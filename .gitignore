@@ -1,0 +1,4 @@
+node_modules/
+dist/
+examples/basic-usage.ts
+test-workspace/test.txt

@@ -1,0 +1,34 @@
+{
+  "name": "diogenes",
+  "version": "0.1.0",
+  "description": "A minimal LLM-controlled agent framework with explicit context management",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "pnpm tsgo",
+    "dev": "pnpm tsgo --watch",
+    "test": "jest",
+    "lint": "pnpm lint"
+  },
+  "keywords": [
+    "llm",
+    "agent",
+    "framework"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.0.3",
+    "jest": "^30.2.0",
+    "oxlint": "^1.34.0",
+    "oxlint-tsgolint": "^0.10.0",
+    "ts-jest": "^29.4.6"
+  },
+  "dependencies": {
+    "@typescript/native-preview": "7.0.0-dev.20251219.1",
+    "chalk": "^5.6.2",
+    "yaml": "^2.8.2",
+    "zod": "^4.2.1"
+  }
+}
