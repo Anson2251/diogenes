@@ -1,22 +1,11 @@
 # Diogenes CLI Usage Examples
 
-## Installation
+## Bundling
 
-After building the project, you can install the CLI globally:
-
-```bash
-# From the project directory
-npm install -g .
-```
-
-Or use it directly:
+You can build the CLI by:
 
 ```bash
-# Using npx with the built CLI
-npx diogenes --help
-
-# Or from the project directory
-node dist/cli.js --help
+npm bundle
 ```
 
 ## Basic Usage
@@ -28,23 +17,23 @@ node dist/cli.js --help
 export OPENAI_API_KEY="your-api-key-here"
 
 # Run a simple task
-diogenes "List all files in the current directory"
+node ./bundle/cli.cjs "List all files in the current directory"
 ```
 
 ### With command-line options
 
 ```bash
 # Specify API key and model
-diogenes --api-key sk-... --model gpt-4 "Analyze the project structure"
+node ./bundle/cli.cjs --api-key sk-... --model gpt-4 "Analyze the project structure"
 
 # Specify workspace directory
-diogenes --workspace ./my-project "Find all TypeScript files"
+node ./bundle/cli.cjs --workspace ./my-project "Find all TypeScript files"
 
 # Enable verbose output
-diogenes --verbose "Fix type errors in utils.ts"
+node ./bundle/cli.cjs --verbose "Fix type errors in utils.ts"
 
 # Limit maximum iterations
-diogenes --max-iterations 10 "Create a simple README file"
+node ./bundle/cli.cjs --max-iterations 10 "Create a simple README file"
 ```
 
 ### Interactive Mode
@@ -52,7 +41,7 @@ diogenes --max-iterations 10 "Create a simple README file"
 Start an interactive session:
 
 ```bash
-diogenes --interactive
+node ./bundle/cli.cjs --interactive
 ```
 
 In interactive mode, you can:
@@ -96,7 +85,7 @@ security:
 Use the config file:
 
 ```bash
-diogenes --config config.json "Your task here"
+node ./bundle/cli.cjs --config config.json "Your task here"
 ```
 
 ## Environment Variables
@@ -111,19 +100,19 @@ Here are some example tasks you can try:
 
 ```bash
 # File system operations
-diogenes "Create a new file called hello.txt with content 'Hello, World!'"
-diogenes "List all .ts files in the src directory"
-diogenes "Count the number of lines in package.json"
+node ./bundle/cli.cjs "Create a new file called hello.txt with content 'Hello, World!'"
+node ./bundle/cli.cjs "List all .ts files in the src directory"
+node ./bundle/cli.cjs "Count the number of lines in package.json"
 
 # Code analysis
-diogenes "Find all function definitions in index.ts"
-diogenes "Check for any TODO comments in the codebase"
-diogenes "Analyze the project structure and suggest improvements"
+node ./bundle/cli.cjs "Find all function definitions in index.ts"
+node ./bundle/cli.cjs "Check for any TODO comments in the codebase"
+node ./bundle/cli.cjs "Analyze the project structure and suggest improvements"
 
 # Project setup
-diogenes "Initialize a new Node.js project with TypeScript"
-diogenes "Create a basic Express.js server"
-diogenes "Set up ESLint configuration for this project"
+node ./bundle/cli.cjs "Initialize a new Node.js project with TypeScript"
+node ./bundle/cli.cjs "Create a basic Express.js server"
+node ./bundle/cli.cjs "Set up ESLint configuration for this project"
 ```
 
 ## Troubleshooting
@@ -134,21 +123,21 @@ diogenes "Set up ESLint configuration for this project"
 # Solution: Set the API key
 export OPENAI_API_KEY="your-api-key-here"
 # Or use --api-key option
-diogenes --api-key sk-... "Your task"
+node ./bundle/cli.cjs --api-key sk-... "Your task"
 ```
 
 ### Workspace Access Issues
 ```bash
 # Error: Workspace directory not accessible
 # Solution: Check permissions or specify a different workspace
-diogenes --workspace ./ "Your task"
+node ./bundle/cli.cjs --workspace ./ "Your task"
 ```
 
 ### Verbose Output
 If a task is taking too long or seems stuck, use verbose mode to see what's happening:
 
 ```bash
-diogenes --verbose "Your complex task"
+node ./bundle/cli.cjs --verbose "Your complex task"
 ```
 
 ### Memory/Token Management
@@ -156,5 +145,5 @@ For complex tasks, you might need to adjust the max iterations:
 
 ```bash
 # Default is 20 iterations
-diogenes --max-iterations 50 "Your very complex task"
+node ./bundle/cli.cjs --max-iterations 50 "Your very complex task"
 ```
