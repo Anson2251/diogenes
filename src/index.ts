@@ -18,10 +18,14 @@ export { TodoUpdateTool } from "./tools/todo/todo-update";
 export { TaskEndTool } from "./tools/task/task-end";
 export { ShellExecTool } from "./tools/shell/shell-exec";
 
+// LLM Client
+export { OpenAIClient } from "./llm/openai-client";
+
 // Types
 export * from "./types";
-import type { DiogenesConfig, ToolCall, ToolResult } from "./types";
+import type { DiogenesConfig } from "./types";
 import { DiogenesContextManager } from "./context";
+import { parseToolCalls } from "./utils/tool-parser";
 import { DirListTool } from "./tools/dir/dir-list";
 import { DirUnloadTool } from "./tools/dir/dir-unload";
 import { FileLoadTool } from "./tools/file/file-load";
@@ -47,7 +51,7 @@ export function createDiogenes(config?: DiogenesConfig) {
     contextManager.registerTool(new TodoSetTool(workspace));
     contextManager.registerTool(new TodoUpdateTool(workspace));
     contextManager.registerTool(new TaskEndTool());
-    
+
     // Register shell tool with security config
     contextManager.registerTool(
         new ShellExecTool(
@@ -63,65 +67,215 @@ export function createDiogenes(config?: DiogenesConfig) {
     return contextManager;
 }
 
-/**
- * Parse tool calls from LLM response
- */
-export function parseToolCalls(text: string): ToolCall[] {
-    // Look for the last code block labeled tool-call
-    const toolCallRegex = /```tool-call\s*([\s\S]*?)```/g;
-    const matches = [...text.matchAll(toolCallRegex)];
+// Re-export utility functions
+export { parseToolCalls, formatToolResults } from "./utils/tool-parser";
 
-    if (matches.length === 0) {
-        return [];
+// ==================== High-Level Task Execution Interface ====================
+
+/**
+ * Options for task execution
+ */
+export interface TaskExecutionOptions {
+    maxIterations?: number;
+    onIterationStart?: (iteration: number) => void;
+    onIterationComplete?: (iteration: number, response: string) => void;
+    onToolCall?: (toolCalls: any[]) => void;
+    onToolResult?: (toolName: string, result: any) => void;
+    onError?: (error: Error) => void;
+}
+
+/**
+ * Execute a task with LLM until completion
+ *
+ * This is a high-level interface that:
+ * 1. Sets up the task in the system prompt
+ * 2. Runs LLM cycles until task.end is called or max iterations reached
+ * 3. Returns the final result
+ */
+export async function executeTask(
+    taskDescription: string,
+    config?: DiogenesConfig,
+    options: TaskExecutionOptions = {},
+): Promise<{
+    success: boolean;
+    result?: string;
+    error?: string;
+    iterations: number;
+    taskEnded: boolean;
+}> {
+    const maxIterations = options.maxIterations || 20;
+    const diogenes = createDiogenes(config);
+
+    // Check if LLM client is available
+    if (!diogenes.hasLLMClient()) {
+        throw new Error(
+            "LLM client not configured. Please provide API key in config.llm.apiKey",
+        );
     }
 
-    const lastMatch = matches[matches.length - 1];
-    const jsonContent = lastMatch[1].trim();
+    // Set the task in the system prompt
+    diogenes.setTask(taskDescription);
+
+    let iterations = 0;
+    let taskEnded = false;
+    let finalResult: string | undefined;
+
+    const messageList: { role: "system" | "user" | "assistant" | "tool"; content: string }[] = [];
 
     try {
-        const toolCalls = JSON.parse(jsonContent);
-        if (!Array.isArray(toolCalls)) {
-            throw new Error("Tool calls must be an array");
+        while (iterations < maxIterations && !taskEnded) {
+            iterations++;
+
+            if (options.onIterationStart) {
+                options.onIterationStart(iterations);
+            }
+
+            // Run LLM to get response
+            const prompt = diogenes.buildPrompt();
+            const messages = [
+                {
+                    role: "system" as const,
+                    content:
+                        "You are an AI assistant that follows instructions and uses tools to complete tasks.",
+                },
+                {
+                    role: "user" as const,
+                    content: prompt,
+                },
+                ...messageList
+            ]
+
+            // Call LLM API directly (not using runLLMCycle since we want to handle tool execution)
+            const llmClient = diogenes.getLLMClient();
+            if (!llmClient) {
+                throw new Error("LLM client not available");
+            }
+
+            const response = await llmClient.createChatCompletion(messages, {
+                temperature: diogenes.getLLMConfig().temperature,
+                max_tokens: diogenes.getLLMConfig().maxTokens,
+            });
+
+            messageList.push({
+                role: "assistant",
+                content: response,
+            });
+
+            if (options.onIterationComplete) {
+                options.onIterationComplete(iterations, response);
+            }
+
+            // Check if task.end was called by parsing tool calls
+            const toolCalls = parseToolCalls(response);
+
+            if (options.onToolCall && toolCalls.length > 0) {
+                options.onToolCall(toolCalls);
+            }
+
+            // Execute tool calls if any
+            if (toolCalls.length > 0) {
+                const results = await diogenes.executeToolCalls(toolCalls);
+                const messageResult: {name: string, result: unknown}[] = []
+
+                // Call onToolResult callback for each tool result
+                if (options.onToolResult) {
+                    for (let i = 0; i < toolCalls.length; i++) {
+                        options.onToolResult(toolCalls[i].tool, results[i]);
+                        messageResult.push({name: toolCalls[i].tool, result: results[i]})
+                    }
+                }
+
+                // Check if any tool call is task.end
+                for (let i = 0; i < toolCalls.length; i++) {
+                    const toolCall = toolCalls[i];
+                    if (toolCall.tool === "task.end") {
+                        taskEnded = true;
+                        finalResult = `Task completed: ${toolCall.params?.reason || "No reason provided"}`;
+                        break;
+                    }
+                }
+
+                messageList.push({
+                    role: "system",
+                    content: "TOOL RESULT \n" + JSON.stringify(messageResult).replace('"', '\\"')
+                })
+            }
+
+            // If task ended, break the loop
+            if (taskEnded) {
+                break;
+            }
+
+            // Safety check: if no tool calls were made, we might be stuck
+            if (toolCalls.length === 0 && iterations > 3) {
+                console.warn(
+                    `No tool calls made in iteration ${iterations}. Task might be stuck.`,
+                );
+            }
         }
-        return toolCalls;
+
+        if (!taskEnded && iterations >= maxIterations) {
+            return {
+                success: false,
+                error: `Task did not complete within ${maxIterations} iterations`,
+                iterations,
+                taskEnded: false,
+            };
+        }
+
+        return {
+            success: true,
+            result: finalResult,
+            iterations,
+            taskEnded: true,
+        };
     } catch (error) {
-        throw new Error(
-            `Failed to parse tool calls: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        if (options.onError) {
+            options.onError(error as Error);
+        }
+
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+            iterations,
+            taskEnded: false,
+        };
     }
 }
 
 /**
- * Format tool results for LLM context
+ * Simple synchronous task execution with callback for progress
  */
-export function formatToolResults(toolCalls: ToolCall[], results: ToolResult[]): string {
-    const parts: string[] = [];
-
-    for (let i = 0; i < toolCalls.length; i++) {
-        const toolCall = toolCalls[i];
-        const result = results[i];
-
-        if (result.success) {
-            parts.push(`=========TOOL RESULT: ${toolCall.tool}`);
-            parts.push(JSON.stringify(result.data, null, 2));
-            parts.push("=========");
-        } else {
-            parts.push(`=========TOOL ERROR: ${toolCall.tool}`);
-            parts.push(`Error: ${result.error?.code}`);
-            parts.push(`Message: ${result.error?.message}`);
-            if (result.error?.details) {
-                parts.push(JSON.stringify(result.error.details, null, 2));
+export function executeTaskSimple(
+    taskDescription: string,
+    config?: DiogenesConfig,
+    onProgress?: (message: string) => void,
+): Promise<{
+    success: boolean;
+    result?: string;
+    error?: string;
+}> {
+    return executeTask(taskDescription, config, {
+        maxIterations: 10,
+        onIterationComplete: (iteration, response) => {
+            if (onProgress) {
+                onProgress(
+                    `Iteration ${iteration}: ${response.substring(0, 100)}...`,
+                );
             }
-            if (result.error?.suggestion) {
-                parts.push(`Suggestion: ${result.error.suggestion}`);
+        },
+        onToolCall: (toolCalls) => {
+            if (onProgress) {
+                onProgress(`Executing ${toolCalls.length} tool call(s)...`);
             }
-            parts.push("=========");
-        }
-
-        if (i < toolCalls.length - 1) {
-            parts.push(""); // Empty line between results
-        }
-    }
-
-    return parts.join("\n");
+        },
+        onToolResult: () => {
+            // Not used in simple mode
+        },
+        onError: (error) => {
+            if (onProgress) {
+                onProgress(`Error: ${error.message}`);
+            }
+        },
+    });
 }

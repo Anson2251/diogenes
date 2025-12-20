@@ -23,6 +23,21 @@ npm install diogenes
 
 ## Quick Start
 
+### Using the CLI
+
+```bash
+# Set your OpenAI API key
+export OPENAI_API_KEY="your-api-key-here"
+
+# Run a task
+diogenes "List all files in the current directory"
+
+# Or use interactive mode
+diogenes --interactive
+```
+
+### Using the API
+
 ```typescript
 import { createDiogenes, parseToolCalls, formatToolResults } from 'diogenes';
 
@@ -238,6 +253,98 @@ interface DiogenesConfig {
 }
 ```
 
+## CLI Usage
+
+The Diogenes CLI provides a simple command-line interface for task execution.
+
+### Basic Commands
+
+```bash
+# Show help
+diogenes --help
+
+# Show version
+diogenes --version
+
+# Execute a task
+diogenes "Your task description here"
+
+# Interactive mode
+diogenes --interactive
+```
+
+### Options
+
+- `-h, --help` - Show help message
+- `-v, --version` - Show version information
+- `-k, --api-key <key>` - OpenAI API key (or set OPENAI_API_KEY env var)
+- `-m, --model <model>` - LLM model to use (default: gpt-4)
+- `-b, --base-url <url>` - OpenAI-compatible API base URL
+- `-w, --workspace <path>` - Workspace directory (default: current directory)
+- `-c, --config <path>` - Configuration file path (JSON or YAML)
+- `-V, --verbose` - Enable verbose output
+- `-i, --max-iterations <n>` - Maximum LLM iterations (default: 20)
+
+### Examples
+
+```bash
+# Simple task
+diogenes "List all TypeScript files in src directory"
+
+# With API key and model
+diogenes --api-key sk-... --model gpt-4 "Fix type errors in utils.ts"
+
+# With custom API endpoint
+diogenes --base-url https://api.openai.com/v1 "Use custom OpenAI endpoint"
+
+# With workspace and verbose output
+diogenes --workspace ./my-project --verbose "Analyze project structure"
+
+# Using configuration file
+diogenes --config config.json "Create a new Express.js server"
+```
+
+### Interactive Mode
+
+In interactive mode, you can:
+- Type tasks directly
+- Use `help` to see available commands
+- Use `config` to see current configuration
+- Use `clear` to clear the screen
+- Use `exit` or `quit` to exit
+
+### Configuration File
+
+Create a JSON or YAML configuration file:
+
+```json
+{
+  "llm": {
+    "model": "gpt-4",
+    "temperature": 0.7,
+    "baseURL": "https://api.openai.com/v1"
+  },
+  "security": {
+    "workspaceRoot": "/path/to/workspace"
+  }
+}
+```
+
+### Environment Variables
+
+- `OPENAI_API_KEY`: OpenAI API key (required)
+- `OPENAI_BASE_URL`: OpenAI-compatible API base URL
+- `DIOGENES_WORKSPACE`: Default workspace directory
+- `DIOGENES_MODEL`: Default LLM model
+
+Example:
+```bash
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+export DIOGENES_MODEL="gpt-4"
+export DIOGENES_WORKSPACE="/path/to/project"
+```
+
 ## API Reference
 
 ### `createDiogenes(config?: DiogenesConfig)`
@@ -257,6 +364,44 @@ Main class for managing context and executing tools.
 - `executeToolCalls(toolCalls: ToolCall[]): Promise<ToolResult[]>` - Executes multiple tool calls
 - `getWorkspaceManager(): WorkspaceManager` - Returns the workspace manager instance
 - `clearWorkspace(): void` - Clears all workspace content
+
+## Troubleshooting
+
+### Common Errors
+
+#### "Network error connecting to https://api.openai.com/v1: fetch failed"
+- Check your internet connection
+- Verify the API endpoint URL is correct
+- If behind a proxy, set HTTP_PROXY/HTTPS_PROXY environment variables
+- For self-signed certificates, try: `NODE_TLS_REJECT_UNAUTHORIZED=0 diogenes ...`
+
+#### "OpenAI API key is required"
+- Set your API key: `export OPENAI_API_KEY="your-key-here"`
+- Or use the `--api-key` option
+- Get an API key from https://platform.openai.com/api-keys
+
+#### "API error: Invalid API key"
+- Verify your API key is correct
+- Check if the key has sufficient permissions/quota
+- Generate a new key at https://platform.openai.com/api-keys
+
+#### "Request timeout after 30000ms"
+- The server may be slow or network congested
+- Increase timeout: `--timeout 60000`
+- Check your network connection
+
+### Testing Connectivity
+
+```bash
+# Test with a simple task
+diogenes --api-key "your-key" "List files in current directory"
+
+# Test with verbose output to see what's happening
+diogenes --verbose --api-key "your-key" "Simple task"
+
+# Test with a different endpoint (if using OpenAI-compatible API)
+diogenes --base-url "https://your-endpoint.com/v1" --api-key "your-key" "Test"
+```
 
 ## Development
 

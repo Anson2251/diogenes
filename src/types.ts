@@ -139,6 +139,7 @@ export interface ContextStatus {
 
 export interface ContextSections {
   systemPrompt: string;
+    taskPrompt: string;
   toolDefinitions: string;
   contextStatus: string;
   directoryWorkspace: string;
@@ -162,6 +163,17 @@ export interface SecurityConfig {
   };
 }
 
+// ==================== LLM Configuration ====================
+
+export interface LLMConfig {
+  apiKey: string;
+  baseURL?: string;
+  model?: string;
+  timeout?: number;
+  temperature?: number;
+  maxTokens?: number;
+}
+
 // ==================== Framework Configuration ====================
 
 export interface DiogenesConfig {
@@ -169,6 +181,7 @@ export interface DiogenesConfig {
   tokenLimit?: number;
   security?: Partial<SecurityConfig>;
   tools?: ToolDefinition[];
+  llm?: Partial<LLMConfig>;
 }
 
 // ==================== Framework State ====================

@@ -17,9 +17,7 @@ export class DirListTool extends BaseTool {
             params: {
                 path: { type: "string", description: "Directory path" },
             },
-            returns: {
-                items: "Array of directory entries with name and type",
-            },
+            returns: {},
         });
         this.workspace = workspace;
     }
@@ -28,14 +26,9 @@ export class DirListTool extends BaseTool {
         const validated = params as { path: string };
 
         try {
-            const items = await this.workspace.loadDirectory(validated.path);
+            await this.workspace.loadDirectory(validated.path);
 
-            return this.success({
-                items: items.map((item) => ({
-                    name: item.name,
-                    type: item.type,
-                })),
-            });
+            return this.success({});
         } catch (error) {
             return this.error(
                 "PATH_NOT_FOUND",

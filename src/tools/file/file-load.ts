@@ -28,7 +28,6 @@ export class FileLoadTool extends BaseTool {
                 },
             },
             returns: {
-                content: "File content as string",
                 total_lines: "Total lines in file",
                 loaded_range: "Array of [start, end] lines loaded",
             },
@@ -51,7 +50,6 @@ export class FileLoadTool extends BaseTool {
             );
 
             return this.success({
-                content: entry.content.join("\n"),
                 total_lines: entry.totalLines,
                 loaded_range: entry.ranges.map((range) => [
                     range.start,

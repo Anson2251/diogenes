@@ -22,6 +22,7 @@ export class PromptBuilder {
 
   buildContextSections(
     toolDefinitions: string,
+    taskPrompt: string,
     contextStatus: ContextStatus,
     directoryWorkspace: DirectoryWorkspace,
     fileWorkspace: FileWorkspace,
@@ -29,6 +30,7 @@ export class PromptBuilder {
   ): ContextSections {
     return {
       systemPrompt: this.systemPrompt,
+      taskPrompt,
       toolDefinitions,
       contextStatus: this.formatContextStatus(contextStatus),
       directoryWorkspace: this.formatDirectoryWorkspace(directoryWorkspace),
@@ -40,19 +42,20 @@ export class PromptBuilder {
   assemblePrompt(sections: ContextSections): string {
     const parts = [
       sections.systemPrompt,
+      sections.taskPrompt,
       sections.toolDefinitions,
       sections.contextStatus,
       sections.directoryWorkspace,
       sections.fileWorkspace,
       sections.todoWorkspace
     ];
-    
+
     return parts.join('\n\n');
   }
 
   private formatContextStatus(status: ContextStatus): string {
     const { tokenUsage, directoryWorkspace, fileWorkspace } = status;
-    
+
     return `=========CONTEXT STATUS
 Token Usage: ${tokenUsage.current} / ${tokenUsage.limit} (${tokenUsage.percentage.toFixed(1)}%)
 Directory Workspace: ${directoryWorkspace.count} directories loaded
@@ -66,25 +69,25 @@ File Workspace: ${fileWorkspace.count} files, ${fileWorkspace.totalLines} lines 
     }
 
     const parts: string[] = ['=========DIRECTORY WORKSPACE'];
-    
+
     for (const [path, entries] of Object.entries(workspace)) {
       parts.push(path);
       parts.push('---------');
-      
+
       for (const entry of entries) {
         parts.push(`${entry.type.padEnd(4)} | ${entry.name}`);
       }
-      
+
       parts.push('---------');
       parts.push(''); // Empty line between directories
     }
-    
+
     // Remove last empty line and add closing marker
     if (parts[parts.length - 1] === '') {
       parts.pop();
     }
     parts.push('=========');
-    
+
     return parts.join('\n');
   }
 
@@ -94,11 +97,11 @@ File Workspace: ${fileWorkspace.count} files, ${fileWorkspace.totalLines} lines 
     }
 
     const parts: string[] = ['=========FILE WORKSPACE'];
-    
+
     for (const [path, entry] of Object.entries(workspace)) {
       parts.push(path);
       parts.push('---------');
-      
+
       let currentLine = 1;
       for (const range of entry.ranges.sort((a, b) => a.start - b.start)) {
         // Add [UNLOADED] marker if there's a gap
@@ -106,36 +109,36 @@ File Workspace: ${fileWorkspace.count} files, ${fileWorkspace.totalLines} lines 
           parts.push('[UNLOADED]');
           parts.push('');
         }
-        
+
         // Add lines in this range
         const rangeStartIndex = range.start - 1;
         const rangeEndIndex = range.end;
         const rangeLines = entry.content.slice(rangeStartIndex, rangeEndIndex);
-        
+
         for (let i = 0; i < rangeLines.length; i++) {
           const lineNum = range.start + i;
           const line = rangeLines[i];
           parts.push(`${lineNum.toString().padStart(3)} | ${line}`);
         }
-        
+
         currentLine = range.end + 1;
       }
-      
+
       // Add final [UNLOADED] if file continues beyond loaded ranges
       if (currentLine <= entry.totalLines) {
         parts.push('[UNLOADED]');
       }
-      
+
       parts.push('---------');
       parts.push(''); // Empty line between files
     }
-    
+
     // Remove last empty line and add closing marker
     if (parts[parts.length - 1] === '') {
       parts.pop();
     }
     parts.push('=========');
-    
+
     return parts.join('\n');
   }
 
@@ -145,7 +148,7 @@ File Workspace: ${fileWorkspace.count} files, ${fileWorkspace.totalLines} lines 
     }
 
     const parts: string[] = ['=========TODO'];
-    
+
     for (const item of workspace.items) {
       let marker: string;
       switch (item.state) {
@@ -163,7 +166,7 @@ File Workspace: ${fileWorkspace.count} files, ${fileWorkspace.totalLines} lines 
       }
       parts.push(`${marker} ${item.text}`);
     }
-    
+
     parts.push('=========');
     return parts.join('\n');
   }

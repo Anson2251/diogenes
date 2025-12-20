@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft (v3)
+Draft (v4)
 
 ## Authors
 
@@ -15,6 +15,8 @@ Anson
 | v1 | - | Initial draft |
 | v2 | - | Unified JSON tool protocol, restructured file edit system |
 | v3 | - | Add task end tool, ReAct structure |
+| v4 | - | Add explanation to message list structure, add notepad tools, and modify namespace format |
+
 
 ---
 
@@ -63,12 +65,14 @@ The core belief is:
 
 The LLM context window is composed of the following ordered sections:
 
-1. System prompt
+1. System prompt and task
 2. Tool definitions and protocol specification
 3. Context status (token usage, workspace summary)
 4. Directory workspace
 5. File workspace
 6. Todo list
+7. Notepad workspace
+8. Iterative runs of tool-calling and tool-return
 
 A **Context Manager** (outside the LLM) is responsible only for:
 
@@ -269,6 +273,10 @@ Todo state changes are valid only when explicitly initiated by the LLM via tools
 =========
 ```
 
+### Notepad Workspace
+
+A space reserved for LLM to take notes. Can be updated via tools.
+
 ---
 
 ## Tool System
@@ -365,7 +373,7 @@ shell
     DESCRIPTION: Execute a shell command
     PARAMS:
       command: string - Command to execute
-      cwd: string [optional] - Working directory
+      cwd: string [optional] - Working directory, default to workspace root
       timeout: number [optional] - Timeout in seconds (default: 30)
     RETURNS:
       stdout: string
@@ -379,17 +387,32 @@ shell
 
 ```
 dir
-  dir_list:
+  dir.list:
     DESCRIPTION: List directory contents and load into workspace
     PARAMS:
       path: string - Directory path
     RETURNS:
       items: array<{name, type}>
 
-  dir_unload:
+  dir.unload:
     DESCRIPTION: Remove directory from workspace
     PARAMS:
       path: string - Directory path
+    RETURNS:
+      success: bool
+  
+  dir.create:
+    DESCRIPTION: Create a directory in the file system. Parent directories can be created as needed.
+    PARAMS:
+      path: string - Directory path
+    RETURNS:
+      success: bool
+  
+  dir.delete:
+    DESCRIPTION: Delete a directory in the file system
+    PARAMS:
+      path: string - Directory path
+      recursive: bool [optional] - Whether to delete non-empty directories (default: false)
     RETURNS:
       success: bool
 ```
@@ -400,7 +423,7 @@ dir
 
 ```
 file
-  file_load:
+  file.load:
     DESCRIPTION: Load file content into workspace
     PARAMS:
       path: string - File path
@@ -411,7 +434,7 @@ file
       total_lines: number
       loaded_range: [start, end]
 
-  file_unload:
+  file.unload:
     DESCRIPTION: Remove file from workspace
     PARAMS:
       path: string - File path
@@ -427,7 +450,7 @@ NOTE: The line number range would be re-calculated when the file displaying is m
 
 ```
 file
-  file_edit:
+  file.edit:
     DESCRIPTION: Apply structured edits to a file
     PARAMS:
       path: string - File path
@@ -519,7 +542,7 @@ When `end` is omitted, it defaults to `start`:
 ```tool-call
 [
   {
-    "tool": "file_edit",
+    "tool": "file.edit",
     "params": {
       "path": "config.py",
       "edits": [
@@ -546,7 +569,7 @@ When `end` is omitted, it defaults to `start`:
 ```tool-call
 [
   {
-    "tool": "file_edit",
+    "tool": "file.edit",
     "params": {
       "path": "utils.py",
       "edits": [
@@ -578,7 +601,7 @@ When `end` is omitted, it defaults to `start`:
 ```tool-call
 [
   {
-    "tool": "file_edit",
+    "tool": "file.edit",
     "params": {
       "path": "main.py",
       "edits": [
@@ -608,7 +631,7 @@ When `end` is omitted, it defaults to `start`:
 ```tool-call
 [
   {
-    "tool": "file_edit",
+    "tool": "file.edit",
     "params": {
       "path": "app.py",
       "edits": [
@@ -730,7 +753,7 @@ Partial failure:
 
 ```
 file
-  file_create:
+  file.create:
     DESCRIPTION: Create a new file with content
     PARAMS:
       path: string - File path
@@ -739,7 +762,7 @@ file
       success: bool
       total_lines: number
 
-  file_overwrite:
+  file.overwrite:
     DESCRIPTION: Overwrite entire file content
     PARAMS:
       path: string - File path
@@ -748,7 +771,7 @@ file
       success: bool
       total_lines: number
 
-  file_append:
+  file.append:
     DESCRIPTION: Append content to end of file
     PARAMS:
       path: string - File path
@@ -764,7 +787,7 @@ file
 
 ```
 search
-  search_files:
+  search.files:
     DESCRIPTION: Search for pattern across files
     PARAMS:
       pattern: string - Search pattern (regex supported)
@@ -776,8 +799,8 @@ search
       matches: array<{path, line, content, context}>
       truncated: bool
 
-  search_symbols:
-    DESCRIPTION: Search for symbol definitions
+  search.symbols:
+    DESCRIPTION: Search for symbol definitions (not implemented yet, language server required)
     PARAMS:
       name: string - Symbol name pattern
       kind: string [optional] - "function" | "class" | "variable" | "all"
@@ -792,7 +815,7 @@ search
 
 ```
 todo
-  todo_set:
+  todo.set:
     DESCRIPTION: Overwrite entire todo list
     PARAMS:
       items: array<object>
@@ -801,7 +824,7 @@ todo
     RETURNS:
       success: bool
 
-  todo_update:
+  todo.update:
     DESCRIPTION: Update state of a todo item
     PARAMS:
       text: string - Item text (must match exactly)
@@ -809,7 +832,7 @@ todo
     RETURNS:
       success: bool
 
-  todo_append:
+  todo.append:
     DESCRIPTION: Add new items to todo list
     PARAMS:
       items: array<string> - New item descriptions
@@ -823,7 +846,7 @@ todo
 ```tool-call
 [
   {
-    "tool": "todo_set",
+    "tool": "todo.set",
     "params": {
       "items": [
         {"text": "Analyze project structure", "state": "done"},
@@ -840,13 +863,36 @@ todo
 ```tool-call
 [
   {
-    "tool": "todo_update",
+    "tool": "todo.update",
     "params": {
       "text": "Fix type errors in utils.ts",
       "state": "done"
     }
   }
 ]
+```
+
+---
+
+### Notepad Tools
+
+```
+notepad
+  notepad.update:
+    DESCRIPTION: Overwrite entire notepad
+    PARAMS:
+      content: string
+    RETURNS:
+      success: bool
+
+  todo.append:
+    DESCRIPTION: Append content to the start/end of the notepad
+    PARAMS:
+      content: string
+      mode: string ("begin" | "end")
+    RETURNS:
+      success: bool
+      total_items: number
 ```
 
 ---
@@ -874,7 +920,7 @@ Reserved namespace for Model Context Protocol integration.
 ```tool-call
 [
   {
-    "tool": "task_end",
+    "tool": "task.end",
     "params": {
       "reason": <brief summary on why the task is over>,
       "summary": <what agent done in this task>
@@ -1026,6 +1072,8 @@ Tool output
 <task end>
 ```
 
+Interleaved reasoning means LLM would call tools while reasoning. Reasoning process is continuous between rounds of tool calling. LLM can adjust their reasoning based on tool outputs before making the next tool call.
+
 ---
 
 ## Non‑Goals
@@ -1052,7 +1100,7 @@ When multiple tools are called in a single request:
 
 ### File Edit Execution Order
 
-For `file_edit` with multiple edits:
+For `file.edit` with multiple edits:
 
 1. Sort edits by line number (descending) to preserve line numbers
 2. Validate all anchors before any modification
@@ -1065,7 +1113,7 @@ After tool execution, the framework should:
 
 1. Update relevant workspace sections
 2. Recalculate context status metrics
-3. Inject tool results into conversation
+3. Update the injection part in system prompt.
 
 ---
 
@@ -1077,6 +1125,36 @@ After tool execution, the framework should:
 Fix the type error in utils.ts where the function returns string | undefined but is typed as string.
 ```
 
+### System Prompt Injection 1
+
+```
+=========TASK
+Fix the type error in utils.ts where the function returns string | undefined but is typed as string.
+=========
+
+=========CONTEXT STATUS
+Token Usage: 0 / 128,000 (0%)
+Directory Workspace: 0 directories loaded
+File Workspace: 0 files, 0 lines loaded
+=========
+
+=========DIRECTORY WORKSPACE
+[EMPTY]
+=========
+
+=========FILE WORKSPACE
+[EMPTY]
+=========
+
+=========TODO
+[EMPTY]
+=========
+
+=========NOTEPAD
+[EMPTY]
+=========
+```
+
 ### LLM Response 1
 
 I'll start by loading the project structure and the mentioned file.
@@ -1084,33 +1162,31 @@ I'll start by loading the project structure and the mentioned file.
 ```tool-call
 [
   {
-    "tool": "dir_list",
+    "tool": "dir.list",
     "params": {"path": "src"}
   },
   {
-    "tool": "file_load",
+    "tool": "file.load",
     "params": {"path": "src/utils.ts"}
   }
 ]
 ```
 
-### Framework Injection
+The message list would look like this:
 
 ```
-=========TOOL RESULT: dir_list
-path: src
-items:
-  FILE | main.ts
-  FILE | utils.ts
-  FILE | types.ts
-  DIR  | components
+<System Prompt Injection 1>
+<LLM Response 1>
+```
+
+### System Prompt Injection 2
+
+```
+=========TASK
+Fix the type error in utils.ts where the function returns string | undefined but is typed as string.
 =========
 
-=========TOOL RESULT: file_load
-path: src/utils.ts
-total_lines: 45
-loaded_range: [1, 45]
-=========
+<some tool call definitions>
 
 =========CONTEXT STATUS
 Token Usage: 12,450 / 128,000 (9.7%)
@@ -1154,7 +1230,7 @@ I found the issue on line 5. The function returns `undefined` but the return typ
 ```tool-call
 [
   {
-    "tool": "file_edit",
+    "tool": "file.edit",
     "params": {
       "path": "src/utils.ts",
       "edits": [
@@ -1174,7 +1250,7 @@ I found the issue on line 5. The function returns `undefined` but the return typ
     }
   },
   {
-    "tool": "todo_set",
+    "tool": "todo.set",
     "params": {
       "items": [
         {"text": "Fix return type in getUserName", "state": "done"},
@@ -1183,4 +1259,12 @@ I found the issue on line 5. The function returns `undefined` but the return typ
     }
   }
 ]
+```
+
+The message list would grow like this:
+
+```
+<System Prompt Injection 2>
+<LLM Response 1>
+<LLM Response 2>
 ```

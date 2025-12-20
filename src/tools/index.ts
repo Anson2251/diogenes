@@ -127,9 +127,7 @@ export const DEFAULT_TOOL_DEFINITIONS: ToolDefinition[] = [
         params: {
             path: { type: "string", description: "Directory path" },
         },
-        returns: {
-            items: "Array of directory entries with name and type",
-        },
+        returns: {},
     },
     {
         namespace: "dir",
@@ -160,7 +158,6 @@ export const DEFAULT_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
         returns: {
-            content: "File content as string",
             total_lines: "Total lines in file",
             loaded_range: "Array of [start, end] lines loaded",
         },
