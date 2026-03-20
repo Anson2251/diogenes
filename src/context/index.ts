@@ -70,8 +70,9 @@ Core principles:
 
 ### General behavior
 
-- Think in natural language first: outline what you need to do and what you need to inspect.
-- Then choose tools to:
+- Plan your approach internally, then execute using tools.
+- When making tool calls, output ONLY the tool-call code block - no narrative text, no explanations.
+- Use tools to:
     - Discover files and directories.
     - Search for relevant code or text.
     - Load only the file ranges you need.
@@ -129,6 +130,14 @@ Core principles:
 
 - Ensure your final summary is accurate and reflects the current state of files, todos, and any relevant results (tests, builds, etc.).
 
+### IMPORTANT: Do NOT repeat context content
+
+- **NEVER** repeat, quote, or echo the contents of files from the FILE WORKSPACE or DIRECTORY WORKSPACE sections in your responses.
+- The context sections are for YOUR reference only - the user can already see them.
+- Do not reproduce file listings, file contents, or directory structures in your responses.
+- Focus on analysis, decisions, and tool calls instead of repeating what is already visible in the context.
+- When discussing files, refer to them by path/name only, not by copying their contents.
+
 ---
 
 Always:
@@ -161,6 +170,10 @@ Always:
                 temperature: 0.7,
                 maxTokens: undefined,
             },
+            logger: {
+                level: 'info',
+                style: 'console',
+            },
         };
 
         return {
@@ -173,6 +186,10 @@ Always:
             llm: {
                 ...defaultConfig.llm,
                 ...config.llm,
+            },
+            logger: {
+                ...defaultConfig.logger,
+                ...config.logger,
             },
         };
     }
@@ -198,6 +215,7 @@ Always:
                 },
             },
             toolRegistry: new Map(),
+            toolResults: [],
         };
     }
 
@@ -255,12 +273,10 @@ Always:
         }
 
         // Add tool invocation protocol
-        parts.push("YOUR OUTPUT SHOULD CONTAIN AT LEAST ONE TOOL CALL AND ONLY ONE TOOL-CALL-CODEBLOCK");
-        parts.push("Once if you want to emit a tool call, use the following protocol by writing the code block, then and the message, framework would execute your tool call.");
         parts.push("TOOL INVOCATION PROTOCOL:");
-        parts.push(
-            "All tool calls use a unified JSON protocol. Tools are invoked by emitting a JSON array inside the **last** code block labeled `tool-call`. ONLY THE LAST `tool-call` CODE BLOCK WILL BE PARSED.",
-        );
+        parts.push("When you need to use tools, your response MUST contain ONLY the tool-call code block. No other text, no explanations, no thinking out loud.");
+        parts.push("All tool calls use a unified JSON protocol. Tools are invoked by emitting a JSON array inside a code block labeled `tool-call`. ONLY THE LAST `tool-call` CODE BLOCK WILL BE PARSED.");
+        parts.push("CRITICAL: Do not output any narrative text before or after the tool-call code block. The code block should be the ONLY content in your response when making tool calls.");
         parts.push("");
         parts.push("Example single tool call:");
         parts.push("```tool-call");
@@ -383,12 +399,44 @@ Always:
             directoryWorkspace,
             fileWorkspace,
             todoWorkspace,
+            this.state.toolResults,
         );
 
         // Update token usage
         this.promptBuilder.updateTokenUsage(sections);
 
         return this.promptBuilder.assemblePrompt(sections);
+    }
+
+    /**
+     * Get the system prompt separately from the context
+     * Use this when you want to send system prompt as a separate system message
+     */
+    getSystemPrompt(): string {
+        return this.promptBuilder.getSystemPrompt();
+    }
+
+    /**
+     * Build just the context sections (tools, status, workspaces) without system prompt or task
+     * Use this when sending system prompt separately and task as user message
+     */
+    buildContextOnly(): string {
+        const toolDefinitions = this.getToolDefinitions();
+        const directoryWorkspace = this.workspace.getDirectoryWorkspace();
+        const fileWorkspace = this.workspace.getFileWorkspace();
+        const todoWorkspace = this.workspace.getTodoWorkspace();
+
+        const sections = this.promptBuilder.buildContextSections(
+            toolDefinitions,
+            this.getTaskPrompt(),
+            this.state.contextStatus,
+            directoryWorkspace,
+            fileWorkspace,
+            todoWorkspace,
+            this.state.toolResults,
+        );
+
+        return this.promptBuilder.assembleContextSections(sections);
     }
 
     formatToolResult(toolName: string, result: ToolResult): string {
@@ -481,38 +529,46 @@ Always:
     /**
      * Execute a complete LLM interaction cycle:
      * 1. Build prompt from current context
-     * 2. Call LLM API
+     * 2. Call LLM API (with optional streaming)
      * 3. Parse tool calls from response
      * 4. Execute tool calls
      * 5. Format results and update context
      *
      * Returns the LLM response text
      */
-    async runLLMCycle(): Promise<string> {
+    async runLLMCycle(onStreamChunk?: (chunk: string) => void): Promise<string> {
         if (!this.llmClient) {
             throw new Error('LLM client not configured. Please set LLM API key.');
         }
 
-        // Build prompt from current context
+        // Build prompt from current context (includes system prompt)
         const prompt = this.buildPrompt();
 
-        // Prepare messages for OpenAI API
+        // Prepare messages for OpenAI API - only user message since system prompt is in the prompt
         const messages = [
-            {
-                role: 'system' as const,
-                content: 'You are an AI assistant that follows instructions and uses tools to complete tasks.',
-            },
             {
                 role: 'user' as const,
                 content: prompt,
             },
         ];
 
-        // Call LLM API
-        const response = await this.llmClient.createChatCompletion(messages, {
-            temperature: this.config.llm.temperature,
-            max_tokens: this.config.llm.maxTokens,
-        });
+        // Call LLM API (with streaming if callback provided)
+        let response: string;
+        if (onStreamChunk) {
+            response = await this.llmClient.createChatCompletionStream(
+                messages,
+                onStreamChunk,
+                {
+                    temperature: this.config.llm.temperature,
+                    max_tokens: this.config.llm.maxTokens,
+                },
+            );
+        } else {
+            response = await this.llmClient.createChatCompletion(messages, {
+                temperature: this.config.llm.temperature,
+                max_tokens: this.config.llm.maxTokens,
+            });
+        }
 
         // Parse tool calls from response
         const toolCalls = parseToolCalls(response);
@@ -521,12 +577,14 @@ Always:
         if (toolCalls.length > 0) {
             const results = await this.executeToolCalls(toolCalls);
 
-            // Format tool results for context
-            const _formattedResults = formatToolResults(toolCalls, results);
+            // Format tool results and store in state for next iteration
+            const formattedResults = formatToolResults(toolCalls, results);
+            this.state.toolResults.push(formattedResults);
 
-            // Update context with tool results
-            // Note: In the next cycle, these results will be included in the prompt
-            // via the buildPrompt() method which reads from workspace state
+            // Limit stored results to prevent context bloat (keep last 10)
+            if (this.state.toolResults.length > 10) {
+                this.state.toolResults = this.state.toolResults.slice(-10);
+            }
         }
 
         return response;

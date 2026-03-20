@@ -36,6 +36,7 @@ import { TodoSetTool } from "./tools/todo/todo-set";
 import { TodoUpdateTool } from "./tools/todo/todo-update";
 import { TaskEndTool } from "./tools/task/task-end";
 import { ShellExecTool } from "./tools/shell/shell-exec";
+import { Logger, ConsoleLogger, LogLevel } from "./utils/logger";
 
 /**
  * Create a new Diogenes context manager with default tools
@@ -73,6 +74,18 @@ export function createDiogenes(config?: DiogenesConfig) {
 // Re-export utility functions
 export { parseToolCalls, formatToolResults } from "./utils/tool-parser";
 
+// ==================== Logger ====================
+export {
+    Logger,
+    LogLevel,
+    TUILogger,
+    ConsoleLogger,
+    NullLogger,
+    ToolCallData,
+    ToolResultData,
+    TaskCompletionData,
+} from "./utils/logger";
+
 // ==================== High-Level Task Execution Interface ====================
 
 /**
@@ -80,11 +93,11 @@ export { parseToolCalls, formatToolResults } from "./utils/tool-parser";
  */
 export interface TaskExecutionOptions {
     maxIterations?: number;
-    onIterationStart?: (iteration: number) => void;
-    onIterationComplete?: (iteration: number, response: string) => void;
-    onToolCall?: (toolCalls: any[]) => void;
-    onToolResult?: (toolName: string, result: any) => void;
-    onError?: (error: Error) => void;
+    /**
+     * Logger instance for output. Defaults to ConsoleLogger if not provided.
+     * Use NullLogger for silent operation.
+     */
+    logger?: Logger;
 }
 
 /**
@@ -107,6 +120,7 @@ export async function executeTask(
     taskEnded: boolean;
 }> {
     const maxIterations = options.maxIterations || 20;
+    const logger = options.logger || new ConsoleLogger();
     const diogenes = createDiogenes(config);
 
     // Check if LLM client is available
@@ -116,32 +130,55 @@ export async function executeTask(
         );
     }
 
-    // Set the task in the system prompt
-    diogenes.setTask(taskDescription);
-
     let iterations = 0;
     let taskEnded = false;
     let finalResult: string | undefined;
 
     const messageList: { role: "system" | "user" | "assistant"; content: string }[] = [];
 
+    const startTime = Date.now();
+
     try {
+        logger.taskStarted(taskDescription);
+
+        // Get system prompt once (it doesn't change)
+        const systemPrompt = diogenes.getSystemPrompt();
+
         while (iterations < maxIterations && !taskEnded) {
             iterations++;
 
-            if (options.onIterationStart) {
-                options.onIterationStart(iterations);
-            }
+            logger.iterationStart(iterations);
 
-            // Run LLM to get response
-            const prompt = diogenes.buildPrompt();
-            const messages = [
+            // Build context sections (without system prompt)
+            const contextOnly = diogenes.buildContextOnly();
+
+            // Build messages array:
+            // 1. System prompt as system message (first message only)
+            // 2. Context + task as user message (first iteration only)
+            // 3. Previous conversation history
+            const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
                 {
                     role: "system" as const,
-                    content: prompt,
+                    content: systemPrompt,
                 },
-                ...messageList
-            ]
+            ];
+
+            if (iterations === 1) {
+                // First iteration: include task description
+                messages.push({
+                    role: "user" as const,
+                    content: `${contextOnly}\n\n========= TASK\n${taskDescription}\n=========`,
+                });
+            } else {
+                // Subsequent iterations: just context, task is in history
+                messages.push({
+                    role: "user" as const,
+                    content: contextOnly,
+                });
+            }
+
+            // Add previous conversation history
+            messages.push(...messageList);
 
             // Call LLM API directly (not using runLLMCycle since we want to handle tool execution)
             const llmClient = diogenes.getLLMClient();
@@ -149,36 +186,39 @@ export async function executeTask(
                 throw new Error("LLM client not available");
             }
 
-            const response = await llmClient.createChatCompletion(messages, {
-                temperature: diogenes.getLLMConfig().temperature,
-                max_tokens: diogenes.getLLMConfig().maxTokens,
-            });
+            // Start streaming
+            logger.streamStart();
+
+            const response = await llmClient.createChatCompletionStream(
+                messages,
+                (chunk) => logger.streamChunk(chunk),
+                {
+                    temperature: diogenes.getLLMConfig().temperature,
+                    max_tokens: diogenes.getLLMConfig().maxTokens,
+                },
+            );
+
+            logger.streamEnd();
 
             messageList.push({
                 role: "assistant",
                 content: response,
             });
 
-            if (options.onIterationComplete) {
-                options.onIterationComplete(iterations, response);
-            }
-
             // Check if task.end was called by parsing tool calls
             const toolCalls = parseToolCalls(response);
 
-            if (options.onToolCall && toolCalls.length > 0) {
-                options.onToolCall(toolCalls);
+            if (toolCalls.length > 0) {
+                logger.toolCalls(toolCalls);
             }
 
             // Execute tool calls if any
             if (toolCalls.length > 0) {
                 const results = await diogenes.executeToolCalls(toolCalls);
 
-                // Call onToolResult callback for each tool result
-                if (options.onToolResult) {
-                    for (let i = 0; i < toolCalls.length; i++) {
-                        options.onToolResult(toolCalls[i].tool, results[i]);
-                    }
+                // Log each tool result
+                for (let i = 0; i < toolCalls.length; i++) {
+                    logger.toolResult(toolCalls[i].tool, results[i]);
                 }
 
                 // Check if any tool call is task.end
@@ -192,7 +232,7 @@ export async function executeTask(
                 }
 
                 messageList.push({
-                    role: "system",
+                    role: "user",
                     content: formatToolResults(toolCalls, results)
                 });
             }
@@ -204,31 +244,33 @@ export async function executeTask(
 
             // Safety check: if no tool calls were made, we might be stuck
             if (toolCalls.length === 0 && iterations > 3) {
-                console.warn(
+                logger.warn(
                     `No tool calls made in iteration ${iterations}. Task might be stuck.`,
                 );
             }
         }
 
         if (!taskEnded && iterations >= maxIterations) {
-            return {
+            const result = {
                 success: false,
                 error: `Task did not complete within ${maxIterations} iterations`,
                 iterations,
                 taskEnded: false,
             };
+            logger.taskCompleted(result, Date.now() - startTime);
+            return result;
         }
 
-        return {
+        const result = {
             success: true,
             result: finalResult,
             iterations,
             taskEnded: true,
         };
+        logger.taskCompleted(result, Date.now() - startTime);
+        return result;
     } catch (error) {
-        if (options.onError) {
-            options.onError(error as Error);
-        }
+        logger.taskError(error as Error);
 
         return {
             success: false,
@@ -240,12 +282,12 @@ export async function executeTask(
 }
 
 /**
- * Simple synchronous task execution with callback for progress
+ * Simple synchronous task execution with minimal logging
  */
 export function executeTaskSimple(
     taskDescription: string,
     config?: DiogenesConfig,
-    onProgress?: (message: string) => void,
+    logger?: Logger,
 ): Promise<{
     success: boolean;
     result?: string;
@@ -253,25 +295,6 @@ export function executeTaskSimple(
 }> {
     return executeTask(taskDescription, config, {
         maxIterations: 10,
-        onIterationComplete: (iteration, response) => {
-            if (onProgress) {
-                onProgress(
-                    `Iteration ${iteration}: ${response.substring(0, 100)}...`,
-                );
-            }
-        },
-        onToolCall: (toolCalls) => {
-            if (onProgress) {
-                onProgress(`Executing ${toolCalls.length} tool call(s)...`);
-            }
-        },
-        onToolResult: () => {
-            // Not used in simple mode
-        },
-        onError: (error) => {
-            if (onProgress) {
-                onProgress(`Error: ${error.message}`);
-            }
-        },
+        logger: logger,
     });
 }

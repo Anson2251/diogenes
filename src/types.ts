@@ -148,6 +148,7 @@ export interface ContextSections {
     directoryWorkspace: string;
     fileWorkspace: string;
     todoWorkspace: string;
+    toolResults: string;
 }
 
 // ==================== Security Types ====================
@@ -164,6 +165,13 @@ export interface SecurityConfig {
         maxFileSize: number;
         blockedExtensions: string[];
     };
+}
+
+// ==================== Logger Types ====================
+
+export interface LoggerConfig {
+    level: 'debug' | 'info' | 'warn' | 'error' | 'silent';
+    style?: 'tui' | 'console' | 'silent';
 }
 
 // ==================== LLM Configuration ====================
@@ -185,6 +193,7 @@ export interface DiogenesConfig {
     security?: Partial<SecurityConfig>;
     tools?: ToolDefinition[];
     llm?: Partial<LLMConfig>;
+    logger?: Partial<LoggerConfig>;
 }
 
 // ==================== Framework State ====================
@@ -196,4 +205,5 @@ export interface DiogenesState {
     todoWorkspace: TodoWorkspace;
     contextStatus: ContextStatus;
     toolRegistry: Map<string, ToolDefinition>;
+    toolResults: string[];
 }

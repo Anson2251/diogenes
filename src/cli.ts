@@ -8,12 +8,11 @@
 import { config } from "dotenv";
 config();
 
-import { executeTask, DiogenesConfig } from "./index";
+import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel } from "./index";
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml"
-import { TRON } from "@tron-format/tron";
 
 // ANSI color codes for terminal output
 const colors = {
@@ -228,6 +227,21 @@ function createConfig(options: CLIOptions): DiogenesConfig {
 }
 
 /**
+ * Create a logger instance based on CLI options
+ */
+function createLogger(options: CLIOptions): Logger {
+    const logger = new TUILogger();
+    
+    if (options.verbose) {
+        logger.setLogLevel(LogLevel.DEBUG);
+    } else {
+        logger.setLogLevel(LogLevel.INFO);
+    }
+    
+    return logger;
+}
+
+/**
  * Execute a task with progress reporting
  */
 async function executeTaskWithProgress(
@@ -235,144 +249,15 @@ async function executeTaskWithProgress(
     config: DiogenesConfig,
     options: CLIOptions,
 ): Promise<void> {
-    console.log(
-        `${colors.cyan}${colors.bright}Task:${colors.reset} ${taskDescription}`,
-    );
-    console.log(`${colors.dim}Starting execution...${colors.reset}\n`);
-
-    const startTime = Date.now();
+    const logger = createLogger(options);
 
     try {
-        const result = await executeTask(taskDescription, config, {
+        await executeTask(taskDescription, config, {
             maxIterations: options.maxIterations || 20,
-            onIterationStart: (iteration) => {
-                console.log(
-                    `\n${colors.cyan}${colors.bright}=== Iteration ${iteration} ===${colors.reset}`,
-                );
-            },
-            onIterationComplete: (iteration, response) => {
-                console.log(`${colors.green}LLM Response:${colors.reset}`);
-                console.log(response);
-                console.log();
-            },
-            onToolCall: (toolCalls) => {
-                console.log(
-                    `${colors.yellow}${colors.bright}Tool Calls (${toolCalls.length}):${colors.reset}`,
-                );
-                for (let i = 0; i < toolCalls.length; i++) {
-                    const toolCall = toolCalls[i];
-                    console.log(
-                        `${colors.yellow}[${i + 1}] ${toolCall.tool}:${colors.reset}`,
-                    );
-                    console.log(TRON.stringify(toolCall.params));
-                    console.log();
-                }
-            },
-            onToolResult: (toolName, result) => {
-                console.log(
-                    `${colors.magenta}${colors.bright}Tool Result: ${toolName}${colors.reset}`,
-                );
-                if (result.success) {
-                    console.log(`${colors.green}Success:${colors.reset}`);
-                } else {
-                    console.log(`${colors.red}Error:${colors.reset}`);
-                    const error = result.error!;
-                    console.log(`Code: ${error.code}`);
-                    console.log(`Message: ${error.message}`);
-                    if (error.details) {
-                        console.log(
-                            `Details: ${JSON.stringify(error.details, null, 2)}`,
-                        );
-                    }
-                    if (error.suggestion) {
-                        console.log(`Suggestion: ${error.suggestion}`);
-                    }
-                }
-                console.log();
-            },
-            onError: (error) => {
-                console.error(
-                    `\n${colors.red}Error:${colors.reset} ${error.message}`,
-                );
-
-                // Provide additional troubleshooting for common errors
-                const errorMsg = error.message.toLowerCase();
-                if (
-                    errorMsg.includes("network") ||
-                    errorMsg.includes("fetch") ||
-                    errorMsg.includes("failed")
-                ) {
-                    console.error(
-                        `\n${colors.yellow}Network troubleshooting:${colors.reset}`,
-                    );
-                    console.error(`1. Check your internet connection`);
-                    console.error(
-                        `2. Verify the API endpoint: ${config.llm?.baseURL || "https://api.openai.com/v1"}`,
-                    );
-                    console.error(
-                        `3. If behind a proxy, set HTTP_PROXY/HTTPS_PROXY environment variables`,
-                    );
-                    console.error(
-                        `4. For self-signed certificates, try: NODE_TLS_REJECT_UNAUTHORIZED=0 diogenes ...`,
-                    );
-                } else if (
-                    errorMsg.includes("api key") ||
-                    errorMsg.includes("authentication") ||
-                    errorMsg.includes("invalid")
-                ) {
-                    console.error(
-                        `\n${colors.yellow}API key troubleshooting:${colors.reset}`,
-                    );
-                    console.error(`1. Verify your API key is correct`);
-                    console.error(
-                        `2. Check if the key has sufficient permissions/quota`,
-                    );
-                    console.error(
-                        `3. Generate a new key at https://platform.openai.com/api-keys`,
-                    );
-                }
-            },
+            logger: logger,
         });
-
-        const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-
-        if (!options.verbose) {
-            process.stdout.write("\n");
-        }
-
-        console.log();
-
-        if (result.success) {
-            console.log(
-                `${colors.green}${colors.bright}✓ Task completed successfully!${colors.reset}`,
-            );
-            console.log(
-                `${colors.dim}Iterations: ${result.iterations}, Time: ${elapsedTime}s${colors.reset}`,
-            );
-
-            if (result.result) {
-                console.log(`\n${colors.bright}Result:${colors.reset}`);
-                console.log(result.result);
-            }
-        } else {
-            console.log(
-                `${colors.red}${colors.bright}✗ Task failed${colors.reset}`,
-            );
-            console.log(
-                `${colors.dim}Iterations: ${result.iterations}, Time: ${elapsedTime}s${colors.reset}`,
-            );
-
-            if (result.error) {
-                console.log(
-                    `\n${colors.bright}Error:${colors.reset} ${result.error}`,
-                );
-            }
-        }
     } catch (error) {
-        console.error(
-            `\n${colors.red}${colors.bright}Fatal error:${colors.reset}`,
-            error,
-        );
+        logger.taskError(error as Error);
         process.exit(1);
     }
 }
