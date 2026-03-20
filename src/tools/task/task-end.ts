@@ -37,4 +37,14 @@ export class TaskEndTool extends BaseTool {
             summary: validated.summary,
         });
     }
+
+    /**
+     * Custom formatting for task.end results
+     */
+    formatResult(result: ToolResult): string | undefined {
+        if (result.success && result.data?.summary) {
+            return `\x1b[35m\x1b[1m✓ Task completed\x1b[0m\n\x1b[1mSummary:\x1b[0m ${result.data.summary}`;
+        }
+        return undefined;
+    }
 }

@@ -33,6 +33,11 @@ export interface ToolResultData {
         suggestion?: string;
     };
     data?: any;
+    /**
+     * Custom formatted output from the tool's formatResult() method.
+     * If provided, this should be used instead of default formatting.
+     */
+    formattedOutput?: string;
 }
 
 /**
@@ -165,6 +170,12 @@ export class TUILogger implements Logger {
     }
 
     toolResult(toolName: string, result: ToolResultData): void {
+        // Use custom formatted output if available from the tool
+        if (result.formattedOutput !== undefined) {
+            console.log(result.formattedOutput);
+            return;
+        }
+
         if (result.success) {
             // For task.end, print the summary
             if (toolName === "task.end" && result.data?.summary) {
@@ -361,6 +372,12 @@ export class ConsoleLogger implements Logger {
     }
 
     toolResult(toolName: string, result: ToolResultData): void {
+        // Use custom formatted output if available from the tool
+        if (result.formattedOutput !== undefined) {
+            this.info(result.formattedOutput);
+            return;
+        }
+
         if (result.success) {
             // For task.end, print the summary at INFO level
             if (toolName === "task.end" && result.data?.summary) {

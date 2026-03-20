@@ -41,6 +41,22 @@ export class FileEditTool extends BaseTool {
 
 IMPORTANT: Always read the file first with file.load to get the exact content and line numbers.
 
+ANCHOR CONCEPT:
+- Anchors is a pointer and must reference one of the EXISTING lines in the file
+- "line" is the 1-indexed line number (e.g., line 1 is the first line)
+- "before" and "after" are optional context to help locate the exact line
+- The anchor is the pivot point for your edit operation
+
+Edit modes:
+- "replace": Replace the anchor line(s) with new content
+- "delete": Remove the anchor line(s)
+- "insert_before": Insert new content before the anchor line
+- "insert_after": Insert new content after the anchor line
+
+APPENDING TO FILE:
+To add lines at the end of a file, use "insert_after" with the LAST EXISTING LINE as the anchor.
+Example: If a file has 5 lines, anchor at line 5 and use "insert_after" to add line 6.
+
 Edit format:
 {
   "path": "file.txt",
@@ -48,14 +64,30 @@ Edit format:
     "mode": "replace",  // "replace" | "delete" | "insert_before" | "insert_after"
     "anchor": {
       "start": {
-        "line": 10,
+        "line": 10,                          // Line number (1-indexed, must exist)
         "text": "const x = 1;",              // EXACT text of the line
-        "before": ["line 9", "line 8"],      // 2 lines before anchor
-        "after": ["line 11", "line 12"]       // 2 lines after anchor
+        "before": ["line 9", "line 8"],      // 2 lines before anchor (optional)
+        "after": ["line 11", "line 12"]      // 2 lines after anchor (optional)
       },
-      "end": { /* same as start */ }         // Required for range operations
+      "end": { /* same as start */ }         // Required for "replace" and "delete"
     },
-    "content": ["new line 1", "new line 2"]  // New content
+    "content": ["new line 1", "new line 2"]  // New content (required for insert/replace)
+  }]
+}
+
+Example - append to end of file:
+If file has 3 lines and you want to add "hello, world":
+{
+  "path": "file.txt",
+  "edits": [{
+    "mode": "insert_after",
+    "anchor": {
+      "start": {
+        "line": 3,                           // Last existing line
+        "text": "last line content"          // Exact text of line 3
+      }
+    },
+    "content": ["hello, world"]              // This becomes line 4
   }]
 }`,
             params: {
@@ -514,9 +546,13 @@ Edit format:
 
     private compareContext(
         actual: string[],
-        expected: string[],
+        expected: string[] | undefined,
         _loose: boolean,
     ): boolean {
+        // If no expected context, match succeeds
+        if (!expected || expected.length === 0) {
+            return true;
+        }
         return (
             actual[0] === expected[0] && actual[1] === expected[1]
         );
@@ -524,9 +560,13 @@ Edit format:
 
     private compareContextFuzzy(
         actual: string[],
-        expected: string[],
+        expected: string[] | undefined,
         _loose: boolean,
     ): boolean {
+        // If no expected context, match succeeds
+        if (!expected || expected.length === 0) {
+            return true;
+        }
         return (
             compareLines(actual[0], expected[0], true) &&
             compareLines(actual[1], expected[1], true)
@@ -621,7 +661,7 @@ Edit format:
       const resolved = path.isAbsolute(inputPath)
         ? path.resolve(inputPath)
         : path.resolve(this.workspaceRoot, inputPath);
-    
+
       // Use path.relative to securely check if path is outside workspace
       // This handles symlinks, case sensitivity issues, and normalization
       const relative = path.relative(this.workspaceRoot, resolved);
@@ -630,7 +670,7 @@ Edit format:
           `Path ${resolved} is outside workspace root ${this.workspaceRoot}`,
         );
       }
-    
+
       return resolved;
     }
 

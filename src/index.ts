@@ -6,7 +6,7 @@ export { DiogenesContextManager } from "./context";
 export { WorkspaceManager } from "./context/workspace";
 export { PromptBuilder } from "./context/prompt-builder";
 export { ToolRegistry } from "./tools";
-export { BaseTool } from "./tools/base-tool";
+export { BaseTool, ToolOutputFormatter } from "./tools/base-tool";
 
 // Tool implementations
 export { DirListTool } from "./tools/dir/dir-list";
@@ -36,7 +36,7 @@ import { TodoSetTool } from "./tools/todo/todo-set";
 import { TodoUpdateTool } from "./tools/todo/todo-update";
 import { TaskEndTool } from "./tools/task/task-end";
 import { ShellExecTool } from "./tools/shell/shell-exec";
-import { Logger, ConsoleLogger, LogLevel } from "./utils/logger";
+import { Logger, ConsoleLogger, LogLevel, ToolResultData } from "./utils/logger";
 
 /**
  * Create a new Diogenes context manager with default tools
@@ -218,7 +218,20 @@ export async function executeTask(
 
                 // Log each tool result
                 for (let i = 0; i < toolCalls.length; i++) {
-                    logger.toolResult(toolCalls[i].tool, results[i]);
+                    const toolCall = toolCalls[i];
+                    const result = results[i];
+                    
+                    // Get custom formatter from tool if available
+                    const tool = diogenes.getTool(toolCall.tool);
+                    if (tool) {
+                        const formattedOutput = tool.formatResult(result);
+                        if (formattedOutput !== undefined) {
+                            // Add formatted output to result for logger to use
+                            (result as ToolResultData).formattedOutput = formattedOutput;
+                        }
+                    }
+                    
+                    logger.toolResult(toolCall.tool, result);
                 }
 
                 // Check if any tool call is task.end

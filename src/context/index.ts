@@ -229,6 +229,10 @@ Always:
         return `========= TASK\n${this.task}\n=========`
     }
 
+    getTool(name: string): BaseTool | undefined {
+        return this.toolRegistry.getTool(name);
+    }
+
     getToolDefinitions(): string {
         const definitions = this.toolRegistry.getAllDefinitions();
 

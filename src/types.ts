@@ -76,8 +76,8 @@ export interface TodoWorkspace {
 export interface LineAnchor {
     line: number;
     text: string;
-    before: string[];
-    after: string[];
+    before?: string[];
+    after?: string[];
 }
 
 export interface Anchor {

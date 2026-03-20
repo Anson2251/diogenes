@@ -5,7 +5,15 @@
 import { z } from "zod";
 import { ToolDefinition, ToolResult } from "../types";
 
-export abstract class BaseTool {
+export interface ToolOutputFormatter {
+    /**
+     * Format the tool result for display/logging.
+     * Return undefined to use default formatting.
+     */
+    formatResult(result: ToolResult): string | undefined;
+}
+
+export abstract class BaseTool implements ToolOutputFormatter {
     protected definition: ToolDefinition;
     protected schema: z.ZodType;
 
@@ -16,6 +24,25 @@ export abstract class BaseTool {
 
     getDefinition(): ToolDefinition {
         return this.definition;
+    }
+
+    /**
+     * Format the tool result for display/logging.
+     * Override this method to customize output for specific tools.
+     * Return undefined to use the default formatter.
+     * 
+     * @example
+     * ```typescript
+     * formatResult(result: ToolResult): string | undefined {
+     *     if (result.success && result.data?.count !== undefined) {
+     *         return `Found ${result.data.count} items`;
+     *     }
+     *     return undefined; // Use default formatting
+     * }
+     * ```
+     */
+    formatResult(_result: ToolResult): string | undefined {
+        return undefined; // Use default formatting
     }
 
     abstract execute(params: unknown): Promise<ToolResult>;
