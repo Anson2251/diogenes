@@ -114,8 +114,17 @@ If file has 3 lines and you want to add "hello, world":
     }
 
     async execute(params: unknown): Promise<ToolResult> {
-        const validated = params as FileEditParams;
-        const { path: filePath, options = {}, edits } = validated;
+        const validation = this.validateParams(params);
+        if (!validation.valid || !validation.data) {
+            return this.error(
+                "INVALID_PARAM",
+                "Invalid parameters for file.edit",
+                { errors: validation.errors },
+                "Check parameter types and values",
+            );
+        }
+
+        const { path: filePath, options = {}, edits } = validation.data as FileEditParams;
 
         try {
             const absolutePath = this.resolvePath(filePath);
@@ -772,5 +781,20 @@ If file has 3 lines and you want to add "hello, world":
             }
             throw error;
         }
+    }
+
+    formatResult(result: ToolResult): string | undefined {
+        if (result.success && result.data) {
+            const { applied, errors, file_state } = result.data as {
+                applied: EditResult[];
+                errors: EditError[];
+                file_state: { total_lines: number };
+            };
+            if (errors.length === 0) {
+                return `\x1b[32m\x1b[1m✓\x1b[0m Applied ${applied.length} edit(s), ${file_state.total_lines} lines`;
+            }
+            return `\x1b[33m\x1b[1m⚠\x1b[0m Applied ${applied.length} edit(s), ${errors.length} error(s)`;
+        }
+        return undefined;
     }
 }

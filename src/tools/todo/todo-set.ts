@@ -27,23 +27,32 @@ export class TodoSetTool extends BaseTool {
     }
 
     async execute(params: unknown): Promise<ToolResult> {
-        const validated = params as {
+        const validation = this.validateParams(params);
+        if (!validation.valid || !validation.data) {
+            return this.error(
+                "INVALID_PARAM",
+                "Invalid parameters for todo.set",
+                { errors: validation.errors },
+                "Check parameter types and values",
+            );
+        }
+
+        const { items } = validation.data as {
             items: Array<{ text: string; state: string }>;
         };
 
-        // Validate items
-        if (!Array.isArray(validated.items)) {
+        if (!Array.isArray(items)) {
             return this.error(
                 "INVALID_PARAM",
                 "Items must be an array",
-                { items: validated.items },
+                { items },
                 "Provide an array of todo items with text and state properties",
             );
         }
 
         const validatedItems: TodoItem[] = [];
-        for (let i = 0; i < validated.items.length; i++) {
-            const item = validated.items[i];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
             if (!item || typeof item !== "object") {
                 return this.error(
                     "INVALID_ITEM",
@@ -79,6 +88,18 @@ export class TodoSetTool extends BaseTool {
 
         this.workspace.setTodoItems(validatedItems);
 
-        return this.success({ success: true });
+        return this.success({ success: true, items: validatedItems });
+    }
+
+    formatResult(result: ToolResult): string | undefined {
+        if (result.success && result.data?.items) {
+            const items = result.data.items as TodoItem[];
+            const lines = items.map((item) => {
+                const icon = item.state === "done" ? "✓" : item.state === "active" ? "→" : "○";
+                return `  ${icon} ${item.text}`;
+            });
+            return `\x1b[32m\x1b[1m✓\x1b[0m Set ${items.length} todo items:\n${lines.join("\n")}`;
+        }
+        return undefined;
     }
 }

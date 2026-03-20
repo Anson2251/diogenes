@@ -244,4 +244,26 @@ export class ShellExecTool extends BaseTool {
 
         return tokens;
     }
+
+    formatResult(result: ToolResult): string | undefined {
+        if (result.success && result.data) {
+            const { stdout, stderr, exit_code } = result.data as {
+                stdout: string;
+                stderr: string;
+                exit_code: number | string;
+            };
+            const parts: string[] = [];
+            if (exit_code !== 0) {
+                parts.push(`\x1b[31mexit: ${exit_code}\x1b[0m`);
+            }
+            if (stdout) {
+                parts.push(stdout.trim());
+            }
+            if (stderr) {
+                parts.push(`\x1b[33m${stderr.trim()}\x1b[0m`);
+            }
+            return parts.length > 0 ? parts.join("\n") : "\x1b[32m✓\x1b[0m";
+        }
+        return undefined;
+    }
 }

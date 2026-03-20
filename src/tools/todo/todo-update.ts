@@ -31,31 +31,50 @@ export class TodoUpdateTool extends BaseTool {
     }
 
     async execute(params: unknown): Promise<ToolResult> {
-        const validated = params as { text: string; state: string };
+        const validation = this.validateParams(params);
+        if (!validation.valid || !validation.data) {
+            return this.error(
+                "INVALID_PARAM",
+                "Invalid parameters for todo.update",
+                { errors: validation.errors },
+                "Check parameter types and values",
+            );
+        }
 
-        if (!["done", "active", "pending"].includes(validated.state)) {
+        const { text, state } = validation.data as {
+            text: string;
+            state: string;
+        };
+
+        if (!["done", "active", "pending"].includes(state)) {
             return this.error(
                 "INVALID_STATE",
-                `Invalid state: ${validated.state}`,
-                { state: validated.state },
+                `Invalid state: ${state}`,
+                { state },
                 'State must be "done", "active", or "pending"',
             );
         }
 
-        const success = this.workspace.updateTodoItem(
-            validated.text,
-            validated.state as any,
-        );
+        const success = this.workspace.updateTodoItem(text, state as any);
 
         if (success) {
-            return this.success({ success: true });
+            return this.success({ success: true, text, state });
         } else {
             return this.error(
                 "NOT_FOUND",
-                `Todo item not found: "${validated.text}"`,
-                { text: validated.text },
+                `Todo item not found: "${text}"`,
+                { text },
                 "Check if the todo item exists with exact text match",
             );
         }
+    }
+
+    formatResult(result: ToolResult): string | undefined {
+        if (result.success && result.data) {
+            const { text, state } = result.data as { text: string; state: string };
+            const stateIcon = state === "done" ? "✓" : state === "active" ? "→" : "○";
+            return `\x1b[32m\x1b[1m${stateIcon}\x1b[0m "${text}" → ${state}`;
+        }
+        return undefined;
     }
 }

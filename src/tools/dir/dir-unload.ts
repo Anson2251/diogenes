@@ -24,17 +24,27 @@ export class DirUnloadTool extends BaseTool {
     }
 
     async execute(params: unknown): Promise<ToolResult> {
-        const validated = params as { path: string };
+        const validation = this.validateParams(params);
+        if (!validation.valid || !validation.data) {
+            return this.error(
+                "INVALID_PARAM",
+                "Invalid parameters for dir.unload",
+                { errors: validation.errors },
+                "Check parameter types and values",
+            );
+        }
 
-        const success = this.workspace.unloadDirectory(validated.path);
+        const { path } = validation.data as { path: string };
+
+        const success = this.workspace.unloadDirectory(path);
 
         if (success) {
             return this.success({ success: true });
         } else {
             return this.error(
                 "NOT_FOUND",
-                `Directory ${validated.path} not found in workspace`,
-                { path: validated.path },
+                `Directory ${path} not found in workspace`,
+                { path },
                 "Check if the directory was previously loaded",
             );
         }

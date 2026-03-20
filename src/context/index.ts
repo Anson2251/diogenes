@@ -136,14 +136,14 @@ export class DiogenesContextManager {
         }
 
         for (const [namespace, tools] of Object.entries(byNamespace)) {
-            parts.push(`[${namespace}]`);
+            parts.push(`\n-----\n\n[${namespace}]`);
 
             for (const tool of tools) {
-                parts.push(`  ${tool.name}: ${tool.description}`);
-                
+                parts.push(`\n\n  ${tool.name}: ${tool.description}`);
+
                 const requiredParams: string[] = [];
                 const optionalParams: string[] = [];
-                
+
                 for (const [paramName, paramDef] of Object.entries(tool.params)) {
                     if (paramDef.optional) {
                         optionalParams.push(paramName);
@@ -151,7 +151,7 @@ export class DiogenesContextManager {
                         requiredParams.push(paramName);
                     }
                 }
-                
+
                 if (requiredParams.length > 0) {
                     parts.push(`    required: ${requiredParams.join(", ")}`);
                 }
@@ -182,7 +182,7 @@ export class DiogenesContextManager {
             }
 
             const percentage = this.estimateContextUsage();
-            
+
             if (percentage > 75 && i < toolCalls.length - 1) {
                 contextWarning = `Context usage at ${percentage.toFixed(1)}%. Remaining ${toolCalls.length - i - 1} tool(s) not executed.`;
                 break;
@@ -190,7 +190,7 @@ export class DiogenesContextManager {
         }
 
         this.updateContextStatus();
-        
+
         if (contextWarning) {
             const lastResult = results[results.length - 1];
             if (lastResult.success && lastResult.data) {
@@ -227,8 +227,8 @@ export class DiogenesContextManager {
 
     private estimateContextUsage(): number {
         const stats = this.workspace.getStatistics();
-        const estimatedTokens = this.promptBuilder.getCurrentTokens() + 
-            (stats.totalLines * 10) + 
+        const estimatedTokens = this.promptBuilder.getCurrentTokens() +
+            (stats.totalLines * 10) +
             (this.state.toolResults.length * 100);
         return (estimatedTokens / this.config.tokenLimit) * 100;
     }

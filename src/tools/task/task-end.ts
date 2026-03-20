@@ -28,13 +28,25 @@ export class TaskEndTool extends BaseTool {
     }
 
     async execute(params: unknown): Promise<ToolResult> {
-        const validated = params as { reason: string; summary: string };
+        const validation = this.validateParams(params);
+        if (!validation.valid || !validation.data) {
+            return this.error(
+                "INVALID_PARAM",
+                "Invalid parameters for task.end",
+                { errors: validation.errors },
+                "Check parameter types and values",
+            );
+        }
 
-        // This tool doesn't modify state, just signals task completion
+        const { reason, summary } = validation.data as {
+            reason: string;
+            summary: string;
+        };
+
         return this.success({
             success: true,
-            reason: validated.reason,
-            summary: validated.summary,
+            reason,
+            summary,
         });
     }
 

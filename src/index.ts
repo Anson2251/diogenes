@@ -153,6 +153,8 @@ export async function executeTask(
             // Build context sections (without system prompt)
             const contextOnly = diogenes.buildContextOnly();
 
+            // console.log(`${systemPrompt}\n${contextOnly}`)
+
             // Build messages array:
             // 1. System prompt as system message (first message only)
             // 2. Context + task as user message (first iteration only)
@@ -160,13 +162,13 @@ export async function executeTask(
             const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
                 {
                     role: "system" as const,
-                    content: systemPrompt,
+                    content: `${systemPrompt}\n${contextOnly}`,
                 },
             ];
 
             messages.push({
                 role: "user" as const,
-                content: `${contextOnly}\n\n========= TASK\n${taskDescription}\n=========`,
+                content: `========= TASK\n${taskDescription}\n=========`,
             });
 
             // Add previous conversation history

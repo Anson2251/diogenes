@@ -23,17 +23,27 @@ export class DirListTool extends BaseTool {
     }
 
     async execute(params: unknown): Promise<ToolResult> {
-        const validated = params as { path: string };
+        const validation = this.validateParams(params);
+        if (!validation.valid || !validation.data) {
+            return this.error(
+                "INVALID_PARAM",
+                "Invalid parameters for dir.list",
+                { errors: validation.errors },
+                "Check parameter types and values",
+            );
+        }
+
+        const { path } = validation.data as { path: string };
 
         try {
-            await this.workspace.loadDirectory(validated.path);
+            await this.workspace.loadDirectory(path);
 
             return this.success({});
         } catch (error) {
             return this.error(
                 "PATH_NOT_FOUND",
-                `Failed to list directory ${validated.path}: ${error instanceof Error ? error.message : String(error)}`,
-                { path: validated.path },
+                `Failed to list directory ${path}: ${error instanceof Error ? error.message : String(error)}`,
+                { path },
                 "Check if the directory exists and you have permission to read it",
             );
         }

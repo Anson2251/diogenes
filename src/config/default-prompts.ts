@@ -16,7 +16,7 @@ Use a code block with triple backticks and the tool-call label:
 [{"tool": "file.load", "params": {"path": "src/main.ts"}}]
 \`\`\`
 
-The triple backticks (\`\`\`) are REQUIRED. Without them, tools won't execute.
+The triple backticks (\`\`\`) and tool-call label are REQUIRED. Without them, tools won't execute.
 
 Multiple tools in one block:
 \`\`\`tool-call
