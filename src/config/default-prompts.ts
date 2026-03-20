@@ -25,6 +25,28 @@ Multiple tools in one block:
 
 Output ONLY the code block. No text before or after.
 
+### Heredoc for Content (No Escaping Needed)
+
+When providing multi-line content (e.g., file edits), use heredoc syntax to avoid JSON escaping:
+
+\`\`\`tool-call
+[{"tool": "file.edit", "params": {"path": "src/main.ts", "edits": [{"mode": "insert_after", "anchor": {"start": {"line": 5, "text": "const x = 1;"}}, "content": {"$heredoc": "EOF"}}]}}]
+<<<EOF
+const y = "hello world";
+const z = 'test with "quotes"';
+console.log(y, z);
+EOF
+\`\`\`
+
+Rules:
+- Use \`{"$heredoc": "DELIMITER"}\` as a placeholder for content
+- After the JSON, start heredoc with \`<<<DELIMITER\` on its own line
+- Content follows on subsequent lines (no escaping needed)
+- End with \`DELIMITER\` alone on its own line
+- Content is automatically split into an array of lines
+
+**RECOMMENDATION**: Always use heredoc for multi-line content. It avoids JSON escaping errors with quotes, backslashes, and special characters.
+
 ## Context Management Protocol
 
 1. **Check Before Acting**: Before each tool call, check Token Usage in CONTEXT STATUS and how many files/lines are loaded
@@ -36,14 +58,16 @@ Output ONLY the code block. No text before or after.
 ## File Editing Protocol
 
 1. **NEVER GUESS CONTENT**: Always load (or reload) the relevant ranges before editing
-2. **Use Exact Content**: When specifying anchor text, copy EXACTLY from the loaded file
-3. **Include Context**: Provide \`before\` and \`after\` lines (2 each) for reliable anchoring
-4. **Line Numbers**: Anchors use 1-indexed line numbers (first line = line 1)
-5. **Atomic Edits**: By default, all edits in a single call are atomic - if any fails, none apply
+2. **Use Exact Content**: When specifying anchor text, copy EXACTLY from the loaded file, including indentation
+3. **Match Indentation**: For Python/YAML, indentation must match exactly. For other files, indentation differences are tolerated
+4. **Include Context**: Provide \`before\` and \`after\` lines (2 each) for reliable anchoring
+5. **Line Numbers**: Anchors use 1-indexed line numbers (first line = line 1)
+6. **Atomic Edits**: By default, all edits in a single call are atomic - if any fails, none apply
+7. **Use Heredoc**: For multi-line content in edits, always use heredoc syntax to avoid escaping issues
 
 ## Error Recovery Protocol
 
-1. **ANCHOR_NOT_FOUND**: Re-load the file, verify exact line content, try again with correct anchor
+1. **ANCHOR_NOT_FOUND**: Check the suggestion in the error - it shows similar lines found. Re-load the file if needed
 2. **AMBIGUOUS_MATCH**: Add more context lines (\`before\`/\`after\`) to make anchor unique
 3. **FILE_ERROR**: Verify path is correct and file exists with \`dir.list\`
 4. **INVALID_PARAM**: Check tool definition for correct parameter types and required fields

@@ -35,6 +35,12 @@ export interface ParseResult {
 /**
  * Parse tool calls from LLM response.
  * Returns a result object with success status instead of throwing.
+ * 
+ * Supports heredoc syntax for content fields:
+ * {"content": {"$heredoc": "EOF"}}
+ * <<<EOF
+ * actual content here
+ * EOF
  */
 export function parseToolCalls(text: string): ParseResult {
   const toolCallRegex = /```tool-call\s*([\s\S]*?)```/g;
@@ -48,9 +54,10 @@ export function parseToolCalls(text: string): ParseResult {
   const errors: string[] = [];
 
   for (const match of matches) {
-    const jsonContent = match[1].trim();
+    const blockContent = match[1].trim();
 
     try {
+      const { jsonContent, heredocs } = extractHeredocs(blockContent);
       const parsed = JSON.parse(jsonContent);
       
       if (!Array.isArray(parsed)) {
@@ -61,7 +68,8 @@ export function parseToolCalls(text: string): ParseResult {
       for (const toolCall of parsed) {
         const validation = validateToolCall(toolCall);
         if (validation.valid) {
-          allToolCalls.push(toolCall);
+          const resolvedToolCall = resolveHeredocs(toolCall, heredocs);
+          allToolCalls.push(resolvedToolCall);
         } else {
           errors.push(validation.error!);
         }
@@ -83,6 +91,98 @@ export function parseToolCalls(text: string): ParseResult {
   }
 
   return { success: true, toolCalls: allToolCalls };
+}
+
+interface HeredocContent {
+  delimiter: string;
+  lines: string[];
+}
+
+/**
+ * Extract heredoc sections from block content.
+ * Format:
+ *   [json array]
+ *   <<<DELIMITER
+ *   content line 1
+ *   content line 2
+ *   DELIMITER
+ */
+function extractHeredocs(blockContent: string): { jsonContent: string; heredocs: Map<string, HeredocContent> } {
+  const heredocs = new Map<string, HeredocContent>();
+  
+  const lines = blockContent.split('\n');
+  const jsonLines: string[] = [];
+  const heredocStartRegex = /^<<<(\w+)$/;
+  
+  let i = 0;
+  let inJson = true;
+  
+  while (i < lines.length) {
+    const line = lines[i];
+    
+    if (inJson) {
+      const startMatch = line.match(heredocStartRegex);
+      if (startMatch) {
+        inJson = false;
+        const delimiter = startMatch[1];
+        const heredocLines: string[] = [];
+        i++;
+        
+        while (i < lines.length) {
+          if (lines[i] === delimiter) {
+            heredocs.set(delimiter, { delimiter, lines: heredocLines });
+            i++;
+            inJson = true;
+            break;
+          }
+          heredocLines.push(lines[i]);
+          i++;
+        }
+        continue;
+      }
+      jsonLines.push(line);
+    }
+    i++;
+  }
+  
+  return { jsonContent: jsonLines.join('\n').trim(), heredocs };
+}
+
+/**
+ * Resolve heredoc markers in tool call params with actual content.
+ */
+function resolveHeredocs(toolCall: ToolCall, heredocs: Map<string, HeredocContent>): ToolCall {
+  return {
+    tool: toolCall.tool,
+    params: resolveHeredocsInObject(toolCall.params, heredocs) as Record<string, unknown>,
+  };
+}
+
+function resolveHeredocsInObject(obj: unknown, heredocs: Map<string, HeredocContent>): unknown {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(item => resolveHeredocsInObject(item, heredocs));
+  }
+  
+  const record = obj as Record<string, unknown>;
+  
+  if (typeof record['$heredoc'] === 'string') {
+    const delimiter = record['$heredoc'];
+    const heredoc = heredocs.get(delimiter);
+    if (heredoc) {
+      return heredoc.lines;
+    }
+    return record;
+  }
+  
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    result[key] = resolveHeredocsInObject(value, heredocs);
+  }
+  return result;
 }
 
 function validateToolCall(toolCall: unknown): { valid: boolean; error?: string } {

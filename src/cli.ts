@@ -231,13 +231,13 @@ function createConfig(options: CLIOptions): DiogenesConfig {
  */
 function createLogger(options: CLIOptions): Logger {
     const logger = new TUILogger();
-    
+
     if (options.verbose) {
         logger.setLogLevel(LogLevel.DEBUG);
     } else {
         logger.setLogLevel(LogLevel.INFO);
     }
-    
+
     return logger;
 }
 
@@ -250,6 +250,10 @@ async function executeTaskWithProgress(
     options: CLIOptions,
 ): Promise<void> {
     const logger = createLogger(options);
+
+    // Print model name before starting
+    const modelName = config.llm?.model || "unknown";
+    console.log(`${colors.cyan}Using model: ${modelName}${colors.reset}\n`);
 
     try {
         await executeTask(taskDescription, config, {

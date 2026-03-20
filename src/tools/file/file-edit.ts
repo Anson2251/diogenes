@@ -265,14 +265,26 @@ If file has 3 lines and you want to add "hello, world":
                 });
             } else {
                 const candidates = this.findCandidates(lines, edit);
+                let errorMessage: string;
+                let errorCode: string;
+                
+                if (candidates.length === 0) {
+                    errorCode = "NO_MATCH";
+                    errorMessage = `Anchor text not found anywhere in file: "${edit.anchor.start.text.slice(0, 50)}..."`;
+                } else if (candidates.length === 1) {
+                    errorCode = "NO_MATCH";
+                    const c = candidates[0];
+                    errorMessage = `Anchor not found at line ${edit.anchor.start.line}. Similar content found at line ${c.line}`;
+                } else {
+                    errorCode = "AMBIGUOUS_MATCH";
+                    errorMessage = `Found ${candidates.length} possible matches for anchor`;
+                }
+                
                 results.push({
                     valid: false,
                     editIndex: i,
-                    errorCode: candidates.length > 1 ? "AMBIGUOUS_MATCH" : "NO_MATCH",
-                    errorMessage:
-                        candidates.length > 1
-                            ? `Found ${candidates.length} possible matches`
-                            : "Anchor not found",
+                    errorCode,
+                    errorMessage,
                     candidates: candidates.map((c) => ({
                         line: c.line,
                         preview: lines[c.line - 1] || "",
@@ -308,11 +320,15 @@ If file has 3 lines and you want to add "hello, world":
                         candidates,
                         edit.anchor.start.line,
                     );
-                    if (filtered.length === 1) {
+                    if (filtered.length >= 1) {
+                        const best = filtered.reduce((closest, c) => 
+                            Math.abs(c.startLine - edit.anchor.start.line) < Math.abs(closest.startLine - edit.anchor.start.line)
+                                ? c : closest
+                        );
                         return {
                             matchedRange: {
-                                start: filtered[0].startLine,
-                                end: filtered[0].endLine,
+                                start: best.startLine,
+                                end: best.endLine,
                             },
                             matchQuality: quality,
                         };
@@ -348,11 +364,15 @@ If file has 3 lines and you want to add "hello, world":
                     const filtered = candidates.filter(
                         (c) => Math.abs(c.line - edit.anchor.start.line) <= 5,
                     );
-                    if (filtered.length === 1) {
+                    if (filtered.length >= 1) {
+                        const best = filtered.reduce((closest, c) => 
+                            Math.abs(c.line - edit.anchor.start.line) < Math.abs(closest.line - edit.anchor.start.line)
+                                ? c : closest
+                        );
                         return {
                             matchedRange: {
-                                start: filtered[0].line,
-                                end: filtered[0].line,
+                                start: best.line,
+                                end: best.line,
                             },
                             matchQuality: quality,
                         };
@@ -585,13 +605,73 @@ If file has 3 lines and you want to add "hello, world":
         edit: Edit,
     ): Array<{ line: number; preview: string }> {
         const loose = this.isLooseWhitespace(lines[0] || "");
-        const result = this.searchForSingleAnchor(
-            lines,
-            edit.anchor.start,
-            "fuzzy",
-            loose,
-        );
-        return result.slice(0, 5);
+        const anchorText = edit.anchor.start.text;
+        const hintLine = edit.anchor.start.line;
+        
+        const candidates: Array<{ line: number; preview: string; score: number }> = [];
+        
+        for (let lineNum = 1; lineNum <= lines.length; lineNum++) {
+            const line = lines[lineNum - 1] || "";
+            let score = 0;
+            const lineDiff = Math.abs(lineNum - hintLine);
+            const proximityBonus = Math.max(0, 20 - lineDiff);
+            
+            if (line === anchorText) {
+                score = 100 + proximityBonus;
+            } else if (rstrip(line) === rstrip(anchorText)) {
+                score = 90 + proximityBonus;
+            } else if (line.trim() === anchorText.trim()) {
+                score = 80 + proximityBonus - Math.min(lineDiff, 30);
+            } else if (line.includes(anchorText)) {
+                score = 50 + proximityBonus;
+            } else if (anchorText.length > 10 && this.similarity(line, anchorText) > 0.7) {
+                score = 30 + proximityBonus;
+            }
+            
+            if (score > 0) {
+                candidates.push({ line: lineNum, preview: line, score });
+            }
+        }
+        
+        candidates.sort((a, b) => b.score - a.score);
+        return candidates.slice(0, 5);
+    }
+
+    private similarity(a: string, b: string): number {
+        const s1 = a.trim().toLowerCase();
+        const s2 = b.trim().toLowerCase();
+        if (s1 === s2) return 1;
+        
+        const longer = s1.length > s2.length ? s1 : s2;
+        const shorter = s1.length > s2.length ? s2 : s1;
+        if (longer.length === 0) return 1;
+        
+        const editDistance = this.levenshtein(longer, shorter);
+        return (longer.length - editDistance) / longer.length;
+    }
+
+    private levenshtein(a: string, b: string): number {
+        const matrix: number[][] = [];
+        for (let i = 0; i <= b.length; i++) {
+            matrix[i] = [i];
+        }
+        for (let j = 0; j <= a.length; j++) {
+            matrix[0][j] = j;
+        }
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                    matrix[i][j] = matrix[i - 1][j - 1];
+                } else {
+                    matrix[i][j] = Math.min(
+                        matrix[i - 1][j - 1] + 1,
+                        matrix[i][j - 1] + 1,
+                        matrix[i - 1][j] + 1
+                    );
+                }
+            }
+        }
+        return matrix[b.length][a.length];
     }
 
     private applyEdit(

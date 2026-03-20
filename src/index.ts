@@ -131,6 +131,7 @@ export async function executeTask(
     }
 
     let iterations = 0;
+
     let taskEnded = false;
     let finalResult: string | undefined;
 
@@ -221,18 +222,18 @@ export async function executeTask(
                 for (let i = 0; i < results.length; i++) {
                     const toolCall = toolCalls[i];
                     const result = results[i];
-                    
+
                     if (result.data?._contextWarning) {
-                        contextWarningData = { 
+                        contextWarningData = {
                             warning: result.data._contextWarning,
                             skippedTools: toolCalls.slice(i + 1).map(t => t.tool),
                         };
                     }
-                    
+
                     if (result.data?._skipped) {
                         continue;
                     }
-                    
+
                     const tool = diogenes.getTool(toolCall.tool);
                     if (tool) {
                         const formattedOutput = tool.formatResult(result);
@@ -240,7 +241,7 @@ export async function executeTask(
                             (result as ToolResultData).formattedOutput = formattedOutput;
                         }
                     }
-                    
+
                     logger.toolResult(toolCall.tool, result);
                 }
 
@@ -254,7 +255,7 @@ export async function executeTask(
                 }
 
                 let resultContent = formatToolResults(toolCalls, results);
-                
+
                 if (contextWarningData) {
                     resultContent += `\n\n[CONTEXT WARNING]\n${contextWarningData.warning}\n`;
                     if (contextWarningData.skippedTools && contextWarningData.skippedTools.length > 0) {
@@ -277,10 +278,10 @@ export async function executeTask(
             }
 
             if (toolCalls.length === 0) {
-                const feedback = iterations > 3 
+                const feedback = iterations > 3
                     ? `[SYSTEM]\nNo tool calls received for ${iterations} iterations.\n\nIf you believe the task is complete, use task.end:\n\`\`\`tool-call\n[{"tool": "task.end", "params": {"reason": "brief summary of why task is done", "summary": "what was accomplished"}}]\n\`\`\`\n\nIf the task is not complete, continue with your next tool call.`
                     : `[SYSTEM]\nNo tool calls received. Please either:\n1. Continue with tool calls to make progress\n2. Use task.end if you believe the task is complete`;
-                
+
                 messageList.push({
                     role: "user",
                     content: feedback,
