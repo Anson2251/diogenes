@@ -1,6 +1,4 @@
-node_modules/
-dist/
-examples/basic-usage.ts
-test-workspace/test.txt
-bundle/
+/node_modules/
 .DS_Store
+/dist/
+.env

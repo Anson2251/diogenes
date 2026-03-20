@@ -4,32 +4,70 @@
 
 import { ToolCall, ToolResult } from "../types";
 
+// Valid tool names for validation
+const VALID_TOOL_NAMES = new Set([
+  "dir.list",
+  "dir.unload",
+  "file.load",
+  "file.unload",
+  "file.edit",
+  "file.create",
+  "file.overwrite",
+  "file.append",
+  "todo.set",
+  "todo.update",
+  "todo.append",
+  "shell.exec",
+  "task.end",
+]);
+
 /**
- * Parse tool calls from LLM response
+ * Parse tool calls from LLM response.
+ * Collects all tool-call code blocks and merges them into a single array.
+ * Validates that tool names are recognized before returning.
  */
 export function parseToolCalls(text: string): ToolCall[] {
-    // Look for the last code block labeled tool-call
-    const toolCallRegex = /```tool-call\s*([\s\S]*?)```/g;
-    const matches = [...text.matchAll(toolCallRegex)];
+  // Look for all code blocks labeled tool-call
+  const toolCallRegex = /```tool-call\s*([\s\S]*?)```/g;
+  const matches = [...text.matchAll(toolCallRegex)];
+  if (matches.length === 0) {
+    return [];
+  }
 
-    if (matches.length === 0) {
-        return [];
-    }
+  const allToolCalls: ToolCall[] = [];
 
-    const lastMatch = matches[matches.length - 1];
-    const jsonContent = lastMatch[1].trim();
+  // Process all matches, not just the last one
+  for (const match of matches) {
+    const jsonContent = match[1].trim();
 
     try {
-        const toolCalls = JSON.parse(jsonContent);
-        if (!Array.isArray(toolCalls)) {
-            throw new Error("Tool calls must be an array");
+      const toolCalls = JSON.parse(jsonContent);
+      if (!Array.isArray(toolCalls)) {
+        throw new Error("Tool calls must be an array");
+      }
+
+      // Validate each tool call has a valid tool name
+      for (const toolCall of toolCalls) {
+        if (!toolCall.tool || typeof toolCall.tool !== "string") {
+          throw new Error("Tool call missing required 'tool' field");
         }
-        return toolCalls;
+        if (!VALID_TOOL_NAMES.has(toolCall.tool)) {
+          throw new Error(`Unknown tool name: ${toolCall.tool}`);
+        }
+        if (!toolCall.params || typeof toolCall.params !== "object") {
+          throw new Error(`Tool call ${toolCall.tool} missing required 'params' field`);
+        }
+      }
+
+      allToolCalls.push(...toolCalls);
     } catch (error) {
-        throw new Error(
-            `Failed to parse tool calls: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      throw new Error(
+        `Failed to parse tool calls: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
+  }
+
+  return allToolCalls;
 }
 
 /**

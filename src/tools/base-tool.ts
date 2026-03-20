@@ -92,14 +92,14 @@ export abstract class BaseTool {
         return z.object(shape);
     }
 
-    protected success(data: Record<string, unknown>): ToolResult {
+    success(data: Record<string, unknown>): ToolResult {
         return {
             success: true,
             data,
         };
     }
 
-    protected error(
+    error(
         code: string,
         message: string,
         details?: Record<string, unknown>,

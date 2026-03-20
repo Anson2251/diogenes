@@ -13,6 +13,7 @@ export { DirListTool } from "./tools/dir/dir-list";
 export { DirUnloadTool } from "./tools/dir/dir-unload";
 export { FileLoadTool } from "./tools/file/file-load";
 export { FileUnloadTool } from "./tools/file/file-unload";
+export { FileEditTool } from "./tools/file/file-edit";
 export { TodoSetTool } from "./tools/todo/todo-set";
 export { TodoUpdateTool } from "./tools/todo/todo-update";
 export { TaskEndTool } from "./tools/task/task-end";
@@ -25,11 +26,12 @@ export { OpenAIClient } from "./llm/openai-client";
 export * from "./types";
 import type { DiogenesConfig } from "./types";
 import { DiogenesContextManager } from "./context";
-import { parseToolCalls } from "./utils/tool-parser";
+import { formatToolResults, parseToolCalls } from "./utils/tool-parser";
 import { DirListTool } from "./tools/dir/dir-list";
 import { DirUnloadTool } from "./tools/dir/dir-unload";
 import { FileLoadTool } from "./tools/file/file-load";
 import { FileUnloadTool } from "./tools/file/file-unload";
+import { FileEditTool } from "./tools/file/file-edit";
 import { TodoSetTool } from "./tools/todo/todo-set";
 import { TodoUpdateTool } from "./tools/todo/todo-update";
 import { TaskEndTool } from "./tools/task/task-end";
@@ -48,6 +50,7 @@ export function createDiogenes(config?: DiogenesConfig) {
     contextManager.registerTool(new DirUnloadTool(workspace));
     contextManager.registerTool(new FileLoadTool(workspace));
     contextManager.registerTool(new FileUnloadTool(workspace));
+    contextManager.registerTool(new FileEditTool(workspace));
     contextManager.registerTool(new TodoSetTool(workspace));
     contextManager.registerTool(new TodoUpdateTool(workspace));
     contextManager.registerTool(new TaskEndTool());
@@ -120,7 +123,7 @@ export async function executeTask(
     let taskEnded = false;
     let finalResult: string | undefined;
 
-    const messageList: { role: "system" | "user" | "assistant" | "tool"; content: string }[] = [];
+    const messageList: { role: "system" | "user" | "assistant"; content: string }[] = [];
 
     try {
         while (iterations < maxIterations && !taskEnded) {
@@ -135,11 +138,6 @@ export async function executeTask(
             const messages = [
                 {
                     role: "system" as const,
-                    content:
-                        "You are an AI assistant that follows instructions and uses tools to complete tasks.",
-                },
-                {
-                    role: "user" as const,
                     content: prompt,
                 },
                 ...messageList
@@ -175,13 +173,11 @@ export async function executeTask(
             // Execute tool calls if any
             if (toolCalls.length > 0) {
                 const results = await diogenes.executeToolCalls(toolCalls);
-                const messageResult: {name: string, result: unknown}[] = []
 
                 // Call onToolResult callback for each tool result
                 if (options.onToolResult) {
                     for (let i = 0; i < toolCalls.length; i++) {
                         options.onToolResult(toolCalls[i].tool, results[i]);
-                        messageResult.push({name: toolCalls[i].tool, result: results[i]})
                     }
                 }
 
@@ -197,8 +193,8 @@ export async function executeTask(
 
                 messageList.push({
                     role: "system",
-                    content: "TOOL RESULT \n" + JSON.stringify(messageResult).replace('"', '\\"')
-                })
+                    content: formatToolResults(toolCalls, results)
+                });
             }
 
             // If task ended, break the loop

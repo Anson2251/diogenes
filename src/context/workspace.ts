@@ -12,6 +12,7 @@ import {
 } from "../types";
 import * as fs from "fs";
 import * as path from "path";
+import { rstrip } from "../utils/str";
 
 export class WorkspaceManager {
     private directoryWorkspace: DirectoryWorkspace = {};
@@ -102,7 +103,7 @@ export class WorkspaceManager {
             );
         }
 
-        const loadedLines = lines.slice(startLine - 1, endLine);
+        const loadedLines = lines.slice(startLine - 1, endLine).map(l => rstrip(l));
         const range = { start: startLine, end: endLine };
 
         let entry = this.fileWorkspace[filePath];
@@ -279,5 +280,9 @@ export class WorkspaceManager {
         this.directoryWorkspace = {};
         this.fileWorkspace = {};
         this.todoWorkspace = { items: [] };
+    }
+
+    getWorkspaceRoot(): string {
+        return this.workspaceRoot;
     }
 }

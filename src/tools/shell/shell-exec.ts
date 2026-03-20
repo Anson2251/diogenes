@@ -86,33 +86,50 @@ export class ShellExecTool extends BaseTool {
             );
         }
 
-        // Check for blocked commands
+        // Check for blocked commands using tokenization to bypass evasion attempts
+        const tokens = this.tokenizeCommand(command);
         for (const blocked of this.securityConfig.blockedCommands) {
-            if (command.includes(blocked)) {
-                return this.error(
-                    "COMMAND_BLOCKED",
-                    `Command contains blocked pattern: ${blocked}`,
-                    { command, blocked_pattern: blocked },
-                    "Remove the blocked pattern from the command",
-                );
+          // Check original command for direct matches (catches obvious attempts)
+          if (command.includes(blocked)) {
+            return this.error(
+              "COMMAND_BLOCKED",
+              `Command contains blocked pattern: ${blocked}`,
+              { command, blocked_pattern: blocked },
+              "Remove the blocked pattern from the command",
+            );
+          }
+          // Check normalized tokens (removes escape characters)
+          for (const token of tokens) {
+            const normalizedToken = token.replace(/\\/g, ""); // Remove escape characters
+            if (
+              normalizedToken === blocked ||
+              normalizedToken.startsWith(blocked + " ")
+            ) {
+              return this.error(
+                "COMMAND_BLOCKED",
+                `Command contains blocked pattern: ${blocked}`,
+                { command, blocked_pattern: blocked },
+                "Remove the blocked pattern from the command",
+              );
             }
+          }
         }
 
         // Determine working directory
         let workingDir = this.workspaceRoot;
         if (cwd) {
-            // Resolve relative to workspace root
-            workingDir = path.resolve(this.workspaceRoot, cwd);
-
-            // Ensure cwd is within workspace
-            if (!workingDir.startsWith(this.workspaceRoot)) {
-                return this.error(
-                    "PATH_OUTSIDE_WORKSPACE",
-                    `Working directory ${workingDir} is outside workspace root ${this.workspaceRoot}`,
-                    { cwd, workspace_root: this.workspaceRoot },
-                    "Use a working directory within the workspace",
-                );
-            }
+          // Resolve relative to workspace root
+          workingDir = path.resolve(this.workspaceRoot, cwd);
+          // Ensure cwd is within workspace using path.relative for security
+          const relative = path.relative(this.workspaceRoot, workingDir);
+          if (relative.startsWith("..") || relative === "..") {
+            return this.error(
+              "PATH_OUTSIDE_WORKSPACE",
+              `Working directory ${workingDir} is outside workspace root ${this.workspaceRoot}`,
+              { cwd, workspace_root: this.workspaceRoot },
+              "Use a working directory within the workspace",
+            );
+          }
         }
 
         // Determine timeout
@@ -160,5 +177,71 @@ export class ShellExecTool extends BaseTool {
                 "Check command syntax and permissions",
             );
         }
+    }
+
+    /**
+     * Tokenize a command string into individual command components.
+     * This helps with detecting blocked commands even when they're
+     * obfuscated with escape characters or shell tricks.
+     */
+    private tokenizeCommand(command: string): string[] {
+        const tokens: string[] = [];
+
+        let current = '';
+        let escaped = false;
+
+        for (let i = 0; i < command.length; i++) {
+            const char = command[i];
+
+            if (escaped) {
+                current += char;
+                escaped = false;
+                continue;
+            }
+
+            if (char === '\\') {
+                escaped = true;
+                current += char;
+                continue;
+            }
+
+            if (char === ' ' || char === '\t') {
+                if (current) {
+                    tokens.push(current);
+                    current = '';
+                }
+                continue;
+            }
+
+            // Start of a quoted string
+            if (char === '"' || char === "'" || char === '`') {
+                if (current) {
+                    tokens.push(current);
+                    current = '';
+                }
+                const quote = char;
+                i++; // skip opening quote
+                let quoted = '';
+                while (i < command.length && command[i] !== quote) {
+                    if (command[i] === '\\' && i + 1 < command.length) {
+                        quoted += command[i + 1];
+                        i += 2;
+                    } else {
+                        quoted += command[i];
+                        i++;
+                    }
+                }
+                tokens.push(quoted);
+                continue;
+            }
+
+            current += char;
+        }
+
+        if (current) {
+            tokens.push(current);
+        }
+
+        return tokens;
     }
 }

@@ -176,16 +176,86 @@ export const DEFAULT_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         namespace: "file",
         name: "edit",
-        description: "Apply structured edits to a file",
+        description: `Apply structured edits to a file. Use this to modify specific lines.
+
+IMPORTANT: Always read the file first with file.load to get the exact content and line numbers.
+
+Edit format:
+{
+  "path": "file.txt",
+  "edits": [{
+    "mode": "replace",  // "replace" | "delete" | "insert_before" | "insert_after"
+    "anchor": {
+      "start": {
+        "line": 10,                          // Line number (from file.load)
+        "text": "const x = 1;",              // EXACT text of the line
+        "before": ["line 9", "line 8"],      // 2 lines before anchor (optional but recommended)
+        "after": ["line 11", "line 12"]      // 2 lines after anchor (optional but recommended)
+      },
+      "end": { /* same as start, for range operations */ }  // Required for "replace" and "delete" with multiple lines
+    },
+    "content": ["new line 1", "new line 2"]  // New content (required for replace/insert)
+  }]
+}
+
+Example - replace a line:
+{
+  "path": "config.js",
+  "edits": [{
+    "mode": "replace",
+    "anchor": {
+      "start": {
+        "line": 5,
+        "text": "DEBUG = true",
+        "before": ["import config", ""],
+        "after: ["", "console.log"]
+      }
+    },
+    "content": ["DEBUG = false"]
+  }]
+}
+
+Example - insert after a line:
+{
+  "path": "config.js",
+  "edits": [{
+    "mode": "insert_after",
+    "anchor": {
+      "start": {
+        "line": 3,
+        "text": "import { env }",
+        "before": ["import os", ""],
+        "after": ["", "export"]
+      }
+    },
+    "content": ["import { config } from './config';"]
+  }]
+}
+
+Example - delete a line:
+{
+  "path": "config.js",
+  "edits": [{
+    "mode": "delete",
+    "anchor": {
+      "start": {
+        "line": 10,
+        "text": "deprecatedFunction()",
+        "before": ["", ""],
+        "after": ["", ""]
+      }
+    }
+  }]
+}`,
         params: {
             path: { type: "string", description: "File path" },
             options: {
                 type: "object",
                 optional: true,
-                description: "Edit options",
+                description: "Edit options: { atomic: boolean }",
             },
             edits: {
-                type: "array<Edit>",
+                type: "array",
                 description: "List of edit operations",
             },
         },
