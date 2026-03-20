@@ -8,7 +8,7 @@
 import { config } from "dotenv";
 config();
 
-import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel } from "./index";
+import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, parseToolCalls } from "./index";
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
@@ -35,6 +35,7 @@ interface CLIOptions {
     config?: string;
     verbose?: boolean;
     maxIterations?: number;
+    socratic?: boolean;
 }
 
 /**
@@ -66,6 +67,8 @@ function parseArgs(): { task?: string; options: CLIOptions } {
             options.config = args[++i];
         } else if (arg === "--verbose" || arg === "-V") {
             options.verbose = true;
+        } else if (arg === "--socratic" || arg === "-s") {
+            options.socratic = true;
         } else if (arg === "--max-iterations" || arg === "-i") {
             options.maxIterations = parseInt(args[++i], 10);
         } else if (arg.startsWith("-")) {
@@ -110,6 +113,7 @@ ${colors.bright}Options:${colors.reset}
   -c, --config <path>           Configuration file path
   -V, --verbose                 Enable verbose output
   -i, --max-iterations <n>      Maximum LLM iterations (default: 20)
+  -s, --socratic                Socratic debug mode - you guide the agent
 
 ${colors.bright}Examples:${colors.reset}
   diogenes "List all TypeScript files in src directory"
@@ -117,6 +121,7 @@ ${colors.bright}Examples:${colors.reset}
   diogenes --base-url https://api.openai.com/v1 "Use custom OpenAI endpoint"
   diogenes --workspace ./my-project "Analyze project structure"
   diogenes --interactive        Start interactive mode
+  diogenes --socratic "Debug my code"
 
 ${colors.bright}Environment Variables:${colors.reset}
   OPENAI_API_KEY                OpenAI API key (alternative to --api-key)
@@ -350,6 +355,258 @@ ${colors.bright}Available commands:${colors.reset}
 }
 
 /**
+ * Socratic debug mode: user acts as the "LLM" to guide the agent
+ */
+async function socraticMode(
+    taskDescription: string,
+    config: DiogenesConfig,
+    options: CLIOptions,
+): Promise<void> {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+
+    console.log(`
+${colors.cyan}${colors.bright}═══════════════════════════════════════════════════════════════${colors.reset}
+${colors.cyan}${colors.bright}                    SOCRATIC DEBUG MODE                         ${colors.reset}
+${colors.cyan}${colors.bright}═══════════════════════════════════════════════════════════════${colors.reset}
+`);
+    console.log(`${colors.yellow}You are the "LLM" guiding the agent through the task.${colors.reset}`);
+    console.log(`${colors.dim}Instead of the AI deciding what to do, YOU decide.${colors.reset}`);
+    console.log(`${colors.dim}This is great for learning, debugging, or teaching others.${colors.reset}\n`);
+
+    const question = (prompt: string): Promise<string> => {
+        return new Promise((resolve) => {
+            rl.question(prompt, resolve);
+        });
+    };
+
+    const readMultilineInput = async (initialPrompt: string): Promise<string> => {
+        let input = "";
+        let braceCount = 0;
+        let inBraces = false;
+        let inCodeBlock = false;
+        let lines: string[] = [];
+
+        input = await question(initialPrompt);
+
+        const checkForToolCallBlock = (text: string): boolean => {
+            const trimmed = text.trim().toLowerCase();
+            return trimmed === "```tool-call" || trimmed === "```tool";
+        };
+
+        if (checkForToolCallBlock(input)) {
+            inCodeBlock = true;
+            console.log(`${colors.dim}  ... (enter more lines, '..' to finish)${colors.reset}`);
+        } else {
+            for (const char of input) {
+                if (char === '{') {
+                    braceCount++;
+                    inBraces = true;
+                } else if (char === '}') {
+                    braceCount--;
+                    if (braceCount === 0) inBraces = false;
+                }
+            }
+            if (inBraces) {
+                console.log(`${colors.dim}  ... (enter more lines, '..' to finish)${colors.reset}`);
+            }
+        }
+
+        while (inBraces || inCodeBlock) {
+            const line = await question(`${colors.dim}> ${colors.reset}`);
+            const trimmed = line.trim();
+
+            if (trimmed === "..") {
+                break;
+            }
+
+            lines.push(line);
+
+            if (inCodeBlock) {
+                if (trimmed.startsWith("```")) {
+                    break;
+                }
+            } else if (inBraces) {
+                for (const char of line) {
+                    if (char === '{') braceCount++;
+                    else if (char === '}') {
+                        braceCount--;
+                        if (braceCount === 0) inBraces = false;
+                    }
+                }
+            }
+        }
+
+        if (lines.length > 0) {
+            input += "\n" + lines.join("\n");
+        }
+
+        return input;
+    };
+
+    const diogenes = createDiogenes(config);
+    diogenes.setTask(taskDescription);
+
+    let iterations = 0;
+    const maxIterations = options.maxIterations || 20;
+
+    const showHelp = () => {
+        console.log(`
+${colors.bright}Commands:${colors.reset}
+  ${colors.green}tools${colors.reset}                Show available tools
+  ${colors.green}context${colors.reset}              Show current context (loaded files, directories)
+  ${colors.green}results${colors.reset}              Show tool execution history
+  ${colors.green}task${colors.reset}                 Show the task description
+  ${colors.green}clear${colors.reset}                Clear the screen
+  ${colors.green}exit${colors.reset}, ${colors.green}quit${colors.reset}          Exit socratic mode
+  ${colors.green}help${colors.reset}                 Show this help
+
+${colors.bright}How to call a tool:${colors.reset}
+  ${colors.yellow}tool.name { "param": "value" }${colors.reset}
+
+  Example:
+  ${colors.yellow}dir.list { "path": "src" }${colors.reset}
+  ${colors.yellow}file.load { "path": "src/cli.ts" }${colors.reset}
+  ${colors.yellow}shell.exec { "command": "npm test" }${colors.reset}
+  ${colors.yellow}task.end { "reason": "Fixed the bug", "summary": "Changed X to Y" }${colors.reset}
+
+${colors.bright}Multiline:${colors.reset}
+  Type tool calls across multiple lines. Enter '..' to finish.
+`);
+    };
+
+    const showTools = () => {
+        console.log(`\n${colors.bright}Available Tools:${colors.reset}`);
+        console.log(diogenes.getToolDefinitions());
+        console.log();
+    };
+
+    const showContext = () => {
+        console.log(`\n${colors.bright}Current Context:${colors.reset}`);
+        console.log(diogenes.buildContextOnly());
+        console.log();
+    };
+
+    const showResults = () => {
+        const state = diogenes.getState();
+        if (state.toolResults.length === 0) {
+            console.log(`\n${colors.dim}No tool results yet.${colors.reset}\n`);
+        } else {
+            console.log(`\n${colors.bright}Tool Execution History:${colors.reset}`);
+            for (const result of state.toolResults) {
+                console.log(result);
+            }
+            console.log();
+        }
+    };
+
+    const showTask = () => {
+        console.log(`\n${colors.bright}Task:${colors.reset}\n${taskDescription}\n`);
+    };
+
+    console.log(`${colors.bright}Starting task:${colors.reset} ${taskDescription}`);
+    console.log(`${colors.dim}Type 'help' for available commands.${colors.reset}\n`);
+
+    while (iterations < maxIterations) {
+        iterations++;
+
+        console.log(`${colors.cyan}──────────────────────── Iteration ${iterations}/${maxIterations} ────────────────────────${colors.reset}`);
+
+        const input = await readMultilineInput(`${colors.magenta}socratic>${colors.reset} `);
+        const trimmed = input.trim();
+
+        if (!trimmed) {
+            continue;
+        }
+
+        const lower = trimmed.toLowerCase();
+
+        if (lower === "exit" || lower === "quit") {
+            break;
+        }
+
+        if (lower === "help") {
+            showHelp();
+            continue;
+        }
+
+        if (lower === "tools") {
+            showTools();
+            continue;
+        }
+
+        if (lower === "context") {
+            showContext();
+            continue;
+        }
+
+        if (lower === "results") {
+            showResults();
+            continue;
+        }
+
+        if (lower === "task") {
+            showTask();
+            continue;
+        }
+
+        if (lower === "clear") {
+            console.clear();
+            continue;
+        }
+
+        console.log(trimmed)
+        const parseResult = parseToolCalls(trimmed);
+
+        if (!parseResult.success) {
+            console.log(`${colors.red}Parse error: ${parseResult.error?.message}${colors.reset}`);
+            console.log(`${colors.dim}Tip: Use format: tool.name { "param": "value" }${colors.reset}`);
+            continue;
+        }
+
+        const toolCalls = parseResult.toolCalls!;
+
+        if (toolCalls.length === 0) {
+            console.log(`${colors.yellow}No tool calls parsed. Use 'tools' to see available tools.${colors.reset}`);
+            continue;
+        }
+
+        for (const toolCall of toolCalls) {
+            console.log(`${colors.green}→ Calling: ${toolCall.tool}${colors.reset}`);
+        }
+
+        try {
+            const results = await diogenes.executeToolCalls(toolCalls);
+
+            for (let i = 0; i < toolCalls.length; i++) {
+                const toolCall = toolCalls[i];
+                const result = results[i];
+
+                const formatted = diogenes.formatToolResult(toolCall.tool, result);
+                console.log(formatted);
+
+                if (toolCall.tool === "task.end") {
+                    console.log(`\n${colors.green}${colors.bright}Task ended by user!${colors.reset}`);
+                    console.log(`${colors.dim}Reason: ${toolCall.params?.reason || "No reason"}${colors.reset}`);
+                    rl.close();
+                    console.log(`${colors.dim}Goodbye!${colors.reset}`);
+                    return;
+                }
+            }
+        } catch (error) {
+            console.log(`${colors.red}Error executing tools: ${error instanceof Error ? error.message : String(error)}${colors.reset}`);
+        }
+
+        console.log();
+    }
+
+    rl.close();
+    console.log(`${colors.yellow}Max iterations reached. Goodbye!${colors.reset}`);
+}
+
+/**
  * Main CLI entry point
  */
 async function main(): Promise<void> {
@@ -397,18 +654,29 @@ async function main(): Promise<void> {
 
     // Execute task or start interactive mode
     if (task) {
-        await executeTaskWithProgress(task, config, options);
+        if (options.socratic) {
+            await socraticMode(task, config, options);
+        } else {
+            await executeTaskWithProgress(task, config, options);
+        }
     } else {
         // Check if interactive mode was explicitly requested
         const args = process.argv.slice(2);
         if (args.includes("--interactive")) {
             await interactiveMode(config, options);
+        } else if (args.includes("--socratic")) {
+            console.error(
+                `${colors.red}Error: Task required for socratic mode.${colors.reset}`,
+            );
+            console.error(`Usage: diogenes --socratic "your task here"`);
+            process.exit(1);
         } else {
             console.error(
                 `${colors.red}Error: No task provided.${colors.reset}`,
             );
             console.error(`Usage: diogenes [options] <task>`);
             console.error(`       diogenes --interactive`);
+            console.error(`       diogenes --socratic "task"`);
             process.exit(1);
         }
     }
