@@ -26,7 +26,7 @@ export { OpenAIClient } from "./llm/openai-client";
 export * from "./types";
 import type { DiogenesConfig } from "./types";
 import { DiogenesContextManager } from "./context";
-import { formatToolResults, parseToolCalls } from "./utils/tool-parser";
+import { formatToolResults, parseToolCalls, formatParseError } from "./utils/tool-parser";
 import { DirListTool } from "./tools/dir/dir-list";
 import { DirUnloadTool } from "./tools/dir/dir-unload";
 import { FileLoadTool } from "./tools/file/file-load";
@@ -163,19 +163,10 @@ export async function executeTask(
                 },
             ];
 
-            if (iterations === 1) {
-                // First iteration: include task description
-                messages.push({
-                    role: "user" as const,
-                    content: `${contextOnly}\n\n========= TASK\n${taskDescription}\n=========`,
-                });
-            } else {
-                // Subsequent iterations: just context, task is in history
-                messages.push({
-                    role: "user" as const,
-                    content: contextOnly,
-                });
-            }
+            messages.push({
+                role: "user" as const,
+                content: `${contextOnly}\n\n========= TASK\n${taskDescription}\n=========`,
+            });
 
             // Add previous conversation history
             messages.push(...messageList);
@@ -205,28 +196,47 @@ export async function executeTask(
                 content: response,
             });
 
-            // Check if task.end was called by parsing tool calls
-            const toolCalls = parseToolCalls(response);
+            const parseResult = parseToolCalls(response);
+
+            if (!parseResult.success) {
+                logger.warn(`Tool call parse error: ${parseResult.error?.message}`);
+                messageList.push({
+                    role: "user",
+                    content: formatParseError(parseResult.error),
+                });
+                continue;
+            }
+
+            const toolCalls = parseResult.toolCalls!;
 
             if (toolCalls.length > 0) {
                 logger.toolCalls(toolCalls);
             }
 
-            // Execute tool calls if any
             if (toolCalls.length > 0) {
                 const results = await diogenes.executeToolCalls(toolCalls);
 
-                // Log each tool result
-                for (let i = 0; i < toolCalls.length; i++) {
+                let contextWarningData: { warning: string; skippedTools?: string[] } | null = null;
+
+                for (let i = 0; i < results.length; i++) {
                     const toolCall = toolCalls[i];
                     const result = results[i];
                     
-                    // Get custom formatter from tool if available
+                    if (result.data?._contextWarning) {
+                        contextWarningData = { 
+                            warning: result.data._contextWarning,
+                            skippedTools: toolCalls.slice(i + 1).map(t => t.tool),
+                        };
+                    }
+                    
+                    if (result.data?._skipped) {
+                        continue;
+                    }
+                    
                     const tool = diogenes.getTool(toolCall.tool);
                     if (tool) {
                         const formattedOutput = tool.formatResult(result);
                         if (formattedOutput !== undefined) {
-                            // Add formatted output to result for logger to use
                             (result as ToolResultData).formattedOutput = formattedOutput;
                         }
                     }
@@ -234,7 +244,6 @@ export async function executeTask(
                     logger.toolResult(toolCall.tool, result);
                 }
 
-                // Check if any tool call is task.end
                 for (let i = 0; i < toolCalls.length; i++) {
                     const toolCall = toolCalls[i];
                     if (toolCall.tool === "task.end") {
@@ -244,22 +253,38 @@ export async function executeTask(
                     }
                 }
 
+                let resultContent = formatToolResults(toolCalls, results);
+                
+                if (contextWarningData) {
+                    resultContent += `\n\n[CONTEXT WARNING]\n${contextWarningData.warning}\n`;
+                    if (contextWarningData.skippedTools && contextWarningData.skippedTools.length > 0) {
+                        resultContent += `Skipped tools: ${contextWarningData.skippedTools.join(", ")}\n`;
+                    }
+                    resultContent += `\nYour context is nearly full. To continue:\n`;
+                    resultContent += `1. Unload files you no longer need: \`file.unload\` or \`dir.unload\`\n`;
+                    resultContent += `2. Then retry the skipped operations\n`;
+                    resultContent += `3. Or use \`task.end\` if the task is complete`;
+                }
+
                 messageList.push({
                     role: "user",
-                    content: formatToolResults(toolCalls, results)
+                    content: resultContent
                 });
             }
 
-            // If task ended, break the loop
             if (taskEnded) {
                 break;
             }
 
-            // Safety check: if no tool calls were made, we might be stuck
-            if (toolCalls.length === 0 && iterations > 3) {
-                logger.warn(
-                    `No tool calls made in iteration ${iterations}. Task might be stuck.`,
-                );
+            if (toolCalls.length === 0) {
+                const feedback = iterations > 3 
+                    ? `[SYSTEM]\nNo tool calls received for ${iterations} iterations.\n\nIf you believe the task is complete, use task.end:\n\`\`\`tool-call\n[{"tool": "task.end", "params": {"reason": "brief summary of why task is done", "summary": "what was accomplished"}}]\n\`\`\`\n\nIf the task is not complete, continue with your next tool call.`
+                    : `[SYSTEM]\nNo tool calls received. Please either:\n1. Continue with tool calls to make progress\n2. Use task.end if you believe the task is complete`;
+                
+                messageList.push({
+                    role: "user",
+                    content: feedback,
+                });
             }
         }
 

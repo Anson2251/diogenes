@@ -17,6 +17,13 @@ import {
     LLMConfig,
 } from "../types";
 import { parseToolCalls, formatToolResults } from "../utils/tool-parser";
+import {
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_SECURITY_CONFIG,
+    DEFAULT_LLM_CONFIG,
+    DEFAULT_LOGGER_CONFIG,
+    DEFAULT_TOKEN_LIMIT,
+} from "../config/default-prompts";
 
 export class DiogenesContextManager {
     private config: Required<DiogenesConfig>;
@@ -56,139 +63,21 @@ export class DiogenesContextManager {
     private mergeWithDefaults(
         config: DiogenesConfig,
     ): Required<DiogenesConfig> {
-        const defaultConfig: Required<DiogenesConfig> = {
-            systemPrompt: `
-You are Diogenes, a professional coder. Your priority is to finish the tasks/answer the questions from the user. You have explicit control over your context window through tools. Treat tools as your way to see and change the world; do not assume anything about the file system or environment without using tools.
-
-Core principles:
-
-1. You decide what to load, unload, and modify in your context.
-2. All useful context should be explicitly visible in the injected sections (Context Status, Directory Workspace, File Workspace, Todo).
-3. Monitor context usage via the CONTEXT STATUS section and manage what you keep loaded.
-4. Prefer small, targeted tool calls over large, exhaustive ones.
-5. Use tools to verify your assumptions before making edits.
-
-### General behavior
-
-- Plan your approach internally, then execute using tools.
-- When making tool calls, output ONLY the tool-call code block - no narrative text, no explanations.
-- Use tools to:
-    - Discover files and directories.
-    - Search for relevant code or text.
-    - Load only the file ranges you need.
-    - Edit files safely.
-    - Track progress (Todo).
-
-### Context and workspace management
-
-- Before each tool call, quickly check:
-
-    - \`Token Usage\` in CONTEXT STATUS.
-    - How many directories and files are currently loaded.
-
-- If token usage is high (e.g. above ~50%) or many files/lines are loaded:
-    - Unload files and directories you no longer need using the unload tools.
-    - Prefer re‑loading specific ranges later over keeping everything in context.
-    - Your performance would get degraded if you keep too much context (generally speaking, 50% is the threshold).
-
-- Use workspaces as follows:
-
-    - **Directory Workspace**: Use directory listing tools (e.g. \`dir.list\`) to explore project structure. Unload directories you no longer care about.
-    - **File Workspace**: Load only the files or line ranges that are necessary. Prefer:
-    - Narrow ranges around the code you’re inspecting or editing.
-    - Unloading large or no‑longer‑relevant files to reduce context size.
-    - **Todo Workspace**: Maintain a simple, explicit list of steps for multi‑step tasks. Update it as you progress; do not rely on hidden memory.
-    Keep it focused; periodically overwrite or prune it to avoid bloat.
-
-### Loading files
-
-- **Never guess file contents.** Always load (or reload) the relevant ranges before editing.
-- When inspecting code:
-    - Use \`file.load\` to fetch only the parts you need (e.g., a function, class, or local region).
-    - If context changes significantly (after multiple edits), consider re‑loading the affected file/ranges to align with reality.
-
-### Shell tools and safety
-
-- Use shell tools only when necessary (e.g., running tests, linters, build commands, simple file system commands).
-- Prefer safe, read‑only commands (listing, checks) before destructive ones.
-- Avoid dangerous patterns (e.g. removing directories, running untrusted commands) unless clearly required by the task and allowed by policy.
-
-### Todo usage
-
-- **Todo**:
-    - On multi‑step tasks, set up a brief todo list early.
-    - Mark items as \`active\`, \`pending\`, or \`done\` as you progress.
-    - Use it to keep yourself oriented over longer runs instead of relying on memory.
-
-### Task completion
-
-- When you believe the task is finished, blocked, or cannot be completed:
-
-    - Call \`task.end\` with:
-    - A brief \`reason\` explaining why you are ending the task.
-    - A \`summary\` describing what you did, what changed, and any remaining follow‑ups or limitations.
-
-- Ensure your final summary is accurate and reflects the current state of files, todos, and any relevant results (tests, builds, etc.).
-
-### IMPORTANT: Do NOT repeat context content
-
-- **NEVER** repeat, quote, or echo the contents of files from the FILE WORKSPACE or DIRECTORY WORKSPACE sections in your responses.
-- The context sections are for YOUR reference only - the user can already see them.
-- Do not reproduce file listings, file contents, or directory structures in your responses.
-- Focus on analysis, decisions, and tool calls instead of repeating what is already visible in the context.
-- When discussing files, refer to them by path/name only, not by copying their contents.
-
----
-
-Always:
-
-- Check CONTEXT STATUS and workspaces before deciding what to load or unload.
-- Use tools to confirm reality rather than assuming.
-- Keep the context small, focused, and relevant to the current task.
-- Plan things ahead using the Todo workspace for multi-step tasks.
-            `,
-            tokenLimit: 128000,
-            security: {
-                workspaceRoot: process.cwd(),
-                allowOutsideWorkspace: false,
-                shell: {
-                    enabled: true,
-                    timeout: 30,
-                    blockedCommands: ["rm -rf", "sudo", ":(){:|:&};:"],
-                },
-                file: {
-                    maxFileSize: 1048576, // 1MB
-                    blockedExtensions: [".exe", ".bin"],
-                },
-            },
-            tools: [],
-            llm: {
-                apiKey: '',
-                baseURL: 'https://api.openai.com/v1',
-                model: 'gpt-4',
-                timeout: 30000,
-                temperature: 0.7,
-                maxTokens: undefined,
-            },
-            logger: {
-                level: 'info',
-                style: 'console',
-            },
-        };
-
         return {
-            ...defaultConfig,
-            ...config,
+            systemPrompt: config.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+            tokenLimit: config.tokenLimit || DEFAULT_TOKEN_LIMIT,
             security: {
-                ...defaultConfig.security,
+                ...DEFAULT_SECURITY_CONFIG,
                 ...config.security,
+                workspaceRoot: config.security?.workspaceRoot || DEFAULT_SECURITY_CONFIG.workspaceRoot,
             },
+            tools: config.tools || [],
             llm: {
-                ...defaultConfig.llm,
+                ...DEFAULT_LLM_CONFIG,
                 ...config.llm,
             },
             logger: {
-                ...defaultConfig.logger,
+                ...DEFAULT_LOGGER_CONFIG,
                 ...config.logger,
             },
         };
@@ -236,9 +125,8 @@ Always:
     getToolDefinitions(): string {
         const definitions = this.toolRegistry.getAllDefinitions();
 
-        const parts: string[] = ["AVAILABLE TOOLS:"];
+        const parts: string[] = [];
 
-        // Group by namespace
         const byNamespace: Record<string, ToolDefinition[]> = {};
         for (const def of definitions) {
             if (!byNamespace[def.namespace]) {
@@ -247,55 +135,33 @@ Always:
             byNamespace[def.namespace].push(def);
         }
 
-        // Format each namespace
         for (const [namespace, tools] of Object.entries(byNamespace)) {
-            parts.push(namespace);
+            parts.push(`[${namespace}]`);
 
             for (const tool of tools) {
-                parts.push(`  ${tool.name}:`);
-                parts.push(`    DESCRIPTION: ${tool.description}`);
-                parts.push(`    PARAMS:`);
-
-                for (const [paramName, paramDef] of Object.entries(
-                    tool.params,
-                )) {
-                    const optional = paramDef.optional ? " [optional]" : "";
-                    parts.push(
-                        `      ${paramName}: ${paramDef.type}${optional} - ${paramDef.description}`,
-                    );
+                parts.push(`  ${tool.name}: ${tool.description}`);
+                
+                const requiredParams: string[] = [];
+                const optionalParams: string[] = [];
+                
+                for (const [paramName, paramDef] of Object.entries(tool.params)) {
+                    if (paramDef.optional) {
+                        optionalParams.push(paramName);
+                    } else {
+                        requiredParams.push(paramName);
+                    }
                 }
-
-                parts.push(`    RETURNS:`);
-                for (const [returnField, description] of Object.entries(
-                    tool.returns,
-                )) {
-                    parts.push(`      ${returnField}: ${description}`);
+                
+                if (requiredParams.length > 0) {
+                    parts.push(`    required: ${requiredParams.join(", ")}`);
                 }
-
-                parts.push(""); // Empty line between tools
+                if (optionalParams.length > 0) {
+                    parts.push(`    optional: ${optionalParams.join(", ")}`);
+                }
             }
-        }
 
-        // Add tool invocation protocol
-        parts.push("TOOL INVOCATION PROTOCOL:");
-        parts.push("When you need to use tools, your response MUST contain ONLY the tool-call code block. No other text, no explanations, no thinking out loud.");
-        parts.push("All tool calls use a unified JSON protocol. Tools are invoked by emitting a JSON array inside a code block labeled `tool-call`. ONLY THE LAST `tool-call` CODE BLOCK WILL BE PARSED.");
-        parts.push("CRITICAL: Do not output any narrative text before or after the tool-call code block. The code block should be the ONLY content in your response when making tool calls.");
-        parts.push("");
-        parts.push("Example single tool call:");
-        parts.push("```tool-call");
-        parts.push(
-            '[{"tool": "file.load", "params": {"path": "src/main.ts"}}]',
-        );
-        parts.push("```");
-        parts.push("");
-        parts.push("Example multiple tool calls:");
-        parts.push("```tool-call");
-        parts.push(
-            '[{"tool": "dir.list", "params": {"path": "src"}}, {"tool": "todo.update", "params": {"text": "Understand build and run configuration", "state": "done"}}]',
-        );
-        parts.push("```");
-        parts.push("Multiple tool calls will be executed sequentially in the order they appear in the array. And it is recommended to use this format when invoking more than one tool.");
+            parts.push("");
+        }
 
         return parts.join("\n");
     }
@@ -303,70 +169,68 @@ Always:
     // ==================== Context Management ====================
 
     async executeToolCalls(toolCalls: ToolCall[]): Promise<ToolResult[]> {
-        const results = await this.toolRegistry.executeToolCalls(toolCalls);
+        const results: ToolResult[] = [];
+        let contextWarning: string | null = null;
 
-        // Update workspace state based on tool results
-        this.updateStateFromToolResults(toolCalls, results);
+        for (let i = 0; i < toolCalls.length; i++) {
+            const toolCall = toolCalls[i];
+            const result = await this.toolRegistry.executeToolCall(toolCall);
+            results.push(result);
 
-        // Update context status
+            if (result.success) {
+                this.updateStateFromSingleToolResult(toolCall, result);
+            }
+
+            const percentage = this.estimateContextUsage();
+            
+            if (percentage > 75 && i < toolCalls.length - 1) {
+                contextWarning = `Context usage at ${percentage.toFixed(1)}%. Remaining ${toolCalls.length - i - 1} tool(s) not executed.`;
+                break;
+            }
+        }
+
         this.updateContextStatus();
+        
+        if (contextWarning) {
+            const lastResult = results[results.length - 1];
+            if (lastResult.success && lastResult.data) {
+                lastResult.data._contextWarning = contextWarning;
+            } else {
+                results.push({
+                    success: true,
+                    data: { _contextWarning: contextWarning, _skipped: true },
+                });
+            }
+        }
 
         return results;
     }
 
-    private updateStateFromToolResults(
-        toolCalls: ToolCall[],
-        results: ToolResult[],
-    ): void {
-        for (let i = 0; i < toolCalls.length; i++) {
-            const toolCall = toolCalls[i];
-            const result = results[i];
+    private updateStateFromSingleToolResult(toolCall: ToolCall, result: ToolResult): void {
+        if (!result.success) return;
 
-            if (!result.success) {
-                // Stop processing on first error
+        switch (toolCall.tool) {
+            case "dir.list":
+            case "dir.unload":
+            case "file.load":
+            case "file.unload":
+            case "file.edit":
+            case "file.create":
+            case "file.overwrite":
+            case "file.append":
+            case "todo.set":
+            case "todo.update":
+            case "todo.append":
                 break;
-            }
-
-            // Handle specific tool updates
-            switch (toolCall.tool) {
-                case "dir.list":
-                    if (result.data?.items) {
-                        // Directory is already loaded in workspace manager
-                        break;
-                    }
-                    break;
-
-                case "dir.unload":
-                    // Directory is already unloaded in workspace manager
-                    break;
-
-                case "file.load":
-                    // File is already loaded in workspace manager
-                    break;
-
-                case "file.unload":
-                    // File is already unloaded in workspace manager
-                    break;
-
-                case "todo.set":
-                case "todo.update":
-                case "todo.append":
-                  // Todo is already updated in workspace manager
-                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                  void result; // Explicitly acknowledge result is intentionally unused
-                  break;
-
-                case "file.edit":
-                    // File content is already updated in workspace manager
-                    break;
-
-                case "file.create":
-                case "file.overwrite":
-                case "file.append":
-                    // File content is already updated in workspace manager
-                    break;
-            }
         }
+    }
+
+    private estimateContextUsage(): number {
+        const stats = this.workspace.getStatistics();
+        const estimatedTokens = this.promptBuilder.getCurrentTokens() + 
+            (stats.totalLines * 10) + 
+            (this.state.toolResults.length * 100);
+        return (estimatedTokens / this.config.tokenLimit) * 100;
     }
 
     private updateContextStatus(): void {
@@ -545,10 +409,8 @@ Always:
             throw new Error('LLM client not configured. Please set LLM API key.');
         }
 
-        // Build prompt from current context (includes system prompt)
         const prompt = this.buildPrompt();
 
-        // Prepare messages for OpenAI API - only user message since system prompt is in the prompt
         const messages = [
             {
                 role: 'user' as const,
@@ -556,7 +418,6 @@ Always:
             },
         ];
 
-        // Call LLM API (with streaming if callback provided)
         let response: string;
         if (onStreamChunk) {
             response = await this.llmClient.createChatCompletionStream(
@@ -574,18 +435,23 @@ Always:
             });
         }
 
-        // Parse tool calls from response
-        const toolCalls = parseToolCalls(response);
+        const parseResult = parseToolCalls(response);
 
-        // Execute tool calls if any
+        if (!parseResult.success) {
+            this.state.toolResults.push(
+                `=========PARSE ERROR\n${parseResult.error?.message}\nSuggestion: ${parseResult.error?.suggestion}\n=========`
+            );
+            return response;
+        }
+
+        const toolCalls = parseResult.toolCalls!;
+
         if (toolCalls.length > 0) {
             const results = await this.executeToolCalls(toolCalls);
 
-            // Format tool results and store in state for next iteration
             const formattedResults = formatToolResults(toolCalls, results);
             this.state.toolResults.push(formattedResults);
 
-            // Limit stored results to prevent context bloat (keep last 10)
             if (this.state.toolResults.length > 10) {
                 this.state.toolResults = this.state.toolResults.slice(-10);
             }

@@ -1,7 +1,3 @@
-/**
- * Prompt builder for assembling context sections using templates
- */
-
 import {
     DirectoryWorkspace,
     FileWorkspace,
@@ -11,8 +7,7 @@ import {
     TodoItem,
 } from "../types";
 
-interface Templates {
-    systemPrompt: string;
+interface TemplateStrings {
     toolDefinitionsHeader: string;
     toolDefinitionsFooter: string;
     contextStatusHeader: string;
@@ -28,21 +23,7 @@ interface Templates {
     todoMarkers: Record<TodoItem['state'], string>;
 }
 
-// Default templates bundled in code
-const DEFAULT_TEMPLATES: Templates = {
-    systemPrompt: `You are a helpful AI assistant with access to a workspace system. You can manipulate files, directories, and manage tasks using the available tools.
-
-When working with files:
-- Always read a file before editing it to ensure accuracy
-- Use the file.edit tool for precise, surgical edits
-- Verify your changes by reading the file again if needed
-
-When working with directories:
-- Load directories you need to work with using dir.list
-- Unload directories when no longer needed to save context space
-
-Use the todo system to track your progress on multi-step tasks.`,
-
+const TEMPLATES: TemplateStrings = {
     toolDefinitionsHeader: `=========AVAILABLE TOOLS
 The following tools are available for you to use:`,
 
@@ -78,19 +59,14 @@ The following tools are available for you to use:`,
 export class PromptBuilder {
     private tokenLimit: number;
     private currentTokens: number = 0;
-    private templates: Templates;
+    private systemPrompt: string;
 
     constructor(
         systemPrompt: string,
         tokenLimit: number,
     ) {
         this.tokenLimit = tokenLimit;
-        // Clone default templates
-        this.templates = { ...DEFAULT_TEMPLATES };
-        // Override system prompt from config if provided
-        if (systemPrompt) {
-            this.templates.systemPrompt = systemPrompt;
-        }
+        this.systemPrompt = systemPrompt;
     }
 
     buildContextSections(
@@ -103,14 +79,11 @@ export class PromptBuilder {
         toolResults: string[],
     ): ContextSections {
         return {
-            systemPrompt: this.formatSystemPrompt(),
+            systemPrompt: this.systemPrompt,
             taskPrompt,
-            toolDefinitions: this.formatToolDefinitions(
-                toolDefinitions,
-            ),
+            toolDefinitions: this.formatToolDefinitions(toolDefinitions),
             contextStatus: this.formatContextStatus(contextStatus),
-            directoryWorkspace:
-                this.formatDirectoryWorkspace(directoryWorkspace),
+            directoryWorkspace: this.formatDirectoryWorkspace(directoryWorkspace),
             fileWorkspace: this.formatFileWorkspace(fileWorkspace),
             todoWorkspace: this.formatTodoWorkspace(todoWorkspace),
             toolResults: this.formatToolResults(toolResults),
@@ -133,10 +106,6 @@ export class PromptBuilder {
         return parts.join("\n\n");
     }
 
-    /**
-     * Assemble only the context sections (without system prompt and task)
-     * For use when system prompt is sent separately as a system message
-     */
     assembleContextSections(sections: ContextSections): string {
         const parts = [
             sections.toolDefinitions,
@@ -145,141 +114,120 @@ export class PromptBuilder {
             sections.fileWorkspace,
             sections.todoWorkspace,
             sections.toolResults,
-        ].filter(Boolean); // Remove empty strings
+        ].filter(Boolean);
 
         return parts.join("\n\n");
     }
 
     getSystemPrompt(): string {
-        return this.templates.systemPrompt;
+        return this.systemPrompt;
     }
 
-    private formatSystemPrompt(): string {
-        return this.templates.systemPrompt;
+    setSystemPrompt(prompt: string): void {
+        this.systemPrompt = prompt;
     }
 
     private formatToolDefinitions(definitions: string): string {
         const parts = [
-            this.templates.toolDefinitionsHeader,
+            TEMPLATES.toolDefinitionsHeader,
             definitions,
-            this.templates.toolDefinitionsFooter,
+            TEMPLATES.toolDefinitionsFooter,
         ];
         return parts.join("\n");
     }
 
     private formatContextStatus(status: ContextStatus): string {
-        const { tokenUsage, directoryWorkspace, fileWorkspace } =
-            status;
+        const { tokenUsage, directoryWorkspace, fileWorkspace } = status;
 
         const parts = [
-            this.templates.contextStatusHeader,
+            TEMPLATES.contextStatusHeader,
             `Token Usage: ${tokenUsage.current} / ${tokenUsage.limit} (${tokenUsage.percentage.toFixed(1)}%)`,
             `Directory Workspace: ${directoryWorkspace.count} directories loaded`,
             `File Workspace: ${fileWorkspace.count} files, ${fileWorkspace.totalLines} lines loaded`,
-            this.templates.sectionDelimiter,
+            TEMPLATES.sectionDelimiter,
         ];
 
         return parts.join("\n");
     }
 
-    private formatDirectoryWorkspace(
-        workspace: DirectoryWorkspace,
-    ): string {
+    private formatDirectoryWorkspace(workspace: DirectoryWorkspace): string {
         if (Object.keys(workspace).length === 0) {
             return [
-                this.templates.directoryWorkspaceHeader,
-                this.templates.directoryWorkspaceEmpty,
-                this.templates.sectionDelimiter,
+                TEMPLATES.directoryWorkspaceHeader,
+                TEMPLATES.directoryWorkspaceEmpty,
+                TEMPLATES.sectionDelimiter,
             ].join("\n");
         }
 
-        const parts: string[] = [
-            this.templates.directoryWorkspaceHeader,
-        ];
+        const parts: string[] = [TEMPLATES.directoryWorkspaceHeader];
 
         for (const [dirPath, entries] of Object.entries(workspace)) {
             parts.push(dirPath);
-            parts.push(this.templates.separator);
+            parts.push(TEMPLATES.separator);
 
             for (const entry of entries) {
-                parts.push(
-                    `${entry.type.padEnd(4)} | ${entry.name}`,
-                );
+                parts.push(`${entry.type.padEnd(4)} | ${entry.name}`);
             }
 
-            parts.push(this.templates.separator);
+            parts.push(TEMPLATES.separator);
             parts.push("");
         }
 
-        // Remove last empty line and add closing marker
         if (parts[parts.length - 1] === "") {
             parts.pop();
         }
-        parts.push(this.templates.sectionDelimiter);
+        parts.push(TEMPLATES.sectionDelimiter);
 
         return parts.join("\n");
     }
 
-    private formatFileWorkspace(
-        workspace: FileWorkspace,
-    ): string {
+    private formatFileWorkspace(workspace: FileWorkspace): string {
         if (Object.keys(workspace).length === 0) {
             return [
-                this.templates.fileWorkspaceHeader,
-                this.templates.fileWorkspaceEmpty,
-                this.templates.sectionDelimiter,
+                TEMPLATES.fileWorkspaceHeader,
+                TEMPLATES.fileWorkspaceEmpty,
+                TEMPLATES.sectionDelimiter,
             ].join("\n");
         }
 
-        const parts: string[] = [this.templates.fileWorkspaceHeader];
+        const parts: string[] = [TEMPLATES.fileWorkspaceHeader];
 
         for (const [filePath, entry] of Object.entries(workspace)) {
             parts.push(filePath);
-            parts.push(this.templates.separator);
+            parts.push(TEMPLATES.separator);
 
             let currentLine = 1;
-            for (const range of entry.ranges.sort(
-                (a, b) => a.start - b.start,
-            )) {
-                // Add [UNLOADED] marker if there's a gap
+            for (const range of entry.ranges.sort((a, b) => a.start - b.start)) {
                 if (range.start > currentLine) {
-                    parts.push(this.templates.fileUnloadedMarker);
+                    parts.push(TEMPLATES.fileUnloadedMarker);
                     parts.push("");
                 }
 
-                // Add lines in this range
                 const rangeStartIndex = range.start - 1;
                 const rangeEndIndex = range.end;
-                const rangeLines = entry.content.slice(
-                    rangeStartIndex,
-                    rangeEndIndex,
-                );
+                const rangeLines = entry.content.slice(rangeStartIndex, rangeEndIndex);
 
                 for (let i = 0; i < rangeLines.length; i++) {
                     const lineNum = range.start + i;
                     const line = rangeLines[i];
-                    parts.push(
-                        `${lineNum.toString().padStart(3)} | ${line}`,
-                    );
+                    parts.push(`${lineNum.toString().padStart(3)} | ${line}`);
                 }
 
                 currentLine = range.end + 1;
             }
 
-            // Add final [UNLOADED] if file continues beyond loaded ranges
             if (currentLine <= entry.totalLines) {
-                parts.push(this.templates.fileUnloadedMarker);
+                parts.push(TEMPLATES.fileUnloadedMarker);
             }
 
-            parts.push(this.templates.separator);
+            parts.push(TEMPLATES.separator);
             parts.push("");
         }
 
-        // Remove last empty line and add closing marker
         if (parts[parts.length - 1] === "") {
             parts.pop();
         }
-        parts.push(this.templates.sectionDelimiter);
+        parts.push(TEMPLATES.sectionDelimiter);
 
         return parts.join("\n");
     }
@@ -287,22 +235,20 @@ export class PromptBuilder {
     private formatTodoWorkspace(workspace: TodoWorkspace): string {
         if (workspace.items.length === 0) {
             return [
-                this.templates.todoWorkspaceHeader,
-                this.templates.todoWorkspaceEmpty,
-                this.templates.sectionDelimiter,
+                TEMPLATES.todoWorkspaceHeader,
+                TEMPLATES.todoWorkspaceEmpty,
+                TEMPLATES.sectionDelimiter,
             ].join("\n");
         }
 
-        const parts: string[] = [this.templates.todoWorkspaceHeader];
+        const parts: string[] = [TEMPLATES.todoWorkspaceHeader];
 
         for (const item of workspace.items) {
-            const marker =
-                this.templates.todoMarkers[item.state] ||
-                this.templates.todoMarkers.pending;
+            const marker = TEMPLATES.todoMarkers[item.state] || TEMPLATES.todoMarkers.pending;
             parts.push(`${marker} ${item.text}`);
         }
 
-        parts.push(this.templates.sectionDelimiter);
+        parts.push(TEMPLATES.sectionDelimiter);
         return parts.join("\n");
     }
 
@@ -340,9 +286,6 @@ export class PromptBuilder {
         return (this.currentTokens / this.tokenLimit) * 100;
     }
 
-    /**
-     * Format tool definitions from the tool registry
-     */
     static formatToolDefinitions(
         definitions: import("../types").ToolDefinition[],
     ): string {
@@ -355,24 +298,15 @@ export class PromptBuilder {
 
             if (def.params && Object.keys(def.params).length > 0) {
                 parts.push("Parameters:");
-                for (const [paramName, param] of Object.entries(
-                    def.params,
-                )) {
-                    const optional =
-                        "optional" in param && param.optional
-                            ? " (optional)"
-                            : "";
-                    parts.push(
-                        `  - ${paramName}${optional}: ${param.type} - ${param.description}`,
-                    );
+                for (const [paramName, param] of Object.entries(def.params)) {
+                    const optional = "optional" in param && param.optional ? " (optional)" : "";
+                    parts.push(`  - ${paramName}${optional}: ${param.type} - ${param.description}`);
                 }
             }
 
             if (def.returns && Object.keys(def.returns).length > 0) {
                 parts.push("Returns:");
-                for (const [returnName, returnDesc] of Object.entries(
-                    def.returns,
-                )) {
+                for (const [returnName, returnDesc] of Object.entries(def.returns)) {
                     parts.push(`  - ${returnName}: ${returnDesc}`);
                 }
             }

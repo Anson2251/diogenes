@@ -17,6 +17,7 @@ export interface ToolResult {
         message: string;
         details?: Record<string, any>;
         suggestion?: string;
+        candidates?: Array<{ line: number; preview: string }>;
     };
 }
 
