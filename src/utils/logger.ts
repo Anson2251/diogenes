@@ -5,6 +5,8 @@
  * supporting both traditional logging and TUI-style progress display.
  */
 
+import { StreamChunk } from "../llm/openai-client";
+
 export enum LogLevel {
     DEBUG = 0,
     INFO = 1,
@@ -80,7 +82,7 @@ export interface Logger {
 
     // Streaming methods
     streamStart(): void;
-    streamChunk(chunk: string): void;
+    streamChunk(chunk: StreamChunk): void;
     streamEnd(): void;
 }
 
@@ -282,8 +284,12 @@ export class TUILogger implements Logger {
         process.stdout.write(`${colors.green}LLM Response:${colors.reset}\n`);
     }
 
-    streamChunk(chunk: string): void {
-        process.stdout.write(chunk);
+    streamChunk(chunk: StreamChunk): void {
+        if (chunk.type === "reasoning") {
+            process.stdout.write(`${colors.dim}${chunk.content}${colors.reset}`);
+        } else {
+            process.stdout.write(chunk.content);
+        }
     }
 
     streamEnd(): void {
@@ -432,8 +438,8 @@ export class ConsoleLogger implements Logger {
         this.info("LLM Response:");
     }
 
-    streamChunk(chunk: string): void {
-        process.stdout.write(chunk);
+    streamChunk(chunk: StreamChunk): void {
+        process.stdout.write(chunk.content);
     }
 
     streamEnd(): void {

@@ -1,4 +1,20 @@
-# Diogenes
+#
+ 
+D
+i
+o
+g
+e
+n
+e
+s
+ 
+v
+0
+.
+1
+.
+0
 
 A minimal LLM-controlled agent framework with explicit context management, implemented in TypeScript.
 
@@ -121,31 +137,29 @@ All tool calls use a unified JSON protocol. Tools are invoked by emitting a JSON
 ## Available Tools
 
 ### Directory Tools
-- `dir.dir_list` - List directory contents and load into workspace
-- `dir.dir_unload` - Remove directory from workspace
+- `dir.list` - List directory contents and load into workspace
+- `dir.unload` - Remove directory from workspace
 
 ### File Tools
-- `file.file_load` - Load file content into workspace
-- `file.file_unload` - Remove file from workspace
-- `file.file_edit` - Apply structured edits to a file (complex anchor-based editing)
+- `file.load` - Load file content into workspace
+- `file.unload` - Remove file from workspace
+- `file.edit` - Apply structured edits to a file (complex anchor-based editing)
 - `file.file_create` - Create a new file with content
 - `file.file_overwrite` - Overwrite entire file content
 - `file.file_append` - Append content to end of file
 
 ### Todo Tools
-- `todo.todo_set` - Overwrite entire todo list
-- `todo.todo_update` - Update state of a todo item
+- `todo.set` - Overwrite entire todo list
+- `todo.update` - Update state of a todo item
 - `todo.todo_append` - Add new items to todo list
 
 ### Task Tools
-- `task.task_end` - End the current task
+- `task.end` - End the current task
 
-### Search Tools (Planned)
-- `search.search_files` - Search for pattern across files
-- `search.search_symbols` - Search for symbol definitions
+### Shell Tools
+- `shell.exec` - Execute a shell command
 
-### Shell Tools (Planned)
-- `shell.shell_exec` - Execute a shell command
+
 
 ## Example Session
 

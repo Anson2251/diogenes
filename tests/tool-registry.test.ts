@@ -297,10 +297,11 @@ describe("ToolRegistry", () => {
                 { tool: "test.tool1", params: {} },
             ]);
 
-            // Current implementation stops on first error (2 results)
-            expect(results).toHaveLength(2);
+            // Implementation continues to execute all calls (3 results)
+            expect(results).toHaveLength(3);
             expect(results[0].success).toBe(true);
             expect(results[1].success).toBe(false);
+            expect(results[2].success).toBe(true);
         });
 
         it("should handle empty array", async () => {

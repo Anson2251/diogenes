@@ -87,8 +87,9 @@ export class WorkspaceManager {
         const absolutePath = this.resolvePath(filePath);
         await this.validatePath(absolutePath, false);
 
+        // Get current file stats
         const content = await fs.promises.readFile(absolutePath, "utf-8");
-        const lines = content.split("\n");
+        const lines = content.split("\n").map(l => rstrip(l));
         const totalLines = lines.length;
 
         let startLine = start || 1;
@@ -103,39 +104,92 @@ export class WorkspaceManager {
             );
         }
 
-        const loadedLines = lines.slice(startLine - 1, endLine).map(l => rstrip(l));
-        const range = { start: startLine, end: endLine };
+        const existingEntry = this.fileWorkspace[absolutePath];
 
-        let entry = this.fileWorkspace[filePath];
-        if (!entry) {
-            entry = {
-                path: filePath,
-                content: loadedLines,
-                totalLines,
-                ranges: [range],
-            };
-        } else {
-            // Merge with existing ranges if possible
-            const merged = this.mergeRanges([...entry.ranges, range]);
-            entry.ranges = merged;
-            // Reload content with merged ranges
+        // If file exists and totalLines match, merge ranges (using FRESH content from disk)
+        if (existingEntry && existingEntry.totalLines === totalLines) {
+            // Merge existing ranges with new range
+            const mergedRanges = this.mergeRanges([...existingEntry.ranges, { start: startLine, end: endLine }]);
+
+            // Extract content for merged ranges from FRESH disk content
             const allLines: string[] = [];
-            for (const r of merged.sort((a, b) => a.start - b.start)) {
+            for (const r of mergedRanges) {
                 allLines.push(...lines.slice(r.start - 1, r.end));
             }
-            entry.content = allLines;
+
+            const entry: FileWorkspaceEntry = {
+                path: filePath,
+                content: allLines,
+                totalLines,
+                ranges: mergedRanges,
+                offsets: [],
+            };
+
+            this.fileWorkspace[absolutePath] = entry;
+            return { ...entry };
         }
 
-        this.fileWorkspace[filePath] = entry;
+        // New file or totalLines changed - start fresh
+        const entry: FileWorkspaceEntry = {
+            path: filePath,
+            content: lines.slice(startLine - 1, endLine),
+            totalLines,
+            ranges: [{ start: startLine, end: endLine }],
+            offsets: [],
+        };
+
+        this.fileWorkspace[absolutePath] = entry;
         return { ...entry };
     }
 
     unloadFile(filePath: string): boolean {
-        if (this.fileWorkspace[filePath]) {
-            delete this.fileWorkspace[filePath];
+        const absolutePath = this.resolvePath(filePath);
+        if (this.fileWorkspace[absolutePath]) {
+            delete this.fileWorkspace[absolutePath];
             return true;
         }
         return false;
+    }
+
+    async reloadFileWithRangesContent(
+        filePath: string,
+        content: string,
+        ranges: Array<{ start: number; end: number }>,
+    ): Promise<FileWorkspaceEntry | undefined> {
+        const absolutePath = this.resolvePath(filePath);
+        const lines = content.split("\n").map(l => rstrip(l));
+        const totalLines = lines.length;
+
+        // Filter and clamp ranges to valid line numbers
+        const validRanges = ranges
+            .filter(r => r.start <= r.end)
+            .map(r => ({
+                start: Math.max(1, Math.min(r.start, totalLines)),
+                end: Math.max(1, Math.min(r.end, totalLines)),
+            }))
+            .filter(r => r.start <= r.end);
+
+        if (validRanges.length === 0) {
+            return undefined;
+        }
+
+        // Extract content for each range
+        const allLines: string[] = [];
+        for (const r of validRanges) {
+            allLines.push(...lines.slice(r.start - 1, r.end));
+        }
+
+        // Create fresh entry
+        const entry: FileWorkspaceEntry = {
+            path: filePath,
+            content: allLines,
+            totalLines,
+            ranges: validRanges,
+            offsets: [],
+        };
+
+        this.fileWorkspace[absolutePath] = entry;
+        return { ...entry };
     }
 
     getFileWorkspace(): FileWorkspace {
@@ -143,18 +197,30 @@ export class WorkspaceManager {
     }
 
     getFileEntry(filePath: string): FileWorkspaceEntry | undefined {
-        const entry = this.fileWorkspace[filePath];
+        const absolutePath = this.resolvePath(filePath);
+        const entry = this.fileWorkspace[absolutePath];
         return entry ? { ...entry } : undefined;
     }
 
     updateFileContent(filePath: string, newContent: string[]): void {
-        const entry = this.fileWorkspace[filePath];
+        const absolutePath = this.resolvePath(filePath);
+        const entry = this.fileWorkspace[absolutePath];
         if (entry) {
-            entry.content = [...newContent];
-            // Reset to single range covering all content
-            entry.ranges = [{ start: 1, end: newContent.length }];
+            entry.content = newContent;
             entry.totalLines = newContent.length;
+            entry.ranges = [{ start: 1, end: newContent.length }];
+            entry.offsets = [];
         }
+    }
+
+    private applyOffsets(index: number, offsets: Array<{ at: number; delta: number }>): number {
+        let newIndex = index;
+        for (const offset of offsets) {
+            if (offset.at < index) {
+                newIndex += offset.delta;
+            }
+        }
+        return newIndex;
     }
 
     private mergeRanges(

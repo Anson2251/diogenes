@@ -58,9 +58,17 @@ export interface OpenAIStreamChunk {
         delta: {
             role?: string;
             content?: string;
+            reasoning_content?: string;
         };
         finish_reason: string | null;
     }>;
+}
+
+export type StreamChunkType = "content" | "reasoning";
+
+export interface StreamChunk {
+    type: StreamChunkType;
+    content: string;
 }
 
 export interface OpenAIErrorResponse {
@@ -226,7 +234,7 @@ export class OpenAIClient {
      */
     async createChatCompletionStream(
         messages: OpenAIMessage[],
-        onChunk: (chunk: string) => void,
+        onChunk: (chunk: StreamChunk) => void,
         options: Partial<OpenAICompletionRequest> = {},
     ): Promise<string> {
         const request: OpenAICompletionRequest = {
@@ -303,10 +311,15 @@ export class OpenAIClient {
 
                     try {
                         const parsed = JSON.parse(data) as OpenAIStreamChunk;
-                        const content = parsed.choices[0]?.delta?.content;
-                        if (content) {
-                            fullContent += content;
-                            onChunk(content);
+                        const delta = parsed.choices[0]?.delta;
+                        
+                        if (delta?.reasoning_content) {
+                            onChunk({ type: "reasoning", content: delta.reasoning_content });
+                        }
+                        
+                        if (delta?.content) {
+                            fullContent += delta.content;
+                            onChunk({ type: "content", content: delta.content });
                         }
                     } catch {
                         // Ignore parse errors for malformed chunks

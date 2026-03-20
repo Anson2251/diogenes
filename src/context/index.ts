@@ -6,7 +6,7 @@ import { WorkspaceManager } from "./workspace";
 import { PromptBuilder } from "./prompt-builder";
 import { ToolRegistry } from "../tools";
 import { BaseTool } from "../tools/base-tool";
-import { OpenAIClient } from "../llm/openai-client";
+import { OpenAIClient, StreamChunk } from "../llm/openai-client";
 import { TRON } from '@tron-format/tron';
 import {
     DiogenesConfig,
@@ -23,6 +23,7 @@ import {
     DEFAULT_LLM_CONFIG,
     DEFAULT_LOGGER_CONFIG,
     DEFAULT_TOKEN_LIMIT,
+    getContextWindowForModel,
 } from "../config/default-prompts";
 
 export class DiogenesContextManager {
@@ -63,9 +64,13 @@ export class DiogenesContextManager {
     private mergeWithDefaults(
         config: DiogenesConfig,
     ): Required<DiogenesConfig> {
+        const model = config.llm?.model || DEFAULT_LLM_CONFIG.model;
+        const modelContextWindow = getContextWindowForModel(model);
+        const tokenLimit = config.tokenLimit || modelContextWindow || DEFAULT_TOKEN_LIMIT;
+        
         return {
             systemPrompt: config.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-            tokenLimit: config.tokenLimit || DEFAULT_TOKEN_LIMIT,
+            tokenLimit,
             security: {
                 ...DEFAULT_SECURITY_CONFIG,
                 ...config.security,
@@ -404,7 +409,7 @@ export class DiogenesContextManager {
      *
      * Returns the LLM response text
      */
-    async runLLMCycle(onStreamChunk?: (chunk: string) => void): Promise<string> {
+    async runLLMCycle(onStreamChunk?: (chunk: StreamChunk) => void): Promise<string> {
         if (!this.llmClient) {
             throw new Error('LLM client not configured. Please set LLM API key.');
         }

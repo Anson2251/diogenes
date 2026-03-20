@@ -141,5 +141,48 @@ HEREDOC
             expect(result.toolCalls![0].params.edits[0].content).toEqual(["regular", "array"]);
             expect(result.toolCalls![0].params.edits[1].content).toEqual(["heredoc content"]);
         });
+
+        it("should parse complex edit with anchor and replace mode", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool": "file.edit", "params": {"path": "README.md", "edits": [
+        {
+            "mode": "replace",
+            "anchor": {
+                "start": {
+                    "line": 135,
+                    "text": "### File Tools\\n- \`file.load\` - Load file content into workspace\\n- \`file.unload\` - Remove file from workspace\\n- \`file.edit\` - Apply structured edits to a file (complex anchor-based editing)\\n- \`file.file_create\` - Create a new file with content\\n- \`file.file_overwrite\` - Overwrite entire file content\\n- \`file.file_append\` - Append content to end of file"
+                }
+            },
+            "content": [
+                "### File Tools",
+                "- \`file.load\` - Load file content into workspace",
+                "- \`file.unload\` - Remove file from workspace",
+                "- \`file.edit\` - Apply structured edits to a file (complex anchor-based editing) **(currently in testing, may contain bugs)**",
+                "- \`file.create\` - Create a new file with content",
+                "- \`file.overwrite\` - Overwrite entire file content",
+                "- \`file.append\` - Append content to end of file"
+            ]
+        }
+    ]}}
+]
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(1);
+            expect(result.toolCalls![0].tool).toBe("file.edit");
+            expect(result.toolCalls![0].params.path).toBe("README.md");
+            expect(result.toolCalls![0].params.edits[0].mode).toBe("replace");
+            expect(result.toolCalls![0].params.edits[0].anchor.start.line).toBe(135);
+            expect(result.toolCalls![0].params.edits[0].content).toEqual([
+                "### File Tools",
+                "- `file.load` - Load file content into workspace",
+                "- `file.unload` - Remove file from workspace",
+                "- `file.edit` - Apply structured edits to a file (complex anchor-based editing) **(currently in testing, may contain bugs)**",
+                "- `file.create` - Create a new file with content",
+                "- `file.overwrite` - Overwrite entire file content",
+                "- `file.append` - Append content to end of file",
+            ]);
+        });
     });
 });

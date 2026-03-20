@@ -52,11 +52,17 @@ export interface FileRange {
     end: number;
 }
 
+export interface FileOffset {
+    at: number;
+    delta: number;
+}
+
 export interface FileWorkspaceEntry {
     path: string;
     content: string[];
     totalLines: number;
     ranges: FileRange[];
+    offsets: FileOffset[];
 }
 
 export interface FileWorkspace {

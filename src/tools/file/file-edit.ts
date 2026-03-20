@@ -9,6 +9,7 @@ import { ToolResult } from "../../types";
 import { WorkspaceManager } from "../../context/workspace";
 import {
     Edit,
+    EditMode,
     EditOptions,
     EditResult,
     EditError,
@@ -56,6 +57,29 @@ Edit modes:
 APPENDING TO FILE:
 To add lines at the end of a file, use "insert_after" with the LAST EXISTING LINE as the anchor.
 Example: If a file has 5 lines, anchor at line 5 and use "insert_after" to add line 6.
+
+HEREDOC SYNTAX (RECOMMENDED for multi-line content):
+For content with multiple lines, use heredoc to avoid JSON escaping issues:
+{
+  "content": {"$heredoc": "EOF"}
+}
+<<<EOF
+line 1 with "quotes" and 'apostrophes'
+line 2 with backslashes: \\n \\t
+line 3
+EOF
+
+Benefits of heredoc:
+- No need to escape quotes, backslashes, or special characters
+- Content is automatically split into lines
+- Essential for markdown, code, or any content with special characters
+
+MULTIPLE EDITS - MERGE WHEN POSSIBLE:
+- Multiple edits are applied in descending line order (bottom to top)
+- Overlapping edit ranges are NOT allowed and will be rejected
+- RECOMMENDED: Instead of many small nearby edits, merge them into one larger edit
+- Example: To change lines 10-20, use ONE replace edit with heredoc, not 10 separate edits
+- This reduces complexity and avoids potential anchor conflicts
 
 Edit format:
 {
@@ -138,32 +162,27 @@ If file has 3 lines and you want to add "hello, world":
 
             const atomic = options.atomic ?? true;
 
-            const sortedEdits = this.sortEdits(edits);
-
-            const preApplyResults = this.validateAnchors(
-                lines,
-                sortedEdits,
-            );
+            const preApplyResults = this.validateAnchors(lines, edits);
 
             const validEdits: Array<{ edit: Edit; matchResult: typeof preApplyResults[0] }> = [];
             const invalidEdits: Array<{ edit: Edit; error: EditError }> = [];
 
-            for (let i = 0; i < sortedEdits.length; i++) {
+            for (let i = 0; i < edits.length; i++) {
                 const result = preApplyResults[i];
                 if (result.valid) {
-                    validEdits.push({ edit: sortedEdits[i], matchResult: result });
+                    validEdits.push({ edit: edits[i], matchResult: result });
                 } else {
                     invalidEdits.push({
-                        edit: sortedEdits[i],
+                        edit: edits[i],
                         error: {
-                            index: i,
+                            index: result.editIndex,
                             error: result.errorCode || "ANCHOR_NOT_FOUND",
                             message: result.errorMessage || "Anchor validation failed",
                             candidates: result.candidates,
                         },
                     });
                     errors.push({
-                        index: i,
+                        index: result.editIndex,
                         error: result.errorCode || "ANCHOR_NOT_FOUND",
                         message: result.errorMessage || "Anchor validation failed",
                         candidates: result.candidates,
@@ -186,16 +205,41 @@ If file has 3 lines and you want to add "hello, world":
                 );
             }
 
+            const overlapErrors = this.checkOverlappingRanges(lines, validEdits);
+            if (overlapErrors.length > 0) {
+                return this.error(
+                    "OVERLAPPING_RANGES",
+                    `Found ${overlapErrors.length} overlapping edit range(s)`,
+                    { overlaps: overlapErrors },
+                    "Ensure edit ranges do not overlap, or combine overlapping edits into a single edit",
+                );
+            }
+
             let modifiedLines = [...lines];
 
-            for (const { edit, matchResult } of validEdits) {
-                const result = this.applyEdit(modifiedLines, edit);
+            const sortedValidEdits = [...validEdits].sort((a, b) => {
+                const aStart = a.matchResult.matchedRange.start;
+                const bStart = b.matchResult.matchedRange.start;
+                return bStart - aStart;
+            });
+
+            for (const { edit, matchResult } of sortedValidEdits) {
+                const startLine = matchResult.matchedRange.start;
+                const endLine = matchResult.matchedRange.end;
+
+                const result = this.applyEdit(
+                    modifiedLines,
+                    edit.mode,
+                    edit.content,
+                    startLine,
+                    endLine,
+                );
                 modifiedLines = result.lines;
 
                 applied.push({
                     index: matchResult.editIndex,
                     mode: edit.mode,
-                    matchedRange: [matchResult.matchedRange.start, matchResult.matchedRange.end],
+                    matchedRange: [startLine, endLine],
                     newRange: result.newRange,
                     matchQuality: matchResult.matchQuality,
                 });
@@ -204,11 +248,59 @@ If file has 3 lines and you want to add "hello, world":
             const newContent = modifiedLines.join("\n");
             await fs.promises.writeFile(absolutePath, newContent, "utf-8");
 
-            if (this.workspace.getFileEntry(filePath)) {
-                this.workspace.updateFileContent(
+            // Update workspace: adjust ranges for line count changes and reload
+            const existingEntry = this.workspace.getFileEntry(filePath);
+            let updatedRanges: Array<{ start: number; end: number }> = [];
+            let totalLinesInWorkspace = 0;
+
+            if (existingEntry) {
+                // Calculate line deltas from applied edits
+                const editDeltas = applied.map((edit) => {
+                    const originalLineCount = edit.matchedRange[1] - edit.matchedRange[0] + 1;
+                    const newLineCount = edit.newRange[1] - edit.newRange[0] + 1;
+                    return {
+                        at: edit.matchedRange[0],
+                        delta: newLineCount - originalLineCount,
+                    };
+                });
+
+                // Sort deltas by position (descending) for proper application
+                editDeltas.sort((a, b) => b.at - a.at);
+
+                // Apply deltas to existing ranges to get adjusted ranges
+                updatedRanges = existingEntry.ranges.map((range) => {
+                    let newStart = range.start;
+                    let newEnd = range.end;
+                    for (const delta of editDeltas) {
+                        if (delta.at < range.start) {
+                            // Delta is before this range - shift entire range
+                            newStart += delta.delta;
+                            newEnd += delta.delta;
+                        } else if (delta.at <= range.end) {
+                            // Delta is within this range - adjust the end
+                            newEnd += delta.delta;
+                        }
+                    }
+                    // Clamp to valid line numbers
+                    newStart = Math.max(1, Math.min(newStart, modifiedLines.length));
+                    newEnd = Math.max(newStart, Math.min(newEnd, modifiedLines.length));
+                    return { start: newStart, end: newEnd };
+                });
+
+                // Unload and reload with adjusted ranges
+                this.workspace.unloadFile(filePath);
+                console.error(`[DEBUG file-edit] Reloading ${filePath} with ranges:`, JSON.stringify(updatedRanges));
+                const newEntry = await this.workspace.reloadFileWithRangesContent(
                     filePath,
-                    modifiedLines.map((l) => rstrip(l)),
+                    newContent,
+                    updatedRanges,
                 );
+
+                if (newEntry) {
+                    totalLinesInWorkspace = newEntry.content.length;
+                    console.error(`[DEBUG file-edit] Reloaded entry ranges:`, JSON.stringify(newEntry.ranges));
+                    console.error(`[DEBUG file-edit] First 3 lines of content:`, JSON.stringify(newEntry.content.slice(0, 3)));
+                }
             }
 
             return this.success({
@@ -219,6 +311,10 @@ If file has 3 lines and you want to add "hello, world":
                     total_lines: modifiedLines.length,
                     modified_regions: applied.map((a) => a.newRange),
                 },
+                workspace_update: updatedRanges.length > 0 ? {
+                    loaded_ranges: updatedRanges.filter(r => r.start <= r.end),
+                    total_lines_in_workspace: totalLinesInWorkspace,
+                } : undefined,
             });
         } catch (error) {
             return this.error(
@@ -228,14 +324,6 @@ If file has 3 lines and you want to add "hello, world":
                 "Check if the file exists and is writable",
             );
         }
-    }
-
-    private sortEdits(edits: Edit[]): Edit[] {
-        return [...edits].sort((a, b) => {
-            const aEnd = a.anchor.end?.line ?? a.anchor.start.line;
-            const bEnd = b.anchor.end?.line ?? b.anchor.start.line;
-            return bEnd - aEnd;
-        });
     }
 
     private validateAnchors(
@@ -276,7 +364,7 @@ If file has 3 lines and you want to add "hello, world":
                 const candidates = this.findCandidates(lines, edit);
                 let errorMessage: string;
                 let errorCode: string;
-                
+
                 if (candidates.length === 0) {
                     errorCode = "NO_MATCH";
                     errorMessage = `Anchor text not found anywhere in file: "${edit.anchor.start.text.slice(0, 50)}..."`;
@@ -288,7 +376,7 @@ If file has 3 lines and you want to add "hello, world":
                     errorCode = "AMBIGUOUS_MATCH";
                     errorMessage = `Found ${candidates.length} possible matches for anchor`;
                 }
-                
+
                 results.push({
                     valid: false,
                     editIndex: i,
@@ -330,7 +418,7 @@ If file has 3 lines and you want to add "hello, world":
                         edit.anchor.start.line,
                     );
                     if (filtered.length >= 1) {
-                        const best = filtered.reduce((closest, c) => 
+                        const best = filtered.reduce((closest, c) =>
                             Math.abs(c.startLine - edit.anchor.start.line) < Math.abs(closest.startLine - edit.anchor.start.line)
                                 ? c : closest
                         );
@@ -374,7 +462,7 @@ If file has 3 lines and you want to add "hello, world":
                         (c) => Math.abs(c.line - edit.anchor.start.line) <= 5,
                     );
                     if (filtered.length >= 1) {
-                        const best = filtered.reduce((closest, c) => 
+                        const best = filtered.reduce((closest, c) =>
                             Math.abs(c.line - edit.anchor.start.line) < Math.abs(closest.line - edit.anchor.start.line)
                                 ? c : closest
                         );
@@ -616,15 +704,15 @@ If file has 3 lines and you want to add "hello, world":
         const loose = this.isLooseWhitespace(lines[0] || "");
         const anchorText = edit.anchor.start.text;
         const hintLine = edit.anchor.start.line;
-        
+
         const candidates: Array<{ line: number; preview: string; score: number }> = [];
-        
+
         for (let lineNum = 1; lineNum <= lines.length; lineNum++) {
             const line = lines[lineNum - 1] || "";
             let score = 0;
             const lineDiff = Math.abs(lineNum - hintLine);
             const proximityBonus = Math.max(0, 20 - lineDiff);
-            
+
             if (line === anchorText) {
                 score = 100 + proximityBonus;
             } else if (rstrip(line) === rstrip(anchorText)) {
@@ -636,12 +724,12 @@ If file has 3 lines and you want to add "hello, world":
             } else if (anchorText.length > 10 && this.similarity(line, anchorText) > 0.7) {
                 score = 30 + proximityBonus;
             }
-            
+
             if (score > 0) {
                 candidates.push({ line: lineNum, preview: line, score });
             }
         }
-        
+
         candidates.sort((a, b) => b.score - a.score);
         return candidates.slice(0, 5);
     }
@@ -650,11 +738,11 @@ If file has 3 lines and you want to add "hello, world":
         const s1 = a.trim().toLowerCase();
         const s2 = b.trim().toLowerCase();
         if (s1 === s2) return 1;
-        
+
         const longer = s1.length > s2.length ? s1 : s2;
         const shorter = s1.length > s2.length ? s2 : s1;
         if (longer.length === 0) return 1;
-        
+
         const editDistance = this.levenshtein(longer, shorter);
         return (longer.length - editDistance) / longer.length;
     }
@@ -683,49 +771,84 @@ If file has 3 lines and you want to add "hello, world":
         return matrix[b.length][a.length];
     }
 
+    private checkOverlappingRanges(
+        lines: string[],
+        validEdits: Array<{ edit: Edit; matchResult: { matchedRange: { start: number; end: number }; editIndex: number } }>,
+    ): Array<{ editIndex: number; overlappedLines: [number, number] }> {
+        const overlaps: Array<{ editIndex: number; overlappedLines: [number, number] }> = [];
+        const modified = new Array(lines.length + 1).fill(false);
+
+        for (const { matchResult } of validEdits) {
+            const { start, end } = matchResult.matchedRange;
+            let overlapFound = false;
+            let overlapStart = -1;
+
+            for (let line = start; line <= end; line++) {
+                if (modified[line]) {
+                    if (!overlapFound) {
+                        overlapStart = line;
+                        overlapFound = true;
+                    }
+                }
+            }
+
+            if (overlapFound) {
+                overlaps.push({
+                    editIndex: matchResult.editIndex,
+                    overlappedLines: [start, end],
+                });
+            } else {
+                for (let line = start; line <= end; line++) {
+                    modified[line] = true;
+                }
+            }
+        }
+
+        return overlaps;
+    }
+
     private applyEdit(
         lines: string[],
-        edit: Edit,
+        mode: EditMode,
+        content: string[] | undefined,
+        startLine: number,
+        endLine: number,
     ): { lines: string[]; newRange: [number, number] } {
-        const anchor = edit.anchor;
-        const anchorLine = anchor.start.line;
-        const endLine = anchor.end?.line ?? anchorLine;
-
-        switch (edit.mode) {
+        switch (mode) {
             case "replace": {
-                const beforeLines = lines.slice(0, anchorLine - 1);
+                const beforeLines = lines.slice(0, startLine - 1);
                 const afterLines = lines.slice(endLine);
-                const newLines = edit.content || [];
+                const newLines = content || [];
                 const newContent = [...beforeLines, ...newLines, ...afterLines];
                 return {
                     lines: newContent,
-                    newRange: [anchorLine, anchorLine + newLines.length - 1],
+                    newRange: [startLine, startLine + newLines.length - 1],
                 };
             }
 
             case "delete": {
-                const beforeLines = lines.slice(0, anchorLine - 1);
+                const beforeLines = lines.slice(0, startLine - 1);
                 const afterLines = lines.slice(endLine);
                 const newContent = [...beforeLines, ...afterLines];
                 return {
                     lines: newContent,
-                    newRange: [anchorLine, anchorLine - 1],
+                    newRange: [startLine, startLine - 1],
                 };
             }
 
             case "insert_before": {
-                const insertLines = edit.content || [];
-                const beforeLines = lines.slice(0, anchorLine - 1);
-                const afterLines = lines.slice(anchorLine - 1);
+                const insertLines = content || [];
+                const beforeLines = lines.slice(0, startLine - 1);
+                const afterLines = lines.slice(startLine - 1);
                 const newContent = [...beforeLines, ...insertLines, ...afterLines];
                 return {
                     lines: newContent,
-                    newRange: [anchorLine, anchorLine + insertLines.length - 1],
+                    newRange: [startLine, startLine + insertLines.length - 1],
                 };
             }
 
             case "insert_after": {
-                const insertLines = edit.content || [];
+                const insertLines = content || [];
                 const beforeLines = lines.slice(0, endLine);
                 const afterLines = lines.slice(endLine);
                 const newContent = [...beforeLines, ...insertLines, ...afterLines];
@@ -736,7 +859,7 @@ If file has 3 lines and you want to add "hello, world":
             }
 
             default:
-                return { lines, newRange: [anchorLine, endLine] };
+                return { lines, newRange: [startLine, endLine] };
         }
     }
 
@@ -785,15 +908,32 @@ If file has 3 lines and you want to add "hello, world":
 
     formatResult(result: ToolResult): string | undefined {
         if (result.success && result.data) {
-            const { applied, errors, file_state } = result.data as {
+            const { applied, errors, file_state, workspace_update } = result.data as {
                 applied: EditResult[];
                 errors: EditError[];
                 file_state: { total_lines: number };
+                workspace_update?: {
+                    loaded_ranges: Array<{ start: number; end: number }>;
+                    total_lines_in_workspace: number;
+                };
             };
+
+            const lines: string[] = [];
+
             if (errors.length === 0) {
-                return `\x1b[32m\x1b[1m✓\x1b[0m Applied ${applied.length} edit(s), ${file_state.total_lines} lines`;
+                lines.push(`\x1b[32m\x1b[1m✓\x1b[0m Applied ${applied.length} edit(s), ${file_state.total_lines} total lines`);
+            } else {
+                lines.push(`\x1b[33m\x1b[1m⚠\x1b[0m Applied ${applied.length} edit(s), ${errors.length} error(s)`);
             }
-            return `\x1b[33m\x1b[1m⚠\x1b[0m Applied ${applied.length} edit(s), ${errors.length} error(s)`;
+
+            if (workspace_update) {
+                const rangeStr = workspace_update.loaded_ranges
+                    .map((r) => `${r.start}-${r.end}`)
+                    .join(", ");
+                lines.push(`\x1b[36mWorkspace:\x1b[0m ${workspace_update.total_lines_in_workspace} lines loaded (${rangeStr})`);
+            }
+
+            return lines.join("\n");
         }
         return undefined;
     }

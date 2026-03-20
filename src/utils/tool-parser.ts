@@ -43,7 +43,7 @@ export interface ParseResult {
  * EOF
  */
 export function parseToolCalls(text: string): ParseResult {
-  const toolCallRegex = /```tool-call\s*([\s\S]*?)```/g;
+  const toolCallRegex = /```tool-call\s*([\s\S]*?)\n```\n\n|```tool-call\s*([\s\S]*?)\n```\s*$/g;
   const matches = [...text.matchAll(toolCallRegex)];
   
   if (matches.length === 0) {
@@ -54,7 +54,7 @@ export function parseToolCalls(text: string): ParseResult {
   const errors: string[] = [];
 
   for (const match of matches) {
-    const blockContent = match[1].trim();
+    const blockContent = (match[1] || match[2] || '').trim();
 
     try {
       const { jsonContent, heredocs } = extractHeredocs(blockContent);
@@ -129,7 +129,7 @@ function extractHeredocs(blockContent: string): { jsonContent: string; heredocs:
         i++;
         
         while (i < lines.length) {
-          if (lines[i] === delimiter) {
+          if (lines[i].trim() === delimiter) {
             heredocs.set(delimiter, { delimiter, lines: heredocLines });
             i++;
             inJson = true;
@@ -175,7 +175,7 @@ function resolveHeredocsInObject(obj: unknown, heredocs: Map<string, HeredocCont
     if (heredoc) {
       return heredoc.lines;
     }
-    return record;
+    throw new Error(`Heredoc '${delimiter}' not found. Make sure the heredoc is defined in the tool-call block.`);
   }
   
   const result: Record<string, unknown> = {};

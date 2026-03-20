@@ -76,8 +76,9 @@ export class FileLoadTool extends BaseTool {
         if (result.success && result.data?.loaded_range) {
             const ranges = result.data.loaded_range as [number, number][];
             const total = result.data.total_lines;
+            const totalLoaded = ranges.reduce((sum, r) => sum + (r[1] - r[0] + 1), 0);
             const rangeStr = ranges.map((r) => `${r[0]}-${r[1]}`).join(", ");
-            return `\x1b[32m\x1b[1m✓\x1b[0m Loaded ${total} lines (${rangeStr})`;
+            return `\x1b[32m\x1b[1m✓\x1b[0m Loaded ${totalLoaded} lines (${rangeStr}) of ${total} total`;
         }
         return undefined;
     }

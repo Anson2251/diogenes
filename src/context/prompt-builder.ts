@@ -197,15 +197,16 @@ export class PromptBuilder {
             parts.push(TEMPLATES.separator);
 
             let currentLine = 1;
+            let contentIndex = 0;
             for (const range of entry.ranges.sort((a, b) => a.start - b.start)) {
                 if (range.start > currentLine) {
                     parts.push(TEMPLATES.fileUnloadedMarker);
                     parts.push("");
                 }
 
-                const rangeStartIndex = range.start - 1;
-                const rangeEndIndex = range.end;
-                const rangeLines = entry.content.slice(rangeStartIndex, rangeEndIndex);
+                const rangeLineCount = range.end - range.start + 1;
+                const rangeLines = entry.content.slice(contentIndex, contentIndex + rangeLineCount);
+                contentIndex += rangeLineCount;
 
                 for (let i = 0; i < rangeLines.length; i++) {
                     const lineNum = range.start + i;

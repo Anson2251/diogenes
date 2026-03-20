@@ -21,6 +21,7 @@ export { ShellExecTool } from "./tools/shell/shell-exec";
 
 // LLM Client
 export { OpenAIClient } from "./llm/openai-client";
+export type { StreamChunk, StreamChunkType } from "./llm/openai-client";
 
 // Types
 export * from "./types";
@@ -153,7 +154,7 @@ export async function executeTask(
             // Build context sections (without system prompt)
             const contextOnly = diogenes.buildContextOnly();
 
-            // console.log(`${systemPrompt}\n${contextOnly}`)
+            // console.log(`\n${contextOnly}`)
 
             // Build messages array:
             // 1. System prompt as system message (first message only)

@@ -98,6 +98,7 @@ describe("WorkspaceManager", () => {
             await workspace.loadFile("test-file.txt", 1, 2);
             const entry = await workspace.loadFile("test-file.txt", 3, 4);
 
+            // Merged ranges should cover 1-4
             expect(entry.ranges.length).toBeLessThanOrEqual(2);
             expect(entry.content.length).toBe(4);
         });
@@ -142,13 +143,16 @@ describe("WorkspaceManager", () => {
     });
 
     describe("updateFileContent", () => {
-        it("should update file content in workspace", async () => {
+        it("should update workspace entry with new content", async () => {
             await workspace.loadFile("test-file.txt");
             workspace.updateFileContent("test-file.txt", ["new line 1", "new line 2"]);
 
+            // Entry should have new content and reset offsets
             const entry = workspace.getFileEntry("test-file.txt");
             expect(entry?.content).toEqual(["new line 1", "new line 2"]);
             expect(entry?.totalLines).toBe(2);
+            expect(entry?.offsets).toEqual([]);
+            expect(entry?.ranges).toEqual([{ start: 1, end: 2 }]);
         });
     });
 
