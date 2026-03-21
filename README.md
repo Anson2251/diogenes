@@ -1,20 +1,4 @@
-#
- 
-D
-i
-o
-g
-e
-n
-e
-s
- 
-v
-0
-.
-1
-.
-0
+# Diogenes
 
 A minimal LLM-controlled agent framework with explicit context management, implemented in TypeScript.
 

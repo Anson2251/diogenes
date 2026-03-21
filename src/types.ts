@@ -110,7 +110,7 @@ export interface EditResult {
     mode: EditMode;
     matchedRange: [number, number];
     newRange: [number, number];
-    matchQuality: "exact" | "fuzzy" | "line_hint";
+    matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
 }
 
 export interface EditError {

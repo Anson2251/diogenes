@@ -425,7 +425,7 @@ export class DiogenesContextManager {
 
         let response: string;
         if (onStreamChunk) {
-            response = await this.llmClient.createChatCompletionStream(
+            const result = await this.llmClient.createChatCompletionStream(
                 messages,
                 onStreamChunk,
                 {
@@ -433,6 +433,8 @@ export class DiogenesContextManager {
                     max_tokens: this.config.llm.maxTokens,
                 },
             );
+            // Reasoning is kept separate - only use content for the assistant message
+            response = result.content;
         } else {
             response = await this.llmClient.createChatCompletion(messages, {
                 temperature: this.config.llm.temperature,

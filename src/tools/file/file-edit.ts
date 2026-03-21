@@ -15,7 +15,7 @@ import {
     EditError,
     LineAnchor,
 } from "../../types";
-import { rstrip, compareLines } from "../../utils/str";
+import { rstrip, compareLines, containsOrContained } from "../../utils/str";
 
 interface FileEditParams {
     path: string;
@@ -27,7 +27,7 @@ interface MatchCandidate {
     line: number;
     startLine: number;
     endLine: number;
-    matchQuality: "exact" | "fuzzy" | "line_hint";
+    matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
 }
 
 export class FileEditTool extends BaseTool {
@@ -38,82 +38,117 @@ export class FileEditTool extends BaseTool {
         super({
             namespace: "file",
             name: "edit",
-            description: `Apply structured edits to a file. Use this to modify specific lines.
+            description: `Apply structured edits to a file.
 
-IMPORTANT: Always read the file first with file.load to get the exact content and line numbers.
+CRITICAL REQUIREMENTS - READ THIS FIRST:
+1. ALWAYS read the file first with file.load to get exact content and line numbers
+2. The "text" field MUST be copied VERBATIM from the file - no paraphrasing, no truncation
+3. ALWAYS include "before" and "after" context (2 lines each) - this is NOT optional
+4. ALWAYS use heredoc syntax for content with newlines, quotes, or special characters
 
-ANCHOR CONCEPT:
-- Anchors is a pointer and must reference one of the EXISTING lines in the file
-- "line" is the 1-indexed line number (e.g., line 1 is the first line)
-- "before" and "after" are optional context to help locate the exact line
-- The anchor is the pivot point for your edit operation
+ANCHOR MATCHING - HOW IT WORKS:
+The tool tries to find your anchor in this order:
+1. Exact match: "text" matches exactly + "before"/"after" context matches
+2. Fuzzy match: "text" is similar + "before"/"after" context matches
+3. Line hint: Falls back to searching around the specified "line" number (±10 lines)
 
-Edit modes:
-- "replace": Replace the anchor line(s) with new content
-- "delete": Remove the anchor line(s)
-- "insert_before": Insert new content before the anchor line
-- "insert_after": Insert new content after the anchor line
+COMMON FAILURE MODES - AVOID THESE:
+❌ WRONG: Paraphrasing text: "text": "function that does something"
+✅ RIGHT: Copy exact text: "text": "function processData(input: string): void {"
 
-APPENDING TO FILE:
-To add lines at the end of a file, use "insert_after" with the LAST EXISTING LINE as the anchor.
-Example: If a file has 5 lines, anchor at line 5 and use "insert_after" to add line 6.
+❌ WRONG: Skipping context: { "line": 10, "text": "const x = 1;" }
+✅ RIGHT: Include context: { "line": 10, "text": "const x = 1;", "before": ["// init", "import { x }"], "after": ["const y = 2", "return x"] }
 
-HEREDOC SYNTAX (RECOMMENDED for multi-line content):
-For content with multiple lines, use heredoc to avoid JSON escaping issues:
+❌ WRONG: Using JSON escaping for multi-line content: "content": ["line 1\\n", "line 2\\n"]
+✅ RIGHT: Use heredoc (see below)
+
+HEREDOC SYNTAX - USE THIS FOR MULTI-LINE CONTENT:
 {
   "content": {"$heredoc": "EOF"}
 }
+
+// AT THE END OF THE tool-call BLOCK, OUTSIDE THE JSON ARRAY
 <<<EOF
 line 1 with "quotes" and 'apostrophes'
-line 2 with backslashes: \\n \\t
+line 2 with backslashes and special chars: \\n \\t $variable
 line 3
 EOF
 
-Benefits of heredoc:
-- No need to escape quotes, backslashes, or special characters
-- Content is automatically split into lines
-- Essential for markdown, code, or any content with special characters
+Benefits:
+- No JSON escaping needed - just paste your content as-is
+- Works with any characters: quotes, backslashes, dollar signs, etc.
+- Essential for code, markdown, or any content with special characters
 
-MULTIPLE EDITS - MERGE WHEN POSSIBLE:
-- Multiple edits are applied in descending line order (bottom to top)
-- Overlapping edit ranges are NOT allowed and will be rejected
-- RECOMMENDED: Instead of many small nearby edits, merge them into one larger edit
-- Example: To change lines 10-20, use ONE replace edit with heredoc, not 10 separate edits
-- This reduces complexity and avoids potential anchor conflicts
+EDIT MODES:
+- "replace": Replace the anchor line(s) with new content (requires "end" anchor)
+- "delete": Remove the anchor line(s) (requires "end" anchor)
+- "insert_before": Insert new content before the anchor line
+- "insert_after": Insert new content after the anchor line
 
-Edit format:
-{
-  "path": "file.txt",
-  "edits": [{
-    "mode": "replace",  // "replace" | "delete" | "insert_before" | "insert_after"
-    "anchor": {
-      "start": {
-        "line": 10,                          // Line number (1-indexed, must exist)
-        "text": "const x = 1;",              // COMPLETE EXACT text of the line
-        "before": ["line 9", "line 8"],      // 2 exact lines before anchor (optional)
-        "after": ["line 11", "line 12"]      // 2 exact lines after anchor (optional)
-      },
-      "end": { /* same as start */ }         // Required for "replace" and "delete"
-    },
-    "content": ["new line 1", "new line 2"]  // New content (required for insert/replace)
-  }]
+MULTIPLE EDITS:
+- Edits are applied bottom-to-top (descending line order)
+- Overlapping ranges are rejected
+- MERGE nearby edits into one larger edit instead of many small ones
+
+EXAMPLE - Replace multiple lines using heredoc:
+
+\`\`\`tool-call
+[
+    {"tool": "file.edit", "params": {
+        "path": "src/file.ts",
+        "edits": [{
+            "mode": "replace",
+            "anchor": {
+            "start": {
+                "line": 10,
+                "text": "function old() {",
+                "before": ["import { x } from 'lib';", ""],
+                "after": ["  return x;", "}"]
+            },
+            "end": {
+                "line": 13,
+                "text": "}",
+                "before": ["  return x;", "function old() {"],
+                "after": ["", "export { old };"]
+            }
+            },
+            "content": {"$heredoc": "EOF"}
+        }]
+        }
+    }}
+]
+
+<<<EOF
+function new() {
+  return x * 2;
 }
+EOF
+\`\`\`
 
-Example - append to end of file:
-If file has 3 lines and you want to add "hello, world":
-{
-  "path": "file.txt",
-  "edits": [{
-    "mode": "insert_after",
-    "anchor": {
-      "start": {
-        "line": 3,                           // Last existing line
-        "text": "last line content"          // Exact text of line 3
-      }
-    },
-    "content": ["hello, world"]              // This becomes line 4
-  }]
-}`,
+EXAMPLE - Append to end of file (file has 3 lines):
+\`\`\`tool-call
+[
+    {"tool": "file.edit", "params": {
+        "path": "file.txt",
+        "edits": [{
+            "mode": "insert_after",
+            "anchor": {
+            "start": {
+                "line": 3,
+                "text": "last line content",
+                "before": ["line 2 content", "line 1 content"],
+                "after": []
+            }
+            },
+            "content": {"$heredoc": "EOF"}
+        }]
+    }}
+]
+
+<<<EOF
+new line at end
+EOF
+\`\`\``,
             params: {
                 path: { type: "string", description: "File path" },
                 options: {
@@ -337,7 +372,7 @@ If file has 3 lines and you want to add "hello, world":
             errorMessage?: string;
             candidates?: Array<{ line: number; preview: string }>;
             matchedRange: { start: number; end: number };
-            matchQuality: "exact" | "fuzzy" | "line_hint";
+            matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
         }> {
         const results: Array<{
             valid: boolean;
@@ -346,7 +381,7 @@ If file has 3 lines and you want to add "hello, world":
             errorMessage?: string;
             candidates?: Array<{ line: number; preview: string }>;
             matchedRange: { start: number; end: number };
-            matchQuality: "exact" | "fuzzy" | "line_hint";
+            matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
         }> = [];
 
         for (let i = 0; i < edits.length; i++) {
@@ -367,14 +402,36 @@ If file has 3 lines and you want to add "hello, world":
 
                 if (candidates.length === 0) {
                     errorCode = "NO_MATCH";
-                    errorMessage = `Anchor text not found anywhere in file: "${edit.anchor.start.text.slice(0, 50)}..."`;
+                    errorMessage = `Anchor text not found anywhere in file.
+Expected: "${edit.anchor.start.text.slice(0, 80)}${edit.anchor.start.text.length > 80 ? '...' : ''}"
+
+TROUBLESHOOTING:
+1. Verify you copied the EXACT text from the file (use file.load to read it)
+2. Include "before" and "after" context fields to help locate the line
+3. Check if the file has been modified since you last read it`;
                 } else if (candidates.length === 1) {
                     errorCode = "NO_MATCH";
                     const c = candidates[0];
-                    errorMessage = `Anchor not found at line ${edit.anchor.start.line}. Similar content found at line ${c.line}`;
+                    const actualLine = lines[c.line - 1] || "";
+                    errorMessage = `Anchor not found at line ${edit.anchor.start.line}.
+Similar content found at line ${c.line}.
+
+Expected: "${edit.anchor.start.text.slice(0, 60)}${edit.anchor.start.text.length > 60 ? '...' : ''}"
+Actual:   "${actualLine.slice(0, 60)}${actualLine.length > 60 ? '...' : ''}"
+
+TROUBLESHOOTING:
+1. Use line ${c.line} instead of ${edit.anchor.start.line}
+2. Copy the EXACT text from the file (the actual line is shown above)
+3. Include "before" and "after" context fields for disambiguation`;
                 } else {
                     errorCode = "AMBIGUOUS_MATCH";
-                    errorMessage = `Found ${candidates.length} possible matches for anchor`;
+                    errorMessage = `Found ${candidates.length} possible matches for anchor.
+This usually means the line appears multiple times or is not unique enough.
+
+TROUBLESHOOTING:
+1. Add "before" and "after" context fields (2 lines each) to disambiguate
+2. Use a more unique portion of the line as the "text" field
+3. Verify the line number is correct`;
                 }
 
                 results.push({
@@ -398,12 +455,12 @@ If file has 3 lines and you want to add "hello, world":
     private findAnchorMatch(
         lines: string[],
         edit: Edit,
-    ): { matchedRange: { start: number; end: number }; matchQuality: "exact" | "fuzzy" | "line_hint" } | null {
+    ): { matchedRange: { start: number; end: number }; matchQuality: "exact" | "fuzzy" | "substring" | "line_hint" } | null {
         const isRange = edit.mode === "replace" || edit.mode === "delete";
         const loose = this.isLooseWhitespace(lines[0] || "");
 
         if (isRange && edit.anchor.end) {
-            for (const quality of ["exact", "fuzzy", "line_hint"] as const) {
+            for (const quality of ["exact", "fuzzy", "substring", "line_hint"] as const) {
                 const candidates = this.searchForAnchor(
                     lines,
                     edit.anchor.start,
@@ -449,7 +506,7 @@ If file has 3 lines and you want to add "hello, world":
                 }
             }
         } else {
-            for (const quality of ["exact", "fuzzy", "line_hint"] as const) {
+            for (const quality of ["exact", "fuzzy", "substring", "line_hint"] as const) {
                 const candidates = this.searchForSingleAnchor(
                     lines,
                     edit.anchor.start,
@@ -459,7 +516,7 @@ If file has 3 lines and you want to add "hello, world":
 
                 if (quality === "line_hint") {
                     const filtered = candidates.filter(
-                        (c) => Math.abs(c.line - edit.anchor.start.line) <= 5,
+                        (c) => Math.abs(c.line - edit.anchor.start.line) <= 10,
                     );
                     if (filtered.length >= 1) {
                         const best = filtered.reduce((closest, c) =>
@@ -501,14 +558,14 @@ If file has 3 lines and you want to add "hello, world":
         lines: string[],
         startAnchor: LineAnchor,
         endAnchor: LineAnchor,
-        quality: "exact" | "fuzzy" | "line_hint",
+        quality: "exact" | "fuzzy" | "substring" | "line_hint",
         loose: boolean,
     ): MatchCandidate[] {
         const candidates: MatchCandidate[] = [];
 
         if (quality === "line_hint") {
-            const searchStart = Math.max(1, startAnchor.line - 5);
-            const searchEnd = Math.min(lines.length, startAnchor.line + 5);
+            const searchStart = Math.max(1, startAnchor.line - 10);
+            const searchEnd = Math.min(lines.length, startAnchor.line + 10);
 
             for (let line = searchStart; line <= searchEnd; line++) {
                 if (
@@ -529,6 +586,7 @@ If file has 3 lines and you want to add "hello, world":
                 }
             }
         } else {
+            // For "exact", "fuzzy", and "substring" - search all lines
             for (let line = 1; line <= lines.length; line++) {
                 if (!this.matchStartAnchor(lines, startAnchor, line, quality, loose)) {
                     continue;
@@ -554,14 +612,14 @@ If file has 3 lines and you want to add "hello, world":
     private searchForSingleAnchor(
         lines: string[],
         anchor: LineAnchor,
-        quality: "exact" | "fuzzy" | "line_hint",
+        quality: "exact" | "fuzzy" | "substring" | "line_hint",
         loose: boolean,
     ): Array<{ line: number; preview: string }> {
         const candidates: Array<{ line: number; preview: string }> = [];
 
         if (quality === "line_hint") {
-            const searchStart = Math.max(1, anchor.line - 5);
-            const searchEnd = Math.min(lines.length, anchor.line + 5);
+            const searchStart = Math.max(1, anchor.line - 10);
+            const searchEnd = Math.min(lines.length, anchor.line + 10);
 
             for (let line = searchStart; line <= searchEnd; line++) {
                 if (this.matchStartAnchor(lines, anchor, line, quality, loose)) {
@@ -569,6 +627,7 @@ If file has 3 lines and you want to add "hello, world":
                 }
             }
         } else {
+            // For "exact", "fuzzy", and "substring" - search all lines
             for (let line = 1; line <= lines.length; line++) {
                 if (this.matchStartAnchor(lines, anchor, line, quality, loose)) {
                     candidates.push({ line, preview: lines[line - 1] || "" });
@@ -615,7 +674,15 @@ If file has 3 lines and you want to add "hello, world":
                 this.compareContextFuzzy(before, anchor.before, loose) &&
                 this.compareContextFuzzy(after, anchor.after, loose)
             );
+        } else if (quality === "substring") {
+            // Substring matching for end anchor
+            return (
+                containsOrContained(line, anchor.text, 15) &&
+                this.compareContextFuzzy(before, anchor.before, loose) &&
+                this.compareContextFuzzy(after, anchor.after, loose)
+            );
         } else {
+            // line_hint - just check text similarity without context
             return compareLines(line, anchor.text, true);
         }
     }
@@ -656,7 +723,16 @@ If file has 3 lines and you want to add "hello, world":
                 this.compareContextFuzzy(before, anchor.before, loose) &&
                 this.compareContextFuzzy(after, anchor.after, loose)
             );
+        } else if (quality === "substring") {
+            // Substring matching: check if anchor text is contained in line or vice versa
+            // This helps when LLMs provide partial/truncated text
+            return (
+                containsOrContained(line, anchor.text, 15) &&
+                this.compareContextFuzzy(before, anchor.before, loose) &&
+                this.compareContextFuzzy(after, anchor.after, loose)
+            );
         } else {
+            // line_hint - just check text similarity without context
             return compareLines(line, anchor.text, true);
         }
     }

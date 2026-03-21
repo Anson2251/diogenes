@@ -36,6 +36,7 @@ interface CLIOptions {
     verbose?: boolean;
     maxIterations?: number;
     socratic?: boolean;
+    interactive?: boolean;
 }
 
 /**
@@ -69,6 +70,8 @@ function parseArgs(): { task?: string; options: CLIOptions } {
             options.verbose = true;
         } else if (arg === "--socratic" || arg === "-s") {
             options.socratic = true;
+        } else if (arg === "--interactive" || arg === "-I") {
+            options.interactive = true;
         } else if (arg === "--max-iterations" || arg === "-i") {
             options.maxIterations = parseInt(args[++i], 10);
         } else if (arg.startsWith("-")) {
@@ -114,6 +117,7 @@ ${colors.bright}Options:${colors.reset}
   -V, --verbose                 Enable verbose output
   -i, --max-iterations <n>      Maximum LLM iterations (default: 20)
   -s, --socratic                Socratic debug mode - you guide the agent
+  -I, --interactive             Start interactive mode
 
 ${colors.bright}Examples:${colors.reset}
   diogenes "List all TypeScript files in src directory"
@@ -661,10 +665,9 @@ async function main(): Promise<void> {
         }
     } else {
         // Check if interactive mode was explicitly requested
-        const args = process.argv.slice(2);
-        if (args.includes("--interactive")) {
+        if (options.interactive) {
             await interactiveMode(config, options);
-        } else if (args.includes("--socratic")) {
+        } else if (options.socratic) {
             console.error(
                 `${colors.red}Error: Task required for socratic mode.${colors.reset}`,
             );

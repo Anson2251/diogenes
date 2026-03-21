@@ -33,7 +33,6 @@ export interface ParseResult {
 }
 
 export function parseToolCalls(text: string): ParseResult {
-    console.log("Parsing", text)
   const blocks = extractToolCallBlocks(text);
 
   if (blocks.length === 0) {
@@ -87,6 +86,7 @@ function extractToolCallBlocks(text: string): string[] {
 
   let inBlock = false;
   let blockStartIndex = -1;
+  let heredocDelimiter: string | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
@@ -95,12 +95,28 @@ function extractToolCallBlocks(text: string): string[] {
       if (trimmed === '```tool-call' || trimmed === '```tool') {
         inBlock = true;
         blockStartIndex = i + 1;
+        heredocDelimiter = null;
       }
     } else {
-      if (trimmed === '```') {
-        const blockLines = lines.slice(blockStartIndex, i);
-        blocks.push(blockLines.join('\n'));
-        inBlock = false;
+      // Track heredoc state
+      if (heredocDelimiter === null) {
+        // Check if we're starting a heredoc
+        const heredocMatch = trimmed.match(/^<<<(\w+)$/);
+        if (heredocMatch) {
+          heredocDelimiter = heredocMatch[1];
+        } else if (trimmed === '```') {
+          // End of block (only if not in heredoc)
+          const blockLines = lines.slice(blockStartIndex, i);
+          blocks.push(blockLines.join('\n'));
+          inBlock = false;
+          heredocDelimiter = null;
+        }
+      } else {
+        // We're inside a heredoc - look for the closing delimiter
+        if (trimmed === heredocDelimiter) {
+          heredocDelimiter = null;
+        }
+        // Don't treat ``` as end of block while in heredoc
       }
     }
   }

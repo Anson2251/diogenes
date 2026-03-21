@@ -187,7 +187,7 @@ export async function executeTask(
             // Start streaming
             logger.streamStart();
 
-            const response = await llmClient.createChatCompletionStream(
+            const result = await llmClient.createChatCompletionStream(
                 messages,
                 (chunk) => logger.streamChunk(chunk),
                 {
@@ -200,10 +200,10 @@ export async function executeTask(
 
             messageList.push({
                 role: "assistant",
-                content: response,
+                content: result.content,
             });
 
-            const parseResult = parseToolCalls(response);
+            const parseResult = parseToolCalls(result.content);
 
             if (!parseResult.success) {
                 logger.warn(`Tool call parse error: ${parseResult.error?.message}`);

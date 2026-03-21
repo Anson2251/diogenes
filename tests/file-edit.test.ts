@@ -205,4 +205,223 @@ describe("FileEditTool", () => {
             expect(result.valid).toBe(true);
         });
     });
+
+    describe("execute - multiple edits", () => {
+        it("should apply multiple edits in sequence", async () => {
+            const result = await tool.execute({
+                path: multiLineFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "line 1",
+                                before: [],
+                                after: ["line 2"],
+                            },
+                        },
+                        content: ["LINE ONE"],
+                    },
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 3,
+                                text: "line 3",
+                                before: ["line 2"],
+                                after: ["line 4"],
+                            },
+                        },
+                        content: ["LINE THREE"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.data?.applied).toHaveLength(2);
+            const content = fs.readFileSync(multiLineFilePath, "utf-8");
+            expect(content).toContain("LINE ONE");
+            expect(content).toContain("LINE THREE");
+        });
+
+        it("should apply insert_before and insert_after in sequence", async () => {
+            const result = await tool.execute({
+                path: multiLineFilePath,
+                edits: [
+                    {
+                        mode: "insert_before",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "line 1",
+                                before: [],
+                                after: ["line 2"],
+                            },
+                        },
+                        content: ["inserted before line 1"],
+                    },
+                    {
+                        mode: "insert_after",
+                        anchor: {
+                            start: {
+                                line: 5,
+                                text: "line 5",
+                                before: ["line 4"],
+                                after: [],
+                            },
+                        },
+                        content: ["inserted after line 5"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.data?.applied).toHaveLength(2);
+            const content = fs.readFileSync(multiLineFilePath, "utf-8");
+            expect(content).toContain("inserted before line 1");
+            expect(content).toContain("inserted after line 5");
+        });
+
+        it("should handle multiple edits with overlapping line hints adjusted", async () => {
+            const result = await tool.execute({
+                path: multiLineFilePath,
+                edits: [
+                    {
+                        mode: "delete",
+                        anchor: {
+                            start: {
+                                line: 2,
+                                text: "line 2",
+                                before: ["line 1"],
+                                after: ["line 3"],
+                            },
+                        },
+                    },
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 4,
+                                text: "line 4",
+                                before: ["line 3"],
+                                after: ["line 5"],
+                            },
+                        },
+                        content: ["REPLACED LINE 4"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            const content = fs.readFileSync(multiLineFilePath, "utf-8");
+            expect(content).not.toContain("line 2");
+            expect(content).toContain("REPLACED LINE 4");
+        });
+
+        it("should apply multiple edits with multi-line content", async () => {
+            const result = await tool.execute({
+                path: testFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "Hello World",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: [
+                            "Line A",
+                            "Line B",
+                            "Line C",
+                        ],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            const content = fs.readFileSync(testFilePath, "utf-8");
+            expect(content).toBe("Line A\nLine B\nLine C\n");
+        });
+
+        it("should rollback all edits if one fails in atomic mode", async () => {
+            const originalContent = fs.readFileSync(multiLineFilePath, "utf-8");
+
+            const result = await tool.execute({
+                path: multiLineFilePath,
+                options: { atomic: true },
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "line 1",
+                                before: [],
+                                after: ["line 2"],
+                            },
+                        },
+                        content: ["REPLACED"],
+                    },
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 99,
+                                text: "non-existent",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(false);
+            const content = fs.readFileSync(multiLineFilePath, "utf-8");
+            expect(content).toBe(originalContent);
+        });
+
+        it("should apply partial edits when atomic: false", async () => {
+            const result = await tool.execute({
+                path: multiLineFilePath,
+                options: { atomic: false },
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "line 1",
+                                before: [],
+                                after: ["line 2"],
+                            },
+                        },
+                        content: ["REPLACED"],
+                    },
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 99,
+                                text: "non-existent",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            expect(result.data?.applied).toHaveLength(1);
+            expect(result.data?.errors).toHaveLength(1);
+            const content = fs.readFileSync(multiLineFilePath, "utf-8");
+            expect(content).toContain("REPLACED");
+        });
+    });
 });

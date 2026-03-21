@@ -71,6 +71,11 @@ export interface StreamChunk {
     content: string;
 }
 
+export interface StreamCompletionResult {
+    content: string;
+    reasoning: string;
+}
+
 export interface OpenAIErrorResponse {
     error: {
         message: string;
@@ -236,7 +241,7 @@ export class OpenAIClient {
         messages: OpenAIMessage[],
         onChunk: (chunk: StreamChunk) => void,
         options: Partial<OpenAICompletionRequest> = {},
-    ): Promise<string> {
+    ): Promise<StreamCompletionResult> {
         const request: OpenAICompletionRequest = {
             model: this.config.model,
             messages,
@@ -260,6 +265,7 @@ export class OpenAIClient {
         }, this.config.timeout);
 
         let fullContent = "";
+        let reasoning_text = ""
 
         try {
             const response = await fetch(
@@ -279,7 +285,7 @@ export class OpenAIClient {
 
             if (!response.ok) {
                 const errorData = await response.json() as OpenAIErrorResponse;
-                throw new Error(`OpenAI API error: ${errorData.error.message}`);
+                throw new Error(`OpenAI API error: ${JSON.stringify(errorData)}`);
             }
 
             if (!response.body) {
@@ -312,12 +318,18 @@ export class OpenAIClient {
                     try {
                         const parsed = JSON.parse(data) as OpenAIStreamChunk;
                         const delta = parsed.choices[0]?.delta;
-                        
+
                         if (delta?.reasoning_content) {
+                            reasoning_text += delta.reasoning_content
                             onChunk({ type: "reasoning", content: delta.reasoning_content });
                         }
-                        
+
                         if (delta?.content) {
+                            // NOTE: Reasoning is kept SEPARATE from output content.
+                            // It's emitted via onChunk for user visibility but NOT included
+                            // in the assistant's message. This prevents the LLM from seeing
+                            // reasoning-style text in its history and continuing to generate
+                            // reasoning instead of proper tool calls.
                             fullContent += delta.content;
                             onChunk({ type: "content", content: delta.content });
                         }
@@ -327,7 +339,10 @@ export class OpenAIClient {
                 }
             }
 
-            return fullContent;
+            return {
+                content: fullContent,
+                reasoning: reasoning_text.trim(),
+            };
         } catch (error) {
             clearTimeout(timeoutId);
 

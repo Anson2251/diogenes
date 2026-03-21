@@ -158,6 +158,38 @@ EOF
                 "But this is still content",
             ]);
         });
+
+        it("should handle heredoc with markdown code blocks containing triple backticks", () => {
+            const text = `\`\`\`tool-call
+[{"tool": "file.edit", "params": {"path": "README.md", "edits": [{"mode": "replace", "anchor": {"start": {"line": 1, "text": "old"}}, "content": {"$heredoc": "EOF"}}]}}]
+<<<EOF
+\`\`\`json
+[
+  {
+    "tool": "dir.list",
+    "params": {
+      "path": "src"
+    }
+  }
+]
+\`\`\`
+EOF
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls![0].params.edits[0].content).toEqual([
+                "\`\`\`json",
+                "[",
+                "  {",
+                '    "tool": "dir.list",',
+                '    "params": {',
+                '      "path": "src"',
+                "    }",
+                "  }",
+                "]",
+                "\`\`\`",
+            ]);
+        });
     });
 
     describe("mixed content", () => {
@@ -214,6 +246,197 @@ HEREDOC
                 "- `file.create` - Create a new file with content",
                 "- `file.overwrite` - Overwrite entire file content",
                 "- `file.append` - Append content to end of file",
+            ]);
+        });
+    });
+
+    describe("multiple edits with heredocs", () => {
+        it("should parse multiple edits each with their own heredoc", () => {
+            const text = `\`\`\`tool-call
+[
+    {
+        "tool": "file.edit",
+        "params": {
+            "path": "test.ts",
+            "edits": [
+                {
+                    "mode": "replace",
+                    "anchor": {"start": {"line": 1, "text": "old line 1"}},
+                    "content": {"$heredoc": "EDIT1"}
+                },
+                {
+                    "mode": "replace",
+                    "anchor": {"start": {"line": 5, "text": "old line 5"}},
+                    "content": {"$heredoc": "EDIT2"}
+                }
+            ]
+        }
+    }
+]
+<<<EDIT1
+new content for line 1
+another line
+EDIT1
+<<<EDIT2
+new content for line 5
+yet another line
+EDIT2
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(1);
+            expect(result.toolCalls![0].params.edits[0].content).toEqual([
+                "new content for line 1",
+                "another line",
+            ]);
+            expect(result.toolCalls![0].params.edits[1].content).toEqual([
+                "new content for line 5",
+                "yet another line",
+            ]);
+        });
+
+        it("should parse three edits with heredocs", () => {
+            const text = `\`\`\`tool-call
+[
+    {
+        "tool": "file.edit",
+        "params": {
+            "path": "src/main.ts",
+            "edits": [
+                {"mode": "insert_before", "anchor": {"start": {"line": 1, "text": "import"}}, "content": {"$heredoc": "A"}},
+                {"mode": "replace", "anchor": {"start": {"line": 10, "text": "const x = 1;"}}, "content": {"$heredoc": "B"}},
+                {"mode": "insert_after", "anchor": {"start": {"line": 20, "text": "export"}}, "content": {"$heredoc": "C"}}
+            ]
+        }
+    }
+]
+<<<A
+// Header comment
+// Author: test
+A
+<<<B
+const x = 42;
+const y = 100;
+B
+<<<C
+
+// End of file
+C
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls![0].params.edits[0].content).toEqual([
+                "// Header comment",
+                "// Author: test",
+            ]);
+            expect(result.toolCalls![0].params.edits[1].content).toEqual([
+                "const x = 42;",
+                "const y = 100;",
+            ]);
+            expect(result.toolCalls![0].params.edits[2].content).toEqual([
+                "",
+                "// End of file",
+            ]);
+        });
+
+        it("should handle multiple edits with mixed content types", () => {
+            const text = `\`\`\`tool-call
+[
+    {
+        "tool": "file.edit",
+        "params": {
+            "path": "mixed.ts",
+            "edits": [
+                {"mode": "replace", "anchor": {"start": {"line": 1, "text": "old"}}, "content": ["simple", "array"]},
+                {"mode": "replace", "anchor": {"start": {"line": 5, "text": "old2"}}, "content": {"$heredoc": "HEREDOC"}},
+                {"mode": "delete", "anchor": {"start": {"line": 10, "text": "delete me"}}}
+            ]
+        }
+    }
+]
+<<<HEREDOC
+heredoc content here
+with multiple lines
+HEREDOC
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls![0].params.edits[0].content).toEqual(["simple", "array"]);
+            expect(result.toolCalls![0].params.edits[1].content).toEqual([
+                "heredoc content here",
+                "with multiple lines",
+            ]);
+            expect(result.toolCalls![0].params.edits[2].mode).toBe("delete");
+            expect(result.toolCalls![0].params.edits[2].content).toBeUndefined();
+        });
+
+        it("should parse multiple file.edit tool calls with heredocs", () => {
+            const text = `\`\`\`tool-call
+[
+    {
+        "tool": "file.edit",
+        "params": {
+            "path": "file1.ts",
+            "edits": [{"mode": "replace", "anchor": {"start": {"line": 1, "text": "old"}}, "content": {"$heredoc": "FILE1"}}]
+        }
+    },
+    {
+        "tool": "file.edit",
+        "params": {
+            "path": "file2.ts",
+            "edits": [{"mode": "replace", "anchor": {"start": {"line": 1, "text": "old"}}, "content": {"$heredoc": "FILE2"}}]
+        }
+    }
+]
+<<<FILE1
+content for file1
+FILE1
+<<<FILE2
+content for file2
+FILE2
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(2);
+            expect(result.toolCalls![0].params.path).toBe("file1.ts");
+            expect(result.toolCalls![0].params.edits[0].content).toEqual(["content for file1"]);
+            expect(result.toolCalls![1].params.path).toBe("file2.ts");
+            expect(result.toolCalls![1].params.edits[0].content).toEqual(["content for file2"]);
+        });
+
+        it("should handle heredocs with complex content including code", () => {
+            const text = `\`\`\`tool-call
+[
+    {
+        "tool": "file.edit",
+        "params": {
+            "path": "code.ts",
+            "edits": [
+                {
+                    "mode": "replace",
+                    "anchor": {"start": {"line": 10, "text": "function old() {"}},
+                    "content": {"$heredoc": "NEWFUNC"}
+                }
+            ]
+        }
+    }
+]
+<<<NEWFUNC
+function newFunction(arg1: string, arg2: number): void {
+    const x = "test with \\"quotes\\"";
+    const y = \`template \${literal}\`;
+    console.log(arg1, arg2, x, y);
+}
+NEWFUNC
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls![0].params.edits[0].content).toEqual([
+                'function newFunction(arg1: string, arg2: number): void {',
+                '    const x = "test with \\"quotes\\"";',
+                '    const y = `template ${literal}`;',
+                '    console.log(arg1, arg2, x, y);',
+                '}',
             ]);
         });
     });
