@@ -89,9 +89,9 @@ Edit format:
     "anchor": {
       "start": {
         "line": 10,                          // Line number (1-indexed, must exist)
-        "text": "const x = 1;",              // EXACT text of the line
-        "before": ["line 9", "line 8"],      // 2 lines before anchor (optional)
-        "after": ["line 11", "line 12"]      // 2 lines after anchor (optional)
+        "text": "const x = 1;",              // COMPLETE EXACT text of the line
+        "before": ["line 9", "line 8"],      // 2 exact lines before anchor (optional)
+        "after": ["line 11", "line 12"]      // 2 exact lines after anchor (optional)
       },
       "end": { /* same as start */ }         // Required for "replace" and "delete"
     },
@@ -701,7 +701,6 @@ If file has 3 lines and you want to add "hello, world":
         lines: string[],
         edit: Edit,
     ): Array<{ line: number; preview: string }> {
-        const loose = this.isLooseWhitespace(lines[0] || "");
         const anchorText = edit.anchor.start.text;
         const hintLine = edit.anchor.start.line;
 
@@ -781,12 +780,10 @@ If file has 3 lines and you want to add "hello, world":
         for (const { matchResult } of validEdits) {
             const { start, end } = matchResult.matchedRange;
             let overlapFound = false;
-            let overlapStart = -1;
 
             for (let line = start; line <= end; line++) {
                 if (modified[line]) {
                     if (!overlapFound) {
-                        overlapStart = line;
                         overlapFound = true;
                     }
                 }

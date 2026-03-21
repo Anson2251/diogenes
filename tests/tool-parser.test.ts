@@ -30,6 +30,38 @@ describe("parseToolCalls", () => {
             expect(result.success).toBe(true);
             expect(result.toolCalls).toHaveLength(2);
         });
+
+        it("should parse todo.set with multiple items", () => {
+            const text = `\`\`\`tool-call
+[
+    {
+        "tool": "todo.set",
+        "params": {
+            "items": [
+                {"text": "Explore src structure and main files", "state": "active"},
+                {"text": "Check examples for consistency", "state": "pending"},
+                {"text": "Identify discrepancies between README and codebase", "state": "pending"},
+                {"text": "Update README accordingly", "state": "pending"}
+            ]
+        }
+    }
+]
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(1);
+            expect(result.toolCalls![0].tool).toBe("todo.set");
+            expect(result.toolCalls![0].params.items).toHaveLength(4);
+        });
+
+        it("should parse ```tool as alias for ```tool-call", () => {
+            const text = `\`\`\`tool
+[{"tool": "file.load", "params": {"path": "test.ts"}}]
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(1);
+        });
     });
 
     describe("heredoc parsing", () => {

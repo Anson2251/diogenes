@@ -4,13 +4,13 @@
 
 import { ToolCall, ToolResult } from "../types";
 
-// Valid tool names for validation
 const VALID_TOOL_NAMES = new Set([
   "dir.list",
   "dir.unload",
   "file.load",
   "file.unload",
   "file.edit",
+  "file.peek",
   "file.create",
   "file.overwrite",
   "file.append",
@@ -32,34 +32,22 @@ export interface ParseResult {
   };
 }
 
-/**
- * Parse tool calls from LLM response.
- * Returns a result object with success status instead of throwing.
- * 
- * Supports heredoc syntax for content fields:
- * {"content": {"$heredoc": "EOF"}}
- * <<<EOF
- * actual content here
- * EOF
- */
 export function parseToolCalls(text: string): ParseResult {
-  const toolCallRegex = /```tool-call\s*([\s\S]*?)\n```\n\n|```tool-call\s*([\s\S]*?)\n```\s*$/g;
-  const matches = [...text.matchAll(toolCallRegex)];
-  
-  if (matches.length === 0) {
+    console.log("Parsing", text)
+  const blocks = extractToolCallBlocks(text);
+
+  if (blocks.length === 0) {
     return { success: true, toolCalls: [] };
   }
 
   const allToolCalls: ToolCall[] = [];
   const errors: string[] = [];
 
-  for (const match of matches) {
-    const blockContent = (match[1] || match[2] || '').trim();
-
+  for (const block of blocks) {
     try {
-      const { jsonContent, heredocs } = extractHeredocs(blockContent);
+      const { jsonContent, heredocs } = extractHeredocs(block);
       const parsed = JSON.parse(jsonContent);
-      
+
       if (!Array.isArray(parsed)) {
         errors.push(`Tool calls must be an array, got: ${typeof parsed}`);
         continue;
@@ -85,7 +73,7 @@ export function parseToolCalls(text: string): ParseResult {
       error: {
         code: "PARSE_ERROR",
         message: errors.join("; "),
-        suggestion: "Ensure tool-call block contains valid JSON array with 'tool' and 'params' fields",
+        suggestion: "Ensure tool-call block contains valid JSON array with 'tool' and 'params' fields, and try to write smaller tool-call blocks. Heredoc can be used to simplify large editing blocks",
       },
     };
   }
@@ -93,58 +81,70 @@ export function parseToolCalls(text: string): ParseResult {
   return { success: true, toolCalls: allToolCalls };
 }
 
+function extractToolCallBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const lines = text.split('\n');
+
+  let inBlock = false;
+  let blockStartIndex = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+
+    if (!inBlock) {
+      if (trimmed === '```tool-call' || trimmed === '```tool') {
+        inBlock = true;
+        blockStartIndex = i + 1;
+      }
+    } else {
+      if (trimmed === '```') {
+        const blockLines = lines.slice(blockStartIndex, i);
+        blocks.push(blockLines.join('\n'));
+        inBlock = false;
+      }
+    }
+  }
+
+  return blocks;
+}
+
 interface HeredocContent {
   delimiter: string;
   lines: string[];
 }
 
-/**
- * Extract heredoc sections from block content.
- * Format:
- *   [json array]
- *   <<<DELIMITER
- *   content line 1
- *   content line 2
- *   DELIMITER
- */
 function extractHeredocs(blockContent: string): { jsonContent: string; heredocs: Map<string, HeredocContent> } {
   const heredocs = new Map<string, HeredocContent>();
-  
   const lines = blockContent.split('\n');
   const jsonLines: string[] = [];
-  const heredocStartRegex = /^<<<(\w+)$/;
-  
+
   let i = 0;
-  let inJson = true;
-  
+
   while (i < lines.length) {
     const line = lines[i];
-    
-    if (inJson) {
-      const startMatch = line.match(heredocStartRegex);
-      if (startMatch) {
-        inJson = false;
-        const delimiter = startMatch[1];
-        const heredocLines: string[] = [];
-        i++;
-        
-        while (i < lines.length) {
-          if (lines[i].trim() === delimiter) {
-            heredocs.set(delimiter, { delimiter, lines: heredocLines });
-            i++;
-            inJson = true;
-            break;
-          }
-          heredocLines.push(lines[i]);
+    const trimmed = line.trim();
+    const heredocMatch = trimmed.match(/^<<<(\w+)$/);
+
+    if (heredocMatch) {
+      const delimiter = heredocMatch[1];
+      const heredocLines: string[] = [];
+      i++;
+
+      while (i < lines.length) {
+        if (lines[i].trim() === delimiter) {
+          heredocs.set(delimiter, { delimiter, lines: heredocLines });
           i++;
+          break;
         }
-        continue;
+        heredocLines.push(lines[i]);
+        i++;
       }
+    } else {
       jsonLines.push(line);
+      i++;
     }
-    i++;
   }
-  
+
   return { jsonContent: jsonLines.join('\n').trim(), heredocs };
 }
 
@@ -162,13 +162,13 @@ function resolveHeredocsInObject(obj: unknown, heredocs: Map<string, HeredocCont
   if (obj === null || typeof obj !== 'object') {
     return obj;
   }
-  
+
   if (Array.isArray(obj)) {
     return obj.map(item => resolveHeredocsInObject(item, heredocs));
   }
-  
+
   const record = obj as Record<string, unknown>;
-  
+
   if (typeof record['$heredoc'] === 'string') {
     const delimiter = record['$heredoc'];
     const heredoc = heredocs.get(delimiter);
@@ -177,7 +177,7 @@ function resolveHeredocsInObject(obj: unknown, heredocs: Map<string, HeredocCont
     }
     throw new Error(`Heredoc '${delimiter}' not found. Make sure the heredoc is defined in the tool-call block.`);
   }
-  
+
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(record)) {
     result[key] = resolveHeredocsInObject(value, heredocs);
@@ -189,25 +189,25 @@ function validateToolCall(toolCall: unknown): { valid: boolean; error?: string }
   if (!toolCall || typeof toolCall !== "object") {
     return { valid: false, error: "Tool call must be an object" };
   }
-  
+
   const tc = toolCall as Record<string, unknown>;
-  
+
   if (!tc.tool || typeof tc.tool !== "string") {
     return { valid: false, error: "Tool call missing required 'tool' field (string)" };
   }
-  
+
   if (!VALID_TOOL_NAMES.has(tc.tool)) {
     const validNames = Array.from(VALID_TOOL_NAMES).slice(0, 5).join(", ");
-    return { 
-      valid: false, 
-      error: `Unknown tool: '${tc.tool}'. Valid tools: ${validNames}...` 
+    return {
+      valid: false,
+      error: `Unknown tool: '${tc.tool}'. Valid tools: ${validNames}...`
     };
   }
-  
+
   if (!tc.params || typeof tc.params !== "object") {
     return { valid: false, error: `Tool '${tc.tool}' missing required 'params' field (object)` };
   }
-  
+
   return { valid: true };
 }
 
@@ -216,21 +216,21 @@ function validateToolCall(toolCall: unknown): { valid: boolean; error?: string }
  */
 export function formatParseError(error: ParseResult['error']): string {
   if (!error) return "";
-  
+
   const lines = [
     "[PARSE ERROR]",
     "---",
     `Code: ${error.code}`,
     `Message: ${error.message}`,
   ];
-  
+
   if (error.suggestion) {
     lines.push(`Suggestion: ${error.suggestion}`);
   }
-  
+
   lines.push("---");
   lines.push("Please fix the tool-call format and try again.");
-  
+
   return lines.join("\n");
 }
 
@@ -239,16 +239,16 @@ export function formatParseError(error: ParseResult['error']): string {
  * Provides structured, actionable feedback instead of raw JSON
  */
 export function formatToolResults(toolCalls: ToolCall[], results: ToolResult[]): string {
-    const parts: string[] = [];
+    const parts: string[] = ["===== TOOL RESULTS"];
 
     for (let i = 0; i < toolCalls.length; i++) {
         const toolCall = toolCalls[i];
         const result = results[i];
-        
+
         if (result.data?._skipped) {
             continue;
         }
-        
+
         const formatted = formatSingleToolResult(toolCall, result);
         parts.push(formatted);
 
@@ -267,7 +267,7 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
     if (result.success) {
         lines.push(`[OK] ${toolName}`);
         lines.push("---");
-        
+
         switch (toolName) {
             case "file.load": {
                 const data = result.data!;
@@ -347,14 +347,14 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
         lines.push("---");
         lines.push(`Code: ${result.error?.code}`);
         lines.push(`Message: ${result.error?.message}`);
-        
+
         if (result.error?.details) {
             lines.push("Details:");
             for (const [key, value] of Object.entries(result.error.details)) {
                 lines.push(`  ${key}: ${JSON.stringify(value)}`);
             }
         }
-        
+
         if (result.error?.suggestion) {
             lines.push(`Suggestion: ${result.error.suggestion}`);
         }
