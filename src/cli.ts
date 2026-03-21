@@ -8,7 +8,7 @@
 import { config } from "dotenv";
 config();
 
-import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, parseToolCalls } from "./index";
+import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, parseToolCalls, formatToolResults } from "./index";
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
@@ -584,13 +584,11 @@ ${colors.bright}Multiline:${colors.reset}
         try {
             const results = await diogenes.executeToolCalls(toolCalls);
 
+            const formatted = formatToolResults(toolCalls, results);
+            console.log(formatted);
+
             for (let i = 0; i < toolCalls.length; i++) {
                 const toolCall = toolCalls[i];
-                const result = results[i];
-
-                const formatted = diogenes.formatToolResult(toolCall.tool, result);
-                console.log(formatted);
-
                 if (toolCall.tool === "task.end") {
                     console.log(`\n${colors.green}${colors.bright}Task ended by user!${colors.reset}`);
                     console.log(`${colors.dim}Reason: ${toolCall.params?.reason || "No reason"}${colors.reset}`);

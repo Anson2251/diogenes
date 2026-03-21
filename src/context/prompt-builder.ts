@@ -211,7 +211,7 @@ export class PromptBuilder {
                 for (let i = 0; i < rangeLines.length; i++) {
                     const lineNum = range.start + i;
                     const line = rangeLines[i];
-                    parts.push(`${lineNum.toString().padStart(3)} | ${line}`);
+                    parts.push(`${lineNum.toString().padStart(3)} ${line.length > 0 ? "" : "<EMPTY LINE> "}| ${line}`);
                 }
 
                 currentLine = range.end + 1;

@@ -190,6 +190,53 @@ EOF
                 "\`\`\`",
             ]);
         });
+
+        it("should handle complex heredoc with nested markdown code blocks and tool-call markers", () => {
+            const text = `\`\`\`tool-call
+[{"tool": "file.edit", "params": {"path": "README.md", "edits": [{"mode": "replace", "anchor": {"start": {"line": 1, "text": "old"}}, "content": {"$heredoc": "EOF"}}]}}]
+<<<EOF
+## Example Session
+
+**LLM Response 1:**
+\`\`\`
+I'll start by exploring the project structure.
+
+\`\`\`tool-call
+[
+  {
+    "tool": "dir.list",
+    "params": {
+      "path": "src"
+    }
+  }
+]
+\`\`\`
+\`\`\`
+
+**LLM Response 2:**
+\`\`\`
+Task completed.
+
+\`\`\`tool-call
+[
+  {
+    "tool": "task.end",
+    "params": {
+      "reason": "Done"
+    }
+  }
+]
+\`\`\`
+\`\`\`
+EOF
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls![0].params.edits[0].content).toContain("## Example Session");
+            expect(result.toolCalls![0].params.edits[0].content).toContain("\`\`\`tool-call");
+            expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "dir.list",');
+            expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "task.end",');
+        });
     });
 
     describe("mixed content", () => {

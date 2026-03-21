@@ -100,7 +100,7 @@ The triple backticks (\`\`\`) and tool-call label are REQUIRED. Without them, to
 
 1. **Sequential Execution**: Tools in a batch run one-by-one in order. Later tools see state changes from earlier ones
 2. **No Short-Circuit**: If a tool fails, subsequent tools still execute. Each tool gets its own result
-3. **Workspace Updates**: After each tool, workspace state updates immediately. A \`file.edit\` followed by \`file.load\` will see the edited content
+3. **Workspace Updates**: After each tool, workspace state updates immediately.
 4. **Result Format**: Each tool returns \`[OK]\` or \`[ERROR]\` with details. Check results to know what succeeded/failed
 5. **Error Handling**: When a tool fails, read the error message and suggestion, then retry with corrected parameters
 

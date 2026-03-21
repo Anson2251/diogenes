@@ -7,7 +7,7 @@ import { PromptBuilder } from "./prompt-builder";
 import { ToolRegistry } from "../tools";
 import { BaseTool } from "../tools/base-tool";
 import { OpenAIClient, StreamChunk } from "../llm/openai-client";
-import { TRON } from '@tron-format/tron';
+
 import {
     DiogenesConfig,
     DiogenesState,
@@ -312,14 +312,7 @@ export class DiogenesContextManager {
         return this.promptBuilder.assembleContextSections(sections);
     }
 
-    formatToolResult(toolName: string, result: ToolResult): string {
-        if (result.success) {
-            return `=========TOOL RESULT: ${toolName}\n${TRON.stringify(result.data)}\n=========`;
-        } else {
-            const error = result.error!;
-            return `=========TOOL ERROR: ${toolName}\nError: ${error.code}\nMessage: ${error.message}\n${error.details ? TRON.stringify(error.details) + "\n" : ""}${error.suggestion ? "Suggestion: " + error.suggestion + "\n" : ""}=========`;
-        }
-    }
+
 
     // ==================== State Accessors ====================
 

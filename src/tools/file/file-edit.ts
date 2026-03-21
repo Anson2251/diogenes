@@ -236,7 +236,7 @@ EOF
                         })),
                         appliedCount: 0,
                     },
-                    "Fix the anchor issues or set atomic: false for partial application",
+                    "Fix the anchor issues or set atomic: false for partial application. To view the exact content again, use tool `file.peek` instead of `file.load`",
                 );
             }
 
@@ -324,7 +324,6 @@ EOF
 
                 // Unload and reload with adjusted ranges
                 this.workspace.unloadFile(filePath);
-                console.error(`[DEBUG file-edit] Reloading ${filePath} with ranges:`, JSON.stringify(updatedRanges));
                 const newEntry = await this.workspace.reloadFileWithRangesContent(
                     filePath,
                     newContent,
@@ -333,8 +332,6 @@ EOF
 
                 if (newEntry) {
                     totalLinesInWorkspace = newEntry.content.length;
-                    console.error(`[DEBUG file-edit] Reloaded entry ranges:`, JSON.stringify(newEntry.ranges));
-                    console.error(`[DEBUG file-edit] First 3 lines of content:`, JSON.stringify(newEntry.content.slice(0, 3)));
                 }
             }
 
@@ -406,7 +403,7 @@ EOF
 Expected: "${edit.anchor.start.text.slice(0, 80)}${edit.anchor.start.text.length > 80 ? '...' : ''}"
 
 TROUBLESHOOTING:
-1. Verify you copied the EXACT text from the file (use file.load to read it)
+1. Verify whether you copied the EXACT text from the file again (use file.peek to read it)
 2. Include "before" and "after" context fields to help locate the line
 3. Check if the file has been modified since you last read it`;
                 } else if (candidates.length === 1) {
@@ -650,8 +647,8 @@ TROUBLESHOOTING:
 
         const beforeStart = lineNum - 2;
         const beforeEnd = lineNum - 1;
-        const afterStart = lineNum;
-        const afterEnd = lineNum + 1;
+        const afterStart = lineNum + 1;
+        const afterEnd = lineNum + 2;
 
         const before = [
             beforeStart >= 1 ? lines[beforeStart - 1] : "",
@@ -699,8 +696,8 @@ TROUBLESHOOTING:
 
         const beforeStart = lineNum - 2;
         const beforeEnd = lineNum - 1;
-        const afterStart = lineNum;
-        const afterEnd = lineNum + 1;
+        const afterStart = lineNum + 1;
+        const afterEnd = lineNum + 2;
 
         const before = [
             beforeStart >= 1 ? lines[beforeStart - 1] : "",

@@ -15,13 +15,29 @@ export class FilePeekTool extends BaseTool {
         super({
             namespace: "file",
             name: "peek",
-            description: "Quick preview of file (max 10 lines) without loading into workspace. Use file.load instead for full context awareness.",
+            description: `Quick preview of file content WITHOUT loading into workspace.
+
+USE THIS WHEN:
+- Verifying exact line content before editing (find anchors)
+- Checking content outside your currently loaded range
+- Scouting for the right lines to edit
+
+DO NOT USE WHEN:
+- You need the content available for editing (use file.load instead)
+- You want to load large portions of the file (use file.load instead)
+
+This tool is lightweight and doesn't affect your workspace context.`,
             params: {
                 path: { type: "string", description: "File path to peek" },
                 start: {
                     type: "number",
                     optional: true,
                     description: "Start line (1-indexed, default: 1)",
+                },
+                end: {
+                    type: "number",
+                    optional: true,
+                    description: "End line (optional, max 30 lines from start if not specified)",
                 },
             },
             returns: {
@@ -44,9 +60,10 @@ export class FilePeekTool extends BaseTool {
             );
         }
 
-        const { path: filePath, start } = validation.data as {
+        const { path: filePath, start, end } = validation.data as {
             path: string;
             start?: number;
+            end?: number;
         };
 
         try {
@@ -57,8 +74,16 @@ export class FilePeekTool extends BaseTool {
             const totalLines = allLines.length;
 
             const startLine = Math.max(1, start || 1);
-            const maxLines = 10;
-            const endLine = Math.min(startLine + maxLines - 1, totalLines);
+            const maxLines = 30;
+
+            let endLine: number;
+            if (end !== undefined) {
+                endLine = Math.min(end, startLine + maxLines - 1);
+            } else {
+                endLine = Math.min(startLine + maxLines - 1, totalLines);
+            }
+            endLine = Math.max(endLine, startLine);
+            endLine = Math.min(endLine, totalLines);
 
             if (startLine > totalLines) {
                 return this.error(
@@ -69,19 +94,19 @@ export class FilePeekTool extends BaseTool {
                 );
             }
 
-            const lines = allLines.slice(startLine - 1, endLine).map(l => l.replace(/\r$/, ""));
+            const lines = allLines.map((l, i) => `${i+1} ${l.length > 0 ? "" : "<EMPTY LINE> "}| ${l}`).slice(startLine - 1, endLine).map(l => l.replace(/\r$/, ""));
 
             return this.success({
                 lines,
                 total_lines: totalLines,
                 preview_range: [startLine, endLine],
-                _note: "Peek does not load file into workspace. Use file.load for context-aware editing.",
+                _note: "Peeked content not loaded into workspace. Use file.load to load for editing.",
             });
         } catch (error) {
             return this.error(
                 "FILE_ERROR",
                 `Failed to peek file ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
-                { path: filePath, start },
+                { path: filePath, start, end },
                 "Check if the file exists and is readable",
             );
         }
@@ -100,15 +125,10 @@ export class FilePeekTool extends BaseTool {
             const lines = result.data.lines as string[];
             const [start, end] = result.data.preview_range as [number, number];
             const total = result.data.total_lines as number;
+            const formatted = lines.join("\n");
 
-            const padWidth = String(end).length;
-            const formatted = lines.map((line, i) => {
-                const lineNum = String(start + i).padStart(padWidth, " ");
-                return `${lineNum}| ${line}`;
-            }).join("\n");
-
-            const warning = "\n\x1b[33m⚠ Not loaded into workspace. Use file.load for editing.\x1b[0m";
-            return `\x1b[32m✓\x1b[0m Peeking lines ${start}-${end} of ${total}:\n${formatted}${warning}`;
+            const warning = "\n\x1b[33m⚠ Peeked content not loaded into workspace. Use file.load to load for editing.\x1b[0m";
+            return `\x1b[32m✓\x1b[0m Peeked lines ${start}-${end} of ${total}:\n${formatted}${warning}`;
         }
         return undefined;
     }
