@@ -47,7 +47,7 @@ The key difference is **agency**: Diogenes gives the LLM direct control over its
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/diogenes.git
+git clone https://github.com/Anson2251/diogenes.git
 cd diogenes
 
 # Install dependencies
