@@ -8,7 +8,7 @@
 import { config } from "dotenv";
 config();
 
-import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, parseToolCalls, formatToolResults } from "./index";
+import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, formatToolResults } from "./index";
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
