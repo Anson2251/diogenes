@@ -229,7 +229,7 @@ EOF
             const result = parseToolCalls(text);
             expect(result.success).toBe(true);
             expect(result.toolCalls![0].params.edits[0].content).toEqual([
-                "\`\`\`json",
+                "```json",
                 "[",
                 "  {",
                 '    "tool": "dir.list",',
@@ -238,7 +238,7 @@ EOF
                 "    }",
                 "  }",
                 "]",
-                "\`\`\`",
+                "```",
             ]);
         });
 
@@ -284,7 +284,7 @@ EOF
             const result = parseToolCalls(text);
             expect(result.success).toBe(true);
             expect(result.toolCalls![0].params.edits[0].content).toContain("## Example Session");
-            expect(result.toolCalls![0].params.edits[0].content).toContain("\`\`\`tool-call");
+            expect(result.toolCalls![0].params.edits[0].content).toContain("```tool-call");
             expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "dir.list",');
             expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "task.end",');
         });

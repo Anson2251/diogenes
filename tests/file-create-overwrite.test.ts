@@ -34,6 +34,16 @@ describe("FileCreateTool and FileOverwriteTool", () => {
         expect(fs.readFileSync(path.join(testDir, "created.txt"), "utf-8")).toBe("line 1\nline 2");
     });
 
+    it("should create nested files from string content", async () => {
+        const result = await createTool.execute({
+            path: "nested/deep/created.txt",
+            content: "alpha\nbeta",
+        });
+
+        expect(result.success).toBe(true);
+        expect(fs.readFileSync(path.join(testDir, "nested", "deep", "created.txt"), "utf-8")).toBe("alpha\nbeta");
+    });
+
     it("should reject file.create when file already exists", async () => {
         const result = await createTool.execute({
             path: "existing.txt",
@@ -62,9 +72,31 @@ describe("FileCreateTool and FileOverwriteTool", () => {
         expect(entry?.ranges).toEqual([{ start: 1, end: 2 }]);
     });
 
+    it("should reject file.create with invalid content type", async () => {
+        const result = await createTool.execute({
+            path: "bad.txt",
+            content: { bad: true },
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("INVALID_PARAM");
+    });
+
     it("should reject file.overwrite when file does not exist", async () => {
         const result = await overwriteTool.execute({
             path: "missing.txt",
+            content: ["new content"],
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("FILE_OVERWRITE_ERROR");
+    });
+
+    it("should reject file.overwrite when path is a directory", async () => {
+        fs.mkdirSync(path.join(testDir, "dir-target"), { recursive: true });
+
+        const result = await overwriteTool.execute({
+            path: "dir-target",
             content: ["new content"],
         });
 

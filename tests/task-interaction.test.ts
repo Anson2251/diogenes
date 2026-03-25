@@ -29,6 +29,43 @@ describe("Task interaction tools", () => {
         expect(result.data?.selection).toBe("beta");
     });
 
+    it("should surface handler failures from task.ask", async () => {
+        askTool = new TaskAskTool(async () => {
+            throw new Error("stdin closed");
+        });
+
+        const result = await askTool.execute({ question: "Still there?" });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("INTERACTION_ERROR");
+        expect(result.error?.message).toContain("stdin closed");
+    });
+
+    it("should surface handler failures from task.choose", async () => {
+        chooseTool = new TaskChooseTool(async () => {
+            throw new Error("invalid selection");
+        });
+
+        const result = await chooseTool.execute({
+            question: "Pick one",
+            options: ["alpha", "beta"],
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("INTERACTION_ERROR");
+        expect(result.error?.message).toContain("invalid selection");
+    });
+
+    it("should reject non-string options for task.choose", async () => {
+        const result = await chooseTool.execute({
+            question: "Pick one",
+            options: ["alpha", 2] as unknown as string[],
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("INVALID_PARAM");
+    });
+
     it("should reject empty options for task.choose", async () => {
         const result = await chooseTool.execute({
             question: "Pick one",

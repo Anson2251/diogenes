@@ -37,6 +37,54 @@ describe("executeTask", () => {
         vi.restoreAllMocks();
     });
 
+    it("should throw when no llm client is configured", async () => {
+        await expect(
+            executeTask(
+                "missing llm",
+                {
+                    security: { workspaceRoot: process.cwd() },
+                },
+                {
+                    logger: new SilentLogger(),
+                },
+            ),
+        ).rejects.toThrow("LLM client not configured");
+    });
+
+    it("should execute a tool call and then complete on a later iteration", async () => {
+        const streamSpy = vi
+            .spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["first note"]}}]\n```',
+                reasoning: "",
+            })
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"completed after writing a note"}}]\n```',
+                reasoning: "",
+            });
+
+        const result = await executeTask(
+            "test task",
+            {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+                security: { workspaceRoot: process.cwd() },
+            },
+            {
+                maxIterations: 3,
+                logger: new SilentLogger(),
+            },
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.taskEnded).toBe(true);
+        expect(result.result).toBe("completed after writing a note");
+        expect(streamSpy).toHaveBeenCalledTimes(2);
+
+        const secondCallMessages = streamSpy.mock.calls[1]?.[0];
+        expect(secondCallMessages.at(-1)?.content).toContain("task.notepad");
+        expect(secondCallMessages.at(-1)?.content).toContain("Total notepad lines: 1");
+    });
+
     it("does not end the task when task.end validation fails", async () => {
         const streamSpy = vi
             .spyOn(OpenAIClient.prototype, "createChatCompletionStream")
@@ -65,5 +113,89 @@ describe("executeTask", () => {
         expect(result.taskEnded).toBe(true);
         expect(result.result).toBe("completed on retry");
         expect(streamSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("should retry after a tool-call parse error", async () => {
+        const streamSpy = vi
+            .spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"broken"}}]\n',
+                reasoning: "",
+            })
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"completed after parse retry"}}]\n```',
+                reasoning: "",
+            });
+
+        const result = await executeTask(
+            "test parse recovery",
+            {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+                security: { workspaceRoot: process.cwd() },
+            },
+            {
+                maxIterations: 2,
+                logger: new SilentLogger(),
+            },
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.result).toBe("completed after parse retry");
+        expect(streamSpy).toHaveBeenCalledTimes(2);
+
+        const retryMessage = streamSpy.mock.calls[1]?.[0].at(-1)?.content ?? "";
+        expect(retryMessage).toContain("[PARSE ERROR]");
+        expect(retryMessage).toContain("Unclosed tool-call block");
+    });
+
+    it("should stop after max iterations when no tool calls are produced", async () => {
+        const streamSpy = vi
+            .spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockResolvedValue({
+                content: "I will think more about this.",
+                reasoning: "",
+            });
+
+        const result = await executeTask(
+            "test no progress",
+            {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+                security: { workspaceRoot: process.cwd() },
+            },
+            {
+                maxIterations: 2,
+                logger: new SilentLogger(),
+            },
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.taskEnded).toBe(false);
+        expect(result.error).toContain("did not complete within 2 iterations");
+        expect(streamSpy).toHaveBeenCalledTimes(2);
+
+        const secondCallMessages = streamSpy.mock.calls[1]?.[0];
+        expect(secondCallMessages.at(-1)?.content).toContain("No tool calls received");
+    });
+
+    it("should surface llm client stream errors as task errors", async () => {
+        vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockRejectedValue(
+            new Error("upstream timeout"),
+        );
+
+        const result = await executeTask(
+            "test llm failure",
+            {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+                security: { workspaceRoot: process.cwd() },
+            },
+            {
+                maxIterations: 1,
+                logger: new SilentLogger(),
+            },
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.taskEnded).toBe(false);
+        expect(result.error).toBe("upstream timeout");
     });
 });
