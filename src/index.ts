@@ -74,8 +74,16 @@ export function createDiogenes(config?: DiogenesConfig) {
     contextManager.registerTool(new TodoUpdateTool(workspace));
     contextManager.registerTool(new TaskNotepadTool(workspace));
     if (configObj.security.interaction?.enabled ?? true) {
-        contextManager.registerTool(new TaskAskTool(createTerminalAskHandler()));
-        contextManager.registerTool(new TaskChooseTool(createTerminalChooseHandler()));
+        contextManager.registerTool(
+            new TaskAskTool(
+                config?.interactionHandlers?.ask ?? createTerminalAskHandler(),
+            ),
+        );
+        contextManager.registerTool(
+            new TaskChooseTool(
+                config?.interactionHandlers?.choose ?? createTerminalChooseHandler(),
+            ),
+        );
     }
     contextManager.registerTool(new TaskEndTool());
 

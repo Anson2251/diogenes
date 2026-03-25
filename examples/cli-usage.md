@@ -50,6 +50,23 @@ In interactive mode, you can:
 - Use `config` to see current configuration
 - Use `clear` to clear the screen
 - Use `exit` or `quit` to exit
+- Let the agent use `task.ask` and `task.choose` when it needs direct user input
+
+### Socratic Mode
+
+Start a guided manual session:
+
+```bash
+node ./bundle/cli.cjs --socratic "Debug the CLI input flow"
+```
+
+In socratic mode, you can:
+- Type single-line tool calls directly
+- Use `tool` or `/tool` to enter multi-line tool-call mode
+- Use `paste` or `/paste` to paste arbitrary multi-line text
+- Finish multi-line input with `..`
+- Use `tools`, `context`, `results`, and `task` to inspect state
+- Use `/help` and `/exit` as command aliases
 
 ## Configuration File
 

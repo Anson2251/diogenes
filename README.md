@@ -86,6 +86,18 @@ node dist/cli.js "List all files in the current directory"
 pnpm run dev
 ```
 
+5. Start an interactive session:
+
+```bash
+node dist/cli.js --interactive
+```
+
+6. Start socratic mode for guided manual control:
+
+```bash
+node dist/cli.js --socratic "Debug the failing test"
+```
+
 ## 4. Workspace Model
 
 Diogenes exposes its working state through explicit workspace sections:
@@ -125,8 +137,8 @@ The notepad is intended for short working memory. A typical pattern is:
 ### Task Tools
 
 - `task.notepad` - Keep short retained notes across unloads
-- `task.ask` - Ask the user a direct open question when blocked on missing input
-- `task.choose` - Ask the user to select from a small fixed set of options
+- `task.ask` - Ask the user a direct open question when blocked on missing input. In the CLI this is only available in `--interactive` mode.
+- `task.choose` - Ask the user to select from a small fixed set of options. In the CLI this is only available in `--interactive` mode.
 - `task.end` - End the current task with a reason and summary
 
 ### Todo Tools
@@ -171,10 +183,30 @@ Relevant security options include:
 
 - `security.watch.enabled` - Enable or disable automatic workspace refresh from filesystem changes
 - `security.watch.debounceMs` - Debounce interval for filesystem-driven refresh
-- `security.interaction.enabled` - Enable or disable interactive tools such as `task.ask` and `task.choose`
+- `security.interaction.enabled` - Enable or disable interactive tools such as `task.ask` and `task.choose`. In the CLI they are still suppressed unless you run `--interactive`.
 - `security.shell.enabled` - Enable or disable shell execution
 
-## 8. Notes on File Editing
+## 8. CLI Modes
+
+### Interactive Mode
+
+`--interactive` is for repeated task execution in one terminal session.
+
+- Enter a task directly at the prompt
+- After one task ends, the session stays open and waits for the next task
+- `task.ask` and `task.choose` are only exposed in this mode
+
+### Socratic Mode
+
+`--socratic "task"` is for manually guiding the agent step by step.
+
+- Use `tools`, `context`, `results`, and `task` to inspect state
+- Use `tool` or `/tool` to enter multi-line tool-call mode
+- Use `paste` or `/paste` to paste arbitrary multi-line text
+- Finish multi-line input with `..` on its own line
+- Slash-prefixed commands such as `/help` and `/exit` are supported
+
+## 9. Notes on File Editing
 
 `file.edit` is the most precise file-writing tool, but it is also the most demanding:
 

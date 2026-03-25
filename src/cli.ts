@@ -14,6 +14,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml"
 import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
+import { parseSocraticToolInput } from "./utils/socratic-parser";
 
 // ANSI color codes for terminal output
 const colors = {
@@ -39,6 +40,8 @@ interface CLIOptions {
     socratic?: boolean;
     interactive?: boolean;
 }
+
+type QuestionFn = (prompt: string) => Promise<string>;
 
 /**
  * Parse command-line arguments
@@ -306,6 +309,24 @@ function createConfig(options: CLIOptions): DiogenesConfig {
     }
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
+    const interactiveToolsEnabled = options.interactive
+        ? (merged.security?.interaction?.enabled ?? DEFAULT_SECURITY_CONFIG.interaction.enabled)
+        : false;
+
+    merged.security = {
+        ...(merged.security || {}),
+        interaction: {
+            enabled: interactiveToolsEnabled,
+        },
+    };
+
+    if (!options.interactive) {
+        const note = "CLI note: task.ask and task.choose are unavailable in this session. Continue without interactive user questions.";
+        merged.systemPrompt = merged.systemPrompt
+            ? `${merged.systemPrompt}\n\n${note}`
+            : note;
+    }
+
     return merged as DiogenesConfig;
 }
 
@@ -322,6 +343,83 @@ function createLogger(options: CLIOptions): Logger {
     }
 
     return logger;
+}
+
+function createQuestionFn(rl: readline.Interface): QuestionFn {
+    return (prompt: string) =>
+        new Promise((resolve) => {
+            rl.question(prompt, resolve);
+        });
+}
+
+async function readTerminatedBlock(
+    question: QuestionFn,
+    linePrompt: string,
+    finishToken = "..",
+): Promise<string[]> {
+    const lines: string[] = [];
+
+    while (true) {
+        const line = await question(linePrompt);
+        if (line.trim() === finishToken) {
+            break;
+        }
+        lines.push(line);
+    }
+
+    return lines;
+}
+
+function hasUnbalancedBraces(text: string): boolean {
+    let depth = 0;
+    for (const char of text) {
+        if (char === "{") depth++;
+        if (char === "}") depth--;
+    }
+    return depth > 0;
+}
+
+function startsToolCallBlock(text: string): boolean {
+    const trimmed = text.trim().toLowerCase();
+    return trimmed === "```tool-call" || trimmed === "```tool";
+}
+
+function normalizeSocraticCommand(input: string): string {
+    return input.trim().replace(/^\//, "").toLowerCase();
+}
+
+async function readSocraticInput(
+    question: QuestionFn,
+): Promise<string> {
+    const initial = await question(`${colors.magenta}socratic>${colors.reset} `);
+    const trimmed = initial.trim();
+    const normalized = normalizeSocraticCommand(trimmed);
+
+    if (normalized === "paste") {
+        console.log(`${colors.dim}  paste mode enabled; paste content, then enter '..' to finish${colors.reset}`);
+        const lines = await readTerminatedBlock(question, `${colors.dim}> ${colors.reset}`);
+        return lines.join("\n");
+    }
+
+    if (normalized === "tool") {
+        console.log(`${colors.dim}  tool mode enabled; enter tool-call content, then enter '..' to finish${colors.reset}`);
+        const lines = await readTerminatedBlock(question, `${colors.dim}> ${colors.reset}`);
+        return lines.join("\n");
+    }
+
+    if (startsToolCallBlock(initial)) {
+        console.log(`${colors.dim}  continuing tool-call block; enter '..' to finish if needed${colors.reset}`);
+        const lines = await readTerminatedBlock(question, `${colors.dim}> ${colors.reset}`);
+        return [initial, ...lines].join("\n");
+    }
+
+    if (hasUnbalancedBraces(initial)) {
+        console.log(`${colors.dim}  multiline JSON detected; enter '..' to finish${colors.reset}`);
+        const lines = await readTerminatedBlock(question, `${colors.dim}> ${colors.reset}`);
+        return [initial, ...lines].join("\n");
+    }
+
+    return initial;
 }
 
 /**
@@ -371,10 +469,33 @@ async function interactiveMode(
         `${colors.dim}Type 'help' for available commands${colors.reset}\n`,
     );
 
-    const question = (prompt: string): Promise<string> => {
-        return new Promise((resolve) => {
-            rl.question(prompt, resolve);
-        });
+    const question = createQuestionFn(rl);
+
+    const interactiveConfig: DiogenesConfig = {
+        ...config,
+        interactionHandlers: {
+            ask: async (prompt: string) => question(`\n${colors.cyan}[task.ask]${colors.reset} ${prompt}\n> `),
+            choose: async (prompt: string, choices: string[]) => {
+                const rendered = [
+                    `\n${colors.cyan}[task.choose]${colors.reset} ${prompt}`,
+                    ...choices.map((choice, index) => `  ${index + 1}. ${choice}`),
+                ].join("\n");
+                const answer = await question(`${rendered}\n> `);
+                const trimmed = answer.trim();
+                const index = Number.parseInt(trimmed, 10);
+
+                if (!Number.isNaN(index) && index >= 1 && index <= choices.length) {
+                    return choices[index - 1];
+                }
+
+                const directMatch = choices.find((choice) => choice === trimmed);
+                if (directMatch) {
+                    return directMatch;
+                }
+
+                throw new Error("Selection must be an option number or exact option text");
+            },
+        },
     };
 
     while (true) {
@@ -424,7 +545,7 @@ ${colors.bright}Available commands:${colors.reset}
 
         // Execute the task
         console.log();
-        await executeTaskWithProgress(trimmed, config, options);
+        await executeTaskWithProgress(trimmed, interactiveConfig, options);
         console.log();
     }
 
@@ -454,75 +575,7 @@ ${colors.cyan}${colors.bright}════════════════�
     console.log(`${colors.dim}Instead of the AI deciding what to do, YOU decide.${colors.reset}`);
     console.log(`${colors.dim}This is great for learning, debugging, or teaching others.${colors.reset}\n`);
 
-    const question = (prompt: string): Promise<string> => {
-        return new Promise((resolve) => {
-            rl.question(prompt, resolve);
-        });
-    };
-
-    const readMultilineInput = async (initialPrompt: string): Promise<string> => {
-        let input = "";
-        let braceCount = 0;
-        let inBraces = false;
-        let inCodeBlock = false;
-        let lines: string[] = [];
-
-        input = await question(initialPrompt);
-
-        const checkForToolCallBlock = (text: string): boolean => {
-            const trimmed = text.trim().toLowerCase();
-            return trimmed === "```tool-call" || trimmed === "```tool";
-        };
-
-        if (checkForToolCallBlock(input)) {
-            inCodeBlock = true;
-            console.log(`${colors.dim}  ... (enter more lines, '..' to finish)${colors.reset}`);
-        } else {
-            for (const char of input) {
-                if (char === '{') {
-                    braceCount++;
-                    inBraces = true;
-                } else if (char === '}') {
-                    braceCount--;
-                    if (braceCount === 0) inBraces = false;
-                }
-            }
-            if (inBraces) {
-                console.log(`${colors.dim}  ... (enter more lines, '..' to finish)${colors.reset}`);
-            }
-        }
-
-        while (inBraces || inCodeBlock) {
-            const line = await question(`${colors.dim}> ${colors.reset}`);
-            const trimmed = line.trim();
-
-            if (trimmed === "..") {
-                break;
-            }
-
-            lines.push(line);
-
-            if (inCodeBlock) {
-                if (trimmed.startsWith("```")) {
-                    break;
-                }
-            } else if (inBraces) {
-                for (const char of line) {
-                    if (char === '{') braceCount++;
-                    else if (char === '}') {
-                        braceCount--;
-                        if (braceCount === 0) inBraces = false;
-                    }
-                }
-            }
-        }
-
-        if (lines.length > 0) {
-            input += "\n" + lines.join("\n");
-        }
-
-        return input;
-    };
+    const question = createQuestionFn(rl);
 
     const diogenes = createDiogenes(config);
     diogenes.setTask(taskDescription);
@@ -537,6 +590,8 @@ ${colors.bright}Commands:${colors.reset}
   ${colors.green}context${colors.reset}              Show current context (loaded files, directories)
   ${colors.green}results${colors.reset}              Show tool execution history
   ${colors.green}task${colors.reset}                 Show the task description
+  ${colors.green}tool${colors.reset}                 Enter multiline tool-call mode
+  ${colors.green}paste${colors.reset}                Enter multiline paste mode
   ${colors.green}clear${colors.reset}                Clear the screen
   ${colors.green}exit${colors.reset}, ${colors.green}quit${colors.reset}          Exit socratic mode
   ${colors.green}help${colors.reset}                 Show this help
@@ -551,7 +606,9 @@ ${colors.bright}How to call a tool:${colors.reset}
   ${colors.yellow}task.end { "reason": "Fixed the bug", "summary": "Changed X to Y" }${colors.reset}
 
 ${colors.bright}Multiline:${colors.reset}
-  Type tool calls across multiple lines. Enter '..' to finish.
+  Use ${colors.green}tool${colors.reset} to enter a multi-line tool-call block.
+  Use ${colors.green}paste${colors.reset} to paste arbitrary multi-line text.
+  Finish either mode with '..' on its own line.
 `);
     };
 
@@ -592,14 +649,14 @@ ${colors.bright}Multiline:${colors.reset}
 
         console.log(`${colors.cyan}──────────────────────── Iteration ${iterations}/${maxIterations} ────────────────────────${colors.reset}`);
 
-        const input = await readMultilineInput(`${colors.magenta}socratic>${colors.reset} `);
+        const input = await readSocraticInput(question);
         const trimmed = input.trim();
 
         if (!trimmed) {
             continue;
         }
 
-        const lower = trimmed.toLowerCase();
+        const lower = normalizeSocraticCommand(trimmed);
 
         if (lower === "exit" || lower === "quit") {
             break;
@@ -635,12 +692,11 @@ ${colors.bright}Multiline:${colors.reset}
             continue;
         }
 
-        console.log(trimmed)
-        const parseResult = parseToolCalls(trimmed);
+        const parseResult = parseSocraticToolInput(trimmed);
 
         if (!parseResult.success) {
             console.log(`${colors.red}Parse error: ${parseResult.error?.message}${colors.reset}`);
-            console.log(`${colors.dim}Tip: Use format: tool.name { "param": "value" }${colors.reset}`);
+            console.log(`${colors.dim}Tip: Use tool.name { "param": "value" } or a full tool-call block${colors.reset}`);
             continue;
         }
 

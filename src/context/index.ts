@@ -105,6 +105,9 @@ export class DiogenesContextManager {
                 ...DEFAULT_LOGGER_CONFIG,
                 ...config.logger,
             },
+            interactionHandlers: {
+                ...config.interactionHandlers,
+            },
         };
     }
 

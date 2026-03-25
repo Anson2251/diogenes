@@ -216,6 +216,10 @@ export interface DiogenesConfig {
     tools?: ToolDefinition[];
     llm?: Partial<LLMConfig>;
     logger?: Partial<LoggerConfig>;
+    interactionHandlers?: {
+        ask?: (question: string) => Promise<string>;
+        choose?: (question: string, options: string[]) => Promise<string>;
+    };
 }
 
 // ==================== Framework State ====================

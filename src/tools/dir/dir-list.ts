@@ -36,9 +36,15 @@ export class DirListTool extends BaseTool {
         const { path } = validation.data as { path: string };
 
         try {
-            await this.workspace.loadDirectory(path);
+            const entries = await this.workspace.loadDirectory(path);
+            const files = entries.filter((entry) => entry.type === "FILE").length;
+            const dirs = entries.filter((entry) => entry.type === "DIR").length;
 
-            return this.success({});
+            return this.success({
+                count: entries.length,
+                files,
+                dirs,
+            });
         } catch (error) {
             return this.error(
                 "PATH_NOT_FOUND",

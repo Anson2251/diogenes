@@ -41,6 +41,9 @@ describe("DirListTool", () => {
             const result = await tool.execute({ path: "." });
 
             expect(result.success).toBe(true);
+            expect(result.data?.count).toBe(2);
+            expect(result.data?.files).toBe(1);
+            expect(result.data?.dirs).toBe(1);
             const entries = workspace.getDirectoryWorkspace()["."];
             expect(entries).toBeDefined();
             expect(entries.length).toBe(2);
