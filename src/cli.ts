@@ -13,6 +13,7 @@ import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml"
+import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
 
 // ANSI color codes for terminal output
 const colors = {
@@ -187,6 +188,75 @@ function loadConfig(configPath: string): Partial<DiogenesConfig> {
     }
 }
 
+function mergeConfig(
+    base: Partial<DiogenesConfig>,
+    override: Partial<DiogenesConfig>,
+): Partial<DiogenesConfig> {
+    const merged: Partial<DiogenesConfig> = {
+        ...base,
+        ...override,
+    };
+
+    if (base.llm || override.llm) {
+        merged.llm = {
+            ...(base.llm || {}),
+            ...(override.llm || {}),
+        };
+    }
+
+    if (base.logger || override.logger) {
+        merged.logger = {
+            ...(base.logger || {}),
+            ...(override.logger || {}),
+        };
+    }
+
+    if (base.security || override.security) {
+        merged.security = {
+            ...(base.security || {}),
+            ...(override.security || {}),
+        };
+
+        if (base.security?.shell || override.security?.shell) {
+            const baseShell = base.security?.shell;
+            const overrideShell = override.security?.shell;
+            merged.security.shell = {
+                enabled: overrideShell?.enabled ?? baseShell?.enabled ?? DEFAULT_SECURITY_CONFIG.shell.enabled,
+                timeout: overrideShell?.timeout ?? baseShell?.timeout ?? DEFAULT_SECURITY_CONFIG.shell.timeout,
+                blockedCommands: overrideShell?.blockedCommands ?? baseShell?.blockedCommands ?? DEFAULT_SECURITY_CONFIG.shell.blockedCommands,
+            };
+        }
+
+        if (base.security?.file || override.security?.file) {
+            const baseFile = base.security?.file;
+            const overrideFile = override.security?.file;
+            merged.security.file = {
+                maxFileSize: overrideFile?.maxFileSize ?? baseFile?.maxFileSize ?? DEFAULT_SECURITY_CONFIG.file.maxFileSize,
+                blockedExtensions: overrideFile?.blockedExtensions ?? baseFile?.blockedExtensions ?? DEFAULT_SECURITY_CONFIG.file.blockedExtensions,
+            };
+        }
+
+        if (base.security?.watch || override.security?.watch) {
+            const baseWatch = base.security?.watch;
+            const overrideWatch = override.security?.watch;
+            merged.security.watch = {
+                enabled: overrideWatch?.enabled ?? baseWatch?.enabled ?? DEFAULT_SECURITY_CONFIG.watch.enabled,
+                debounceMs: overrideWatch?.debounceMs ?? baseWatch?.debounceMs ?? DEFAULT_SECURITY_CONFIG.watch.debounceMs,
+            };
+        }
+
+        if (base.security?.interaction || override.security?.interaction) {
+            const baseInteraction = base.security?.interaction;
+            const overrideInteraction = override.security?.interaction;
+            merged.security.interaction = {
+                enabled: overrideInteraction?.enabled ?? baseInteraction?.enabled ?? DEFAULT_SECURITY_CONFIG.interaction.enabled,
+            };
+        }
+    }
+
+    return merged;
+}
+
 /**
  * Get API key from options or environment
  */
@@ -207,32 +277,36 @@ function getApiKey(options: CLIOptions): string | undefined {
  * Create Diogenes configuration from CLI options
  */
 function createConfig(options: CLIOptions): DiogenesConfig {
-    const config: DiogenesConfig = {
-        llm: {
-            apiKey: getApiKey(options),
-            model: options.model || process.env.DIOGENES_MODEL || "gpt-4",
-            baseURL: options.baseUrl || process.env.OPENAI_BASE_URL,
-        },
-    };
+    const fileConfig = options.config ? loadConfig(options.config) : {};
 
-    // Load config file if specified
-    if (options.config) {
-        const fileConfig = loadConfig(options.config);
-        Object.assign(config, fileConfig);
+    const envConfig: Partial<DiogenesConfig> = {};
+    if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL || process.env.DIOGENES_MODEL) {
+        envConfig.llm = {};
+        if (process.env.OPENAI_API_KEY) envConfig.llm.apiKey = process.env.OPENAI_API_KEY;
+        if (process.env.OPENAI_BASE_URL) envConfig.llm.baseURL = process.env.OPENAI_BASE_URL;
+        if (process.env.DIOGENES_MODEL) envConfig.llm.model = process.env.DIOGENES_MODEL;
     }
-
-    // Set workspace root
-    if (options.workspace) {
-        config.security = {
-            workspaceRoot: path.resolve(options.workspace),
-        };
-    } else if (process.env.DIOGENES_WORKSPACE) {
-        config.security = {
+    if (process.env.DIOGENES_WORKSPACE) {
+        envConfig.security = {
             workspaceRoot: path.resolve(process.env.DIOGENES_WORKSPACE),
         };
     }
 
-    return config;
+    const cliConfig: Partial<DiogenesConfig> = {};
+    if (options.apiKey || options.baseUrl || options.model) {
+        cliConfig.llm = {};
+        if (options.apiKey) cliConfig.llm.apiKey = options.apiKey;
+        if (options.baseUrl) cliConfig.llm.baseURL = options.baseUrl;
+        if (options.model) cliConfig.llm.model = options.model;
+    }
+    if (options.workspace) {
+        cliConfig.security = {
+            workspaceRoot: path.resolve(options.workspace),
+        };
+    }
+
+    const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
+    return merged as DiogenesConfig;
 }
 
 /**

@@ -11,6 +11,7 @@ describe("FileEditTool", () => {
     const testFilePath = path.join(testDir, "test.txt");
     const multiLineFilePath = path.join(testDir, "multi-line.txt");
     const duplicateFilePath = path.join(testDir, "duplicate.txt");
+    const fullDocFilePath = path.join(testDir, "full-doc.txt");
 
     beforeEach(() => {
         fs.mkdirSync(testDir, { recursive: true });
@@ -22,6 +23,10 @@ describe("FileEditTool", () => {
         fs.writeFileSync(
             duplicateFilePath,
             "alpha\nrepeat\nbeta\nrepeat\ngamma\n",
+        );
+        fs.writeFileSync(
+            fullDocFilePath,
+            "# Diogenes\n\nA minimal LLM-controlled agent framework with explicit context management, implemented in TypeScript.\n\n## License\n\nDiogenes is released under the MIT License. See the [LICENSE](LICENSE) file for details.\n\nCopyright (c) 2024\n\n",
         );
         workspace = new WorkspaceManager(testDir);
         tool = new FileEditTool(workspace);
@@ -352,6 +357,52 @@ describe("FileEditTool", () => {
             expect(content).toBe("Line A\nLine B\nLine C\n");
         });
 
+        it("should support virtual EOF matching for empty end anchors", async () => {
+            const result = await tool.execute({
+                path: fullDocFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "# Diogenes",
+                                before: [],
+                                after: [
+                                    "",
+                                    "A minimal LLM-controlled agent framework with explicit context management, implemented in TypeScript.",
+                                ],
+                            },
+                            end: {
+                                line: 11,
+                                text: "",
+                                before: [
+                                    "## License",
+                                    "",
+                                    "Diogenes is released under the MIT License. See the [LICENSE](LICENSE) file for details.",
+                                    "",
+                                    "Copyright (c) 2024",
+                                    "",
+                                ],
+                                after: [],
+                            },
+                        },
+                        content: [
+                            "# Rewritten",
+                            "",
+                            "replacement text",
+                        ],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            const content = fs.readFileSync(fullDocFilePath, "utf-8");
+            expect(content).toContain("# Rewritten");
+            expect(content).toContain("replacement text");
+            expect(content).not.toContain("## License");
+        });
+
         it("should respect single-line context instead of falling back to line_hint", async () => {
             const result = await tool.execute({
                 path: duplicateFilePath,
@@ -481,6 +532,34 @@ describe("FileEditTool", () => {
             expect(result.error?.suggestion).toContain("3 | line 3");
             expect(result.error?.suggestion).toContain("5 | line 5");
             expect(result.error?.suggestion).toContain("Expected anchor context:");
+        });
+
+        it("should avoid duplicate windows for same-line single-candidate mismatch", async () => {
+            const result = await tool.execute({
+                path: multiLineFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 3,
+                                text: "line 3",
+                                before: ["wrong before"],
+                                after: ["line 4"],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("ATOMIC_FAILURE");
+            expect(result.error?.suggestion).toContain("Closest match window around line 3 (±5):");
+            expect(result.error?.suggestion).not.toContain("Anchor hint window around line 3 (±5):");
+            expect(result.error?.suggestion).toContain("Mismatch details:");
+            expect(result.error?.suggestion).toContain("before[0] expected: wrong before");
+            expect(result.error?.suggestion).toContain("before[0] actual:   line 2");
         });
 
         it("should rollback all edits if one fails in atomic mode", async () => {

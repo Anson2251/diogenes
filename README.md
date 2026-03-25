@@ -24,12 +24,12 @@ Diogenes is a framework that treats the LLM as the primary controller of its own
 Traditional agent frameworks often hide complexity behind abstractions like:
 - Implicit memory systems that summarize or embed content
 - Hidden planners that break down tasks without LLM awareness
-- Forced context window management (truncation, summarization)
+- Forced context window management such as truncation or summarization
 - Complex orchestration layers
 
 Diogenes takes a different approach:
 - **Explicit context management**: The LLM sees exactly what's loaded via workspace sections
-- **Direct control**: The LLM decides what to load/unload using tools
+- **Direct control**: The LLM decides what to load and unload using tools
 - **Transparent execution**: All tool results are visible in the context
 - **Minimal abstraction**: No hidden planners, embeddings, or memory systems
 - **Unified protocol**: All tools use the same simple JSON format
@@ -39,106 +39,150 @@ The key difference is **agency**: Diogenes gives the LLM direct control over its
 ## 3. How to use it
 
 ### Prerequisites
+
 - Node.js 18 or higher
-- TypeScript 5.0+ (for development)
-- pnpm (recommended) or npm/yarn
+- TypeScript 5.0+ for development
+- pnpm recommended, though npm or yarn also work
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/Anson2251/diogenes.git
 cd diogenes
-
-# Install dependencies
-pnpm install  # or npm install or yarn install
+pnpm install
 ```
 
 ### Available Scripts
 
-The following scripts are available in `package.json`:
-
-- **`pnpm run build`** - Compile TypeScript to JavaScript using tsgo
-- **`pnpm run dev`** - Development mode with watch functionality (tsgo --watch)
-- **`pnpm test`** - Run tests with Vitest
-- **`pnpm run lint`** - Lint code with oxlint
-- **`pnpm run bundle`** - Build and create a bundled CLI executable
+- `pnpm run build` - Compile TypeScript to JavaScript
+- `pnpm run dev` - Development mode with auto rebuild
+- `pnpm test` - Run tests with Vitest
+- `pnpm run lint` - Lint the codebase
+- `pnpm run bundle` - Build and create a bundled CLI executable
 
 ### Basic Usage
 
-1. **Build the project**:
-   ```bash
-   pnpm run build
-   ```
+1. Build the project:
 
-   or
-
-   ```bash
-   pnpm run bundle
-   ```
-
-2. **Run tests** to verify everything works:
-   ```bash
-   pnpm test
-   ```
-
-3. **Use the CLI** (after building):
-   ```bash
-   # Run a simple task
-   node dist/cli.js "List all files in the current directory"
-   ```
-
-4. **For development** with auto-rebuild:
-   ```bash
-   pnpm run dev
-   ```
-
-### Development Workflow
-
-1. Make changes to TypeScript files in the `src/` directory
-2. Run `pnpm run dev` to watch for changes and rebuild automatically
-3. Test your changes with `pnpm test`
-4. Lint your code with `pnpm run lint`
-5. Create a bundled executable with `pnpm run bundle`
-
-### Project Structure
-
-- `src/` - TypeScript source code
-  - `cli.ts` - Command-line interface
-  - `index.ts` - Main library entry point
-  - `config/` - Configuration management
-  - `context/` - Context window management
-  - `llm/` - LLM integration
-  - `tools/` - Tool implementations
-  - `utils/` - Utility functions
-- `dist/` - Compiled JavaScript (generated after build)
-- `tests/` - Test files
-- `bundle/` - Bundled CLI executable (generated after bundle)
-
-### Quick Example
-
-```typescript
-import { createDiogenes } from 'diogenes';
-
-// Create a Diogenes instance
-const diogenes = createDiogenes({
-  security: {
-    workspaceRoot: '/path/to/workspace'
-  }
-});
-
-// Get the initial prompt for the LLM
-const prompt = diogenes.buildPrompt();
-console.log(prompt);
+```bash
+pnpm run build
 ```
 
-### Note on File Editing
+2. Run tests:
 
-The file editing tool (`file.edit`) is currently in testing and may contain bugs. When editing files, ensure you:
-1. Always load the file first with `file.load` to get exact content
-2. Copy text verbatim from the loaded file for anchors
-3. Include before/after context lines for reliable anchoring
-4. Use heredoc syntax for multi-line content
+```bash
+pnpm test
+```
+
+3. Run the CLI after building:
+
+```bash
+node dist/cli.js "List all files in the current directory"
+```
+
+4. During development, use watch mode:
+
+```bash
+pnpm run dev
+```
+
+## 4. Workspace Model
+
+Diogenes exposes its working state through explicit workspace sections:
+
+- **Directory Workspace**: directory listings loaded by `dir.list`
+- **File Workspace**: loaded file ranges from `file.load`
+- **Todo Workspace**: short execution plans managed by `todo.set` and `todo.update`
+- **Notepad Workspace**: retained short notes managed by `task.notepad`
+
+The file and directory workspaces now support automatic refresh through filesystem watching. If a loaded file or loaded directory changes on disk, the workspace view is refreshed without requiring the model to reload it manually. For file edits, range recalculation is still preserved, but the workspace owns the actual reload.
+
+The notepad is intended for short working memory. A typical pattern is:
+
+1. Read a large file with `file.load`
+2. Extract the facts you still need into `task.notepad`
+3. Unload the file with `file.unload`
+4. Continue using the notepad summary without keeping the full file in context
+
+## 5. File and Task Tools
+
+### File Tools
+
+- `file.load` - Load file content into workspace
+- `file.peek` - Preview file lines without loading them into workspace
+- `file.edit` - Apply anchor-based local edits
+- `file.create` - Create a new file with full content
+- `file.overwrite` - Replace an entire file with full content
+- `file.unload` - Remove a file from workspace context
+
+### Choosing the Right File Tool
+
+- Use `file.edit` for local edits. A single edit around 30 lines is a good target.
+- Use `file.overwrite` when replacing most of a file or a large contiguous block.
+- Use `file.create` when the target file does not exist yet.
+- Use heredoc for multi-line content with `file.edit`, `file.create`, and `file.overwrite`.
+
+### Task Tools
+
+- `task.notepad` - Keep short retained notes across unloads
+- `task.ask` - Ask the user a direct open question when blocked on missing input
+- `task.choose` - Ask the user to select from a small fixed set of options
+- `task.end` - End the current task with a reason and summary
+
+### Todo Tools
+
+- `todo.set` - Create or replace a short execution plan
+- `todo.update` - Update the state of an existing todo item
+
+## 6. Heredoc Usage
+
+For multi-line content, prefer heredoc syntax:
+
+```tool-call
+[
+  {
+    "tool": "file.overwrite",
+    "params": {
+      "path": "README.md",
+      "content": {"$heredoc": "EOF"}
+    }
+  }
+]
+<<<EOF
+# Title
+
+Updated content
+EOF
+```
+
+Rules:
+
+1. Put `{"$heredoc":"DELIM"}` inside the JSON
+2. Put `<<<DELIM` after the JSON array
+3. Put the raw content next
+4. Close with a line containing only `DELIM`
+5. Keep the heredoc inside the same `tool-call` block
+
+## 7. Configuration
+
+Configuration can be loaded from JSON or YAML. An example file is provided at [`examples/diogenes.config.yaml`](examples/diogenes.config.yaml).
+
+Relevant security options include:
+
+- `security.watch.enabled` - Enable or disable automatic workspace refresh from filesystem changes
+- `security.watch.debounceMs` - Debounce interval for filesystem-driven refresh
+- `security.interaction.enabled` - Enable or disable interactive tools such as `task.ask` and `task.choose`
+- `security.shell.enabled` - Enable or disable shell execution
+
+## 8. Notes on File Editing
+
+`file.edit` is the most precise file-writing tool, but it is also the most demanding:
+
+1. Load or peek the file first
+2. Copy anchor text verbatim
+3. Provide surrounding context when possible
+4. If the same text appears multiple times, provide context to disambiguate it
+5. Prefer `file.overwrite` instead of forcing very large `file.edit` ranges
 
 ## License
 

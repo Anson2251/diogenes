@@ -42,6 +42,10 @@ export class DiogenesContextManager {
         }
         this.workspace = new WorkspaceManager(
             this.config.security.workspaceRoot,
+            {
+                enabled: this.config.security.watch?.enabled ?? DEFAULT_SECURITY_CONFIG.watch.enabled,
+                debounceMs: this.config.security.watch?.debounceMs ?? DEFAULT_SECURITY_CONFIG.watch.debounceMs,
+            },
         );
         this.promptBuilder = new PromptBuilder(
             this.config.systemPrompt,
@@ -74,6 +78,22 @@ export class DiogenesContextManager {
             security: {
                 ...DEFAULT_SECURITY_CONFIG,
                 ...config.security,
+                watch: {
+                    ...DEFAULT_SECURITY_CONFIG.watch,
+                    ...config.security?.watch,
+                },
+                interaction: {
+                    ...DEFAULT_SECURITY_CONFIG.interaction,
+                    ...config.security?.interaction,
+                },
+                shell: {
+                    ...DEFAULT_SECURITY_CONFIG.shell,
+                    ...config.security?.shell,
+                },
+                file: {
+                    ...DEFAULT_SECURITY_CONFIG.file,
+                    ...config.security?.file,
+                },
                 workspaceRoot: config.security?.workspaceRoot || DEFAULT_SECURITY_CONFIG.workspaceRoot,
             },
             tools: config.tools || [],
@@ -94,6 +114,7 @@ export class DiogenesContextManager {
             directoryWorkspace: {},
             fileWorkspace: {},
             todoWorkspace: { items: [] },
+            notepadWorkspace: { lines: [] },
             contextStatus: {
                 tokenUsage: {
                     current: 0,
@@ -106,6 +127,9 @@ export class DiogenesContextManager {
                 fileWorkspace: {
                     count: 0,
                     totalLines: 0,
+                },
+                notepadWorkspace: {
+                    lines: 0,
                 },
             },
             toolRegistry: new Map(),
@@ -120,7 +144,7 @@ export class DiogenesContextManager {
     }
 
     getTaskPrompt(): string {
-        return `========= TASK\n${this.task}\n=========`
+        return `## Task\n${this.task}\n--`
     }
 
     getTool(name: string): BaseTool | undefined {
@@ -141,7 +165,7 @@ export class DiogenesContextManager {
         }
 
         for (const [namespace, tools] of Object.entries(byNamespace)) {
-            parts.push(`\n-----\n\n[${namespace}]`);
+            parts.push(`\n--\n\n[${namespace}]`);
 
             for (const tool of tools) {
                 parts.push(`\n\n  ${tool.name}: ${tool.description}`);
@@ -220,8 +244,13 @@ export class DiogenesContextManager {
             case "file.load":
             case "file.unload":
             case "file.edit":
+            case "file.create":
+            case "file.overwrite":
             case "todo.set":
             case "todo.update":
+            case "task.ask":
+            case "task.choose":
+            case "task.notepad":
                 break;
         }
     }
@@ -250,6 +279,9 @@ export class DiogenesContextManager {
                 count: stats.fileCount,
                 totalLines: stats.totalLines,
             },
+            notepadWorkspace: {
+                lines: this.workspace.getNotepadWorkspace().lines.length,
+            },
         };
     }
 
@@ -260,6 +292,7 @@ export class DiogenesContextManager {
         const directoryWorkspace = this.workspace.getDirectoryWorkspace();
         const fileWorkspace = this.workspace.getFileWorkspace();
         const todoWorkspace = this.workspace.getTodoWorkspace();
+        const notepadWorkspace = this.workspace.getNotepadWorkspace();
 
         const sections = this.promptBuilder.buildContextSections(
             toolDefinitions,
@@ -268,6 +301,7 @@ export class DiogenesContextManager {
             directoryWorkspace,
             fileWorkspace,
             todoWorkspace,
+            notepadWorkspace,
             this.state.toolResults,
         );
 
@@ -294,6 +328,7 @@ export class DiogenesContextManager {
         const directoryWorkspace = this.workspace.getDirectoryWorkspace();
         const fileWorkspace = this.workspace.getFileWorkspace();
         const todoWorkspace = this.workspace.getTodoWorkspace();
+        const notepadWorkspace = this.workspace.getNotepadWorkspace();
 
         const sections = this.promptBuilder.buildContextSections(
             toolDefinitions,
@@ -302,6 +337,7 @@ export class DiogenesContextManager {
             directoryWorkspace,
             fileWorkspace,
             todoWorkspace,
+            notepadWorkspace,
             this.state.toolResults,
         );
 
@@ -435,7 +471,7 @@ export class DiogenesContextManager {
 
         if (!parseResult.success) {
             this.state.toolResults.push(
-                `=========PARSE ERROR\n${parseResult.error?.message}\nSuggestion: ${parseResult.error?.suggestion}\n=========`
+                `## Parse Error\n${parseResult.error?.message}\nSuggestion: ${parseResult.error?.suggestion}\n--`
             );
             return response;
         }

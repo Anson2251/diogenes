@@ -15,8 +15,13 @@ export { FileLoadTool } from "./tools/file/file-load";
 export { FileUnloadTool } from "./tools/file/file-unload";
 export { FileEditTool } from "./tools/file/file-edit";
 export { FilePeekTool } from "./tools/file/file-peek";
+export { FileCreateTool } from "./tools/file/file-create";
+export { FileOverwriteTool } from "./tools/file/file-overwrite";
 export { TodoSetTool } from "./tools/todo/todo-set";
 export { TodoUpdateTool } from "./tools/todo/todo-update";
+export { TaskAskTool } from "./tools/task/task-ask";
+export { TaskChooseTool } from "./tools/task/task-choose";
+export { TaskNotepadTool } from "./tools/task/task-notepad";
 export { TaskEndTool } from "./tools/task/task-end";
 export { ShellExecTool } from "./tools/shell/shell-exec";
 
@@ -35,11 +40,18 @@ import { FileLoadTool } from "./tools/file/file-load";
 import { FileUnloadTool } from "./tools/file/file-unload";
 import { FileEditTool } from "./tools/file/file-edit";
 import { FilePeekTool } from "./tools/file/file-peek";
+import { FileCreateTool } from "./tools/file/file-create";
+import { FileOverwriteTool } from "./tools/file/file-overwrite";
 import { TodoSetTool } from "./tools/todo/todo-set";
 import { TodoUpdateTool } from "./tools/todo/todo-update";
+import { TaskAskTool } from "./tools/task/task-ask";
+import { TaskChooseTool } from "./tools/task/task-choose";
+import { TaskNotepadTool } from "./tools/task/task-notepad";
 import { TaskEndTool } from "./tools/task/task-end";
 import { ShellExecTool } from "./tools/shell/shell-exec";
 import { Logger, ConsoleLogger, LogLevel, ToolResultData } from "./utils/logger";
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 
 /**
  * Create a new Diogenes context manager with default tools
@@ -56,8 +68,15 @@ export function createDiogenes(config?: DiogenesConfig) {
     contextManager.registerTool(new FileUnloadTool(workspace));
     contextManager.registerTool(new FileEditTool(workspace));
     contextManager.registerTool(new FilePeekTool(workspace));
+    contextManager.registerTool(new FileCreateTool(workspace));
+    contextManager.registerTool(new FileOverwriteTool(workspace));
     contextManager.registerTool(new TodoSetTool(workspace));
     contextManager.registerTool(new TodoUpdateTool(workspace));
+    contextManager.registerTool(new TaskNotepadTool(workspace));
+    if (configObj.security.interaction?.enabled ?? true) {
+        contextManager.registerTool(new TaskAskTool(createTerminalAskHandler()));
+        contextManager.registerTool(new TaskChooseTool(createTerminalChooseHandler()));
+    }
     contextManager.registerTool(new TaskEndTool());
 
     // Register shell tool with security config
@@ -73,6 +92,55 @@ export function createDiogenes(config?: DiogenesConfig) {
     );
 
     return contextManager;
+}
+
+function createTerminalAskHandler() {
+    return async (question: string): Promise<string> => {
+        if (!input.isTTY || !output.isTTY) {
+            throw new Error("Interactive terminal is not available");
+        }
+
+        const rl = createInterface({ input, output });
+        try {
+            return await rl.question(`\n[task.ask] ${question}\n> `);
+        } finally {
+            rl.close();
+        }
+    };
+}
+
+function createTerminalChooseHandler() {
+    return async (question: string, options: string[]): Promise<string> => {
+        if (!input.isTTY || !output.isTTY) {
+            throw new Error("Interactive terminal is not available");
+        }
+
+        const rl = createInterface({ input, output });
+        try {
+            const promptLines = [
+                `\n[task.choose] ${question}`,
+                ...options.map((option, index) => `  ${index + 1}. ${option}`),
+                "> ",
+            ];
+
+            const answer = await rl.question(promptLines.join("\n"));
+            const trimmed = answer.trim();
+            const index = Number.parseInt(trimmed, 10);
+
+            if (!Number.isNaN(index) && index >= 1 && index <= options.length) {
+                return options[index - 1];
+            }
+
+            const directMatch = options.find((option) => option === trimmed);
+            if (directMatch) {
+                return directMatch;
+            }
+
+            throw new Error("Selection must be an option number or exact option text");
+        } finally {
+            rl.close();
+        }
+    };
 }
 
 // Re-export utility functions

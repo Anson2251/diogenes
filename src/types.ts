@@ -78,6 +78,10 @@ export interface TodoWorkspace {
     items: TodoItem[];
 }
 
+export interface NotepadWorkspace {
+    lines: string[];
+}
+
 // ==================== File Edit Types ====================
 
 export interface LineAnchor {
@@ -145,6 +149,9 @@ export interface ContextStatus {
         count: number;
         totalLines: number;
     };
+    notepadWorkspace: {
+        lines: number;
+    };
 }
 
 export interface ContextSections {
@@ -155,6 +162,7 @@ export interface ContextSections {
     directoryWorkspace: string;
     fileWorkspace: string;
     todoWorkspace: string;
+    notepadWorkspace: string;
     toolResults: string;
 }
 
@@ -163,6 +171,13 @@ export interface ContextSections {
 export interface SecurityConfig {
     workspaceRoot: string;
     allowOutsideWorkspace: boolean;
+    watch: {
+        enabled: boolean;
+        debounceMs: number;
+    };
+    interaction: {
+        enabled: boolean;
+    };
     shell: {
         enabled: boolean;
         timeout: number;
@@ -210,6 +225,7 @@ export interface DiogenesState {
     directoryWorkspace: DirectoryWorkspace;
     fileWorkspace: FileWorkspace;
     todoWorkspace: TodoWorkspace;
+    notepadWorkspace: NotepadWorkspace;
     contextStatus: ContextStatus;
     toolRegistry: Map<string, ToolDefinition>;
     toolResults: string[];

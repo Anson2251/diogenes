@@ -3,6 +3,19 @@ import { WorkspaceManager } from "../src/context/workspace";
 import * as fs from "fs";
 import * as path from "path";
 
+async function waitFor(
+    predicate: () => boolean,
+    timeoutMs = 2000,
+    intervalMs = 25,
+): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        if (predicate()) return;
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    throw new Error("Condition not met within timeout");
+}
+
 describe("WorkspaceManager", () => {
     let workspace: WorkspaceManager;
     const testDir = path.join(__dirname, "test-workspace");
@@ -154,6 +167,25 @@ describe("WorkspaceManager", () => {
             expect(entry?.offsets).toEqual([]);
             expect(entry?.ranges).toEqual([{ start: 1, end: 2 }]);
         });
+
+        it("should preserve semantic ranges after edit delta sync", async () => {
+            await workspace.loadFile("test-file.txt", 3, 4);
+
+            fs.writeFileSync(
+                testFilePath,
+                "line1\nline2a\nline2b\nline3\nline4\nline5",
+                "utf-8",
+            );
+
+            const update = await workspace.syncLoadedFileAfterEdit("test-file.txt", [
+                { matchedRange: [2, 2], newRange: [2, 3] },
+            ]);
+
+            expect(update).toBeDefined();
+            expect(update?.loaded_ranges).toEqual([{ start: 4, end: 5 }]);
+            const entry = workspace.getFileEntry("test-file.txt");
+            expect(entry?.content).toEqual(["line3", "line4"]);
+        });
     });
 
     describe("Todo Workspace Methods", () => {
@@ -195,6 +227,17 @@ describe("WorkspaceManager", () => {
             const todo = workspace.getTodoWorkspace();
             expect(todo.items).toHaveLength(3);
         });
+
+        it("should manage notepad lines", () => {
+            workspace.appendNotepadLines(["summary one", "summary two"]);
+            expect(workspace.getNotepadWorkspace().lines).toEqual(["summary one", "summary two"]);
+
+            workspace.setNotepadLines(["replacement"]);
+            expect(workspace.getNotepadWorkspace().lines).toEqual(["replacement"]);
+
+            workspace.clearNotepad();
+            expect(workspace.getNotepadWorkspace().lines).toEqual([]);
+        });
     });
 
     describe("getStatistics", () => {
@@ -229,6 +272,7 @@ describe("WorkspaceManager", () => {
             expect(workspace.getDirectoryWorkspace()).toEqual({});
             expect(workspace.getFileWorkspace()).toEqual({});
             expect(workspace.getTodoWorkspace().items).toHaveLength(0);
+            expect(workspace.getNotepadWorkspace().lines).toHaveLength(0);
         });
     });
 
@@ -259,6 +303,54 @@ describe("WorkspaceManager", () => {
             const entry = await workspace.loadFile("nested/nested-file.txt");
 
             expect(entry.path).toBe("nested/nested-file.txt");
+        });
+    });
+
+    describe("watchers", () => {
+        it("should auto-refresh loaded file content on file change", async () => {
+            await workspace.loadFile("test-file.txt", 1, 2);
+
+            fs.writeFileSync(testFilePath, "updated1\nupdated2\nline3\nline4\nline5", "utf-8");
+
+            await waitFor(() => {
+                const entry = workspace.getFileEntry("test-file.txt");
+                return !!entry && entry.content[0] === "updated1";
+            });
+
+            const entry = workspace.getFileEntry("test-file.txt");
+            expect(entry?.content[0]).toBe("updated1");
+            expect(entry?.content[1]).toBe("updated2");
+        });
+
+        it("should auto-refresh loaded directory entries on directory change", async () => {
+            await workspace.loadDirectory(".");
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            const addedFile = path.join(testDir, "new-file.txt");
+            fs.writeFileSync(addedFile, "new", "utf-8");
+
+            await waitFor(() => {
+                const entries = workspace.getDirectoryEntries(".");
+                return !!entries?.some((e) => e.name === "new-file.txt");
+            }, 3000);
+
+            const entries = workspace.getDirectoryEntries(".");
+            expect(entries?.some((e) => e.name === "new-file.txt")).toBe(true);
+        });
+
+        it("should not auto-refresh when file watcher is disabled", async () => {
+            const workspaceNoWatch = new WorkspaceManager(testDir, {
+                enabled: false,
+                debounceMs: 10,
+            });
+            await workspaceNoWatch.loadFile("test-file.txt", 1, 2);
+
+            fs.writeFileSync(testFilePath, "disabled1\ndisabled2\nline3\nline4\nline5", "utf-8");
+            await new Promise((resolve) => setTimeout(resolve, 200));
+
+            const entry = workspaceNoWatch.getFileEntry("test-file.txt");
+            expect(entry?.content[0]).toBe("line1");
+            expect(entry?.content[1]).toBe("line2");
         });
     });
 });

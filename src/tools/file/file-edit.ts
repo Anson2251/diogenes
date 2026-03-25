@@ -51,6 +51,9 @@ CRITICAL REQUIREMENTS - READ THIS FIRST:
 2. The "text" field MUST be copied VERBATIM from the file - no paraphrasing, no truncation
 3. ALWAYS include "before" and "after" context (2 lines each) - this is NOT optional
 4. ALWAYS use heredoc syntax for content with newlines, quotes, or special characters
+5. Keep each file.edit change small and local; around 30 lines is a good target
+6. If you need to rewrite most of a file, use file.overwrite instead
+7. If you need to create a new file, use file.create instead
 
 ANCHOR MATCHING - HOW IT WORKS:
 The tool tries to find your anchor in this order:
@@ -98,6 +101,7 @@ MULTIPLE EDITS:
 - Edits are applied bottom-to-top (descending line order)
 - Overlapping ranges are rejected
 - MERGE nearby edits into one larger edit instead of many small ones
+- If one replacement grows beyond about 30 lines, prefer file.overwrite
 
 MULTIPLE MATCHES:
 - If the anchor text appears in multiple places, the edit is ambiguous
@@ -312,57 +316,8 @@ EOF
             const newContent = modifiedLines.join("\n");
             await fs.promises.writeFile(absolutePath, newContent, "utf-8");
 
-            // Update workspace: adjust ranges for line count changes and reload
-            const existingEntry = this.workspace.getFileEntry(filePath);
-            let updatedRanges: Array<{ start: number; end: number }> = [];
-            let totalLinesInWorkspace = 0;
-
-            if (existingEntry) {
-                // Calculate line deltas from applied edits
-                const editDeltas = applied.map((edit) => {
-                    const originalLineCount = edit.matchedRange[1] - edit.matchedRange[0] + 1;
-                    const newLineCount = edit.newRange[1] - edit.newRange[0] + 1;
-                    return {
-                        at: edit.matchedRange[0],
-                        delta: newLineCount - originalLineCount,
-                    };
-                });
-
-                // Sort deltas by position (descending) for proper application
-                editDeltas.sort((a, b) => b.at - a.at);
-
-                // Apply deltas to existing ranges to get adjusted ranges
-                updatedRanges = existingEntry.ranges.map((range) => {
-                    let newStart = range.start;
-                    let newEnd = range.end;
-                    for (const delta of editDeltas) {
-                        if (delta.at < range.start) {
-                            // Delta is before this range - shift entire range
-                            newStart += delta.delta;
-                            newEnd += delta.delta;
-                        } else if (delta.at <= range.end) {
-                            // Delta is within this range - adjust the end
-                            newEnd += delta.delta;
-                        }
-                    }
-                    // Clamp to valid line numbers
-                    newStart = Math.max(1, Math.min(newStart, modifiedLines.length));
-                    newEnd = Math.max(newStart, Math.min(newEnd, modifiedLines.length));
-                    return { start: newStart, end: newEnd };
-                });
-
-                // Unload and reload with adjusted ranges
-                this.workspace.unloadFile(filePath);
-                const newEntry = await this.workspace.reloadFileWithRangesContent(
-                    filePath,
-                    newContent,
-                    updatedRanges,
-                );
-
-                if (newEntry) {
-                    totalLinesInWorkspace = newEntry.content.length;
-                }
-            }
+            // Delegate post-edit file reload and range re-calculation to workspace manager
+            const workspaceUpdate = await this.workspace.syncLoadedFileAfterEdit(filePath, applied);
 
             return this.success({
                 success: invalidEdits.length === 0,
@@ -372,10 +327,7 @@ EOF
                     total_lines: modifiedLines.length,
                     modified_regions: applied.map((a) => a.newRange),
                 },
-                workspace_update: updatedRanges.length > 0 ? {
-                    loaded_ranges: updatedRanges.filter(r => r.start <= r.end),
-                    total_lines_in_workspace: totalLinesInWorkspace,
-                } : undefined,
+                workspace_update: workspaceUpdate,
             });
         } catch (error) {
             return this.error(
@@ -595,6 +547,7 @@ TROUBLESHOOTING:
         loose: boolean,
     ): MatchCandidate[] {
         const candidates: MatchCandidate[] = [];
+        const expectedOffset = endAnchor.line - startAnchor.line;
 
         if (quality === "line_hint") {
             const searchStart = Math.max(1, startAnchor.line - 10);
@@ -604,11 +557,15 @@ TROUBLESHOOTING:
                 if (
                     this.matchStartAnchor(lines, startAnchor, line, quality, loose)
                 ) {
-                    const endLine = line + (endAnchor.line - startAnchor.line);
-                    if (
-                        endLine <= lines.length &&
-                        this.matchEndAnchor(lines, endAnchor, endLine, quality, loose)
-                    ) {
+                    const endLines = this.findMatchingEndLines(
+                        lines,
+                        endAnchor,
+                        line,
+                        expectedOffset,
+                        quality,
+                        loose,
+                    );
+                    for (const endLine of endLines) {
                         candidates.push({
                             line: line,
                             startLine: line,
@@ -625,10 +582,15 @@ TROUBLESHOOTING:
                     continue;
                 }
 
-                const endLine = line + (endAnchor.line - startAnchor.line);
-                if (endLine > lines.length) continue;
-
-                if (this.matchEndAnchor(lines, endAnchor, endLine, quality, loose)) {
+                const endLines = this.findMatchingEndLines(
+                    lines,
+                    endAnchor,
+                    line,
+                    expectedOffset,
+                    quality,
+                    loose,
+                );
+                for (const endLine of endLines) {
                     candidates.push({
                         line,
                         startLine: line,
@@ -640,6 +602,41 @@ TROUBLESHOOTING:
         }
 
         return candidates;
+    }
+
+    private findMatchingEndLines(
+        lines: string[],
+        endAnchor: LineAnchor,
+        startLine: number,
+        expectedOffset: number,
+        quality: "exact" | "fuzzy" | "substring" | "line_hint",
+        loose: boolean,
+    ): number[] {
+        const matches: number[] = [];
+        const expectedEndLine = startLine + expectedOffset;
+        const maxEndLine = this.supportsVirtualEofLine(endAnchor)
+            ? lines.length + 1
+            : lines.length;
+
+        if (
+            expectedEndLine >= startLine &&
+            expectedEndLine <= maxEndLine &&
+            this.matchEndAnchor(lines, endAnchor, expectedEndLine, quality, loose)
+        ) {
+            matches.push(expectedEndLine);
+            return matches;
+        }
+
+        // Fallback: search end anchor forward from start line.
+        // This makes range matching robust when provided line hints drift.
+        for (let endLine = startLine; endLine <= maxEndLine; endLine++) {
+            if (endLine === expectedEndLine) continue;
+            if (this.matchEndAnchor(lines, endAnchor, endLine, quality, loose)) {
+                matches.push(endLine);
+            }
+        }
+
+        return matches;
     }
 
     private searchForSingleAnchor(
@@ -679,21 +676,22 @@ TROUBLESHOOTING:
         loose: boolean,
     ): boolean {
         const line = lines[lineNum - 1];
-        if (!line) return false;
+        if (line === undefined) return false;
 
-        const beforeStart = lineNum - 2;
-        const beforeEnd = lineNum - 1;
-        const afterStart = lineNum + 1;
-        const afterEnd = lineNum + 2;
+        const beforeCount = Math.max(2, anchor.before?.length || 0);
+        const afterCount = Math.max(2, anchor.after?.length || 0);
 
-        const before = [
-            beforeStart >= 1 ? lines[beforeStart - 1] : "",
-            beforeEnd >= 1 ? lines[beforeEnd - 1] : "",
-        ];
-        const after = [
-            afterStart <= lines.length ? lines[afterStart - 1] : "",
-            afterEnd <= lines.length ? lines[afterEnd - 1] : "",
-        ];
+        const before: string[] = [];
+        for (let i = beforeCount; i >= 1; i--) {
+            const idx = lineNum - i;
+            before.push(idx >= 1 ? lines[idx - 1] ?? "" : "");
+        }
+
+        const after: string[] = [];
+        for (let i = 1; i <= afterCount; i++) {
+            const idx = lineNum + i;
+            after.push(idx <= lines.length ? lines[idx - 1] ?? "" : "");
+        }
 
         if (quality === "exact") {
             return (
@@ -731,22 +729,23 @@ TROUBLESHOOTING:
         quality: string,
         loose: boolean,
     ): boolean {
-        const line = lines[lineNum - 1];
-        if (!line) return false;
+        const line = this.getAnchorLine(lines, lineNum, anchor);
+        if (line === undefined) return false;
 
-        const beforeStart = lineNum - 2;
-        const beforeEnd = lineNum - 1;
-        const afterStart = lineNum + 1;
-        const afterEnd = lineNum + 2;
+        const beforeCount = Math.max(2, anchor.before?.length || 0);
+        const afterCount = Math.max(2, anchor.after?.length || 0);
 
-        const before = [
-            beforeStart >= 1 ? lines[beforeStart - 1] : "",
-            beforeEnd >= 1 ? lines[beforeEnd - 1] : "",
-        ];
-        const after = [
-            afterStart <= lines.length ? lines[afterStart - 1] : "",
-            afterEnd <= lines.length ? lines[afterEnd - 1] : "",
-        ];
+        const before: string[] = [];
+        for (let i = beforeCount; i >= 1; i--) {
+            const idx = lineNum - i;
+            before.push(idx >= 1 ? lines[idx - 1] ?? "" : "");
+        }
+
+        const after: string[] = [];
+        for (let i = 1; i <= afterCount; i++) {
+            const idx = lineNum + i;
+            after.push(idx <= lines.length ? lines[idx - 1] ?? "" : "");
+        }
 
         if (quality === "exact") {
             return (
@@ -776,6 +775,26 @@ TROUBLESHOOTING:
                 this.compareContextFuzzy(after, anchor.after, loose, "after")
             );
         }
+    }
+
+    private supportsVirtualEofLine(anchor: LineAnchor): boolean {
+        return anchor.text === "";
+    }
+
+    private getAnchorLine(
+        lines: string[],
+        lineNum: number,
+        anchor: LineAnchor,
+    ): string | undefined {
+        if (lineNum >= 1 && lineNum <= lines.length) {
+            return lines[lineNum - 1];
+        }
+
+        if (lineNum === lines.length + 1 && this.supportsVirtualEofLine(anchor)) {
+            return "";
+        }
+
+        return undefined;
     }
 
     private compareContext(
@@ -892,13 +911,25 @@ TROUBLESHOOTING:
     }
 
     private formatSingleCandidateSuggestion(lines: string[], anchor: LineAnchor, candidateLine: number): string {
+        const clampedHintLine = clampLineNumber(anchor.line, lines.length);
+        const mismatchDetails = this.formatAnchorMismatchDetails(lines, anchor, candidateLine);
         const parts: string[] = [
             `Closest match window around line ${candidateLine} (±5):`,
             formatDisplayWindow(lines, candidateLine, 5).join("\n"),
-            "",
-            `Anchor hint window around line ${clampLineNumber(anchor.line, lines.length)} (±5):`,
-            formatDisplayWindow(lines, anchor.line, 5).join("\n"),
         ];
+
+        if (mismatchDetails.length > 0) {
+            parts.push("");
+            parts.push("Mismatch details:");
+            parts.push(...mismatchDetails);
+        }
+
+        if (candidateLine !== clampedHintLine) {
+            parts.push("");
+            parts.push(`Anchor hint window around line ${clampedHintLine} (±5):`);
+            parts.push(formatDisplayWindow(lines, clampedHintLine, 5).join("\n"));
+        }
+
         return parts.join("\n");
     }
 
@@ -919,6 +950,52 @@ TROUBLESHOOTING:
         parts.push(formatDisplayWindow(lines, anchor.line, 5).join("\n"));
 
         return parts.join("\n");
+    }
+
+    private formatAnchorMismatchDetails(
+        lines: string[],
+        anchor: LineAnchor,
+        candidateLine: number,
+    ): string[] {
+        const details: string[] = [];
+
+        const actualAnchorLine = lines[candidateLine - 1] ?? "";
+        if (actualAnchorLine !== anchor.text) {
+            details.push(`anchor expected: ${anchor.text}`);
+            details.push(`anchor actual:   ${actualAnchorLine}`);
+        }
+
+        const expectedBefore = anchor.before || [];
+        const actualBefore: string[] = [];
+        for (let i = expectedBefore.length; i >= 1; i--) {
+            const idx = candidateLine - i;
+            actualBefore.push(idx >= 1 ? lines[idx - 1] ?? "" : "");
+        }
+        for (let i = 0; i < expectedBefore.length; i++) {
+            const expected = expectedBefore[i] ?? "";
+            const actual = actualBefore[i] ?? "";
+            if (expected !== actual) {
+                details.push(`before[${i}] expected: ${expected}`);
+                details.push(`before[${i}] actual:   ${actual}`);
+            }
+        }
+
+        const expectedAfter = anchor.after || [];
+        const actualAfter: string[] = [];
+        for (let i = 1; i <= expectedAfter.length; i++) {
+            const idx = candidateLine + i;
+            actualAfter.push(idx <= lines.length ? lines[idx - 1] ?? "" : "");
+        }
+        for (let i = 0; i < expectedAfter.length; i++) {
+            const expected = expectedAfter[i] ?? "";
+            const actual = actualAfter[i] ?? "";
+            if (expected !== actual) {
+                details.push(`after[${i}] expected: ${expected}`);
+                details.push(`after[${i}] actual:   ${actual}`);
+            }
+        }
+
+        return details;
     }
 
     private similarity(a: string, b: string): number {

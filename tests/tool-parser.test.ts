@@ -31,6 +31,37 @@ describe("parseToolCalls", () => {
             expect(result.toolCalls).toHaveLength(2);
         });
 
+        it("should parse task.ask and task.choose", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool":"task.ask","params":{"question":"Need more info?"}},
+    {"tool":"task.choose","params":{"question":"Pick one","options":["a","b"]}}
+]
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(2);
+            expect(result.toolCalls![0].tool).toBe("task.ask");
+            expect(result.toolCalls![1].tool).toBe("task.choose");
+        });
+
+        it("should parse task.notepad", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool":"task.notepad","params":{"mode":"append","content":{"$heredoc":"NOTE"}}}
+]
+<<<NOTE
+summary line 1
+summary line 2
+NOTE
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(1);
+            expect(result.toolCalls![0].tool).toBe("task.notepad");
+            expect(result.toolCalls![0].params.content).toEqual(["summary line 1", "summary line 2"]);
+        });
+
         it("should parse todo.set with multiple items", () => {
             const text = `\`\`\`tool-call
 [
@@ -100,6 +131,26 @@ END
                 "const y = 'test\\n';",
                 "const z = `backtick ${var}`;",
             ]);
+        });
+
+        it("should accept file.create and file.overwrite tool names", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool":"file.create","params":{"path":"a.txt","content":{"$heredoc":"CREATE"}}},
+    {"tool":"file.overwrite","params":{"path":"b.txt","content":{"$heredoc":"OVERWRITE"}}}
+]
+<<<CREATE
+hello
+CREATE
+<<<OVERWRITE
+world
+OVERWRITE
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(true);
+            expect(result.toolCalls).toHaveLength(2);
+            expect(result.toolCalls![0].tool).toBe("file.create");
+            expect(result.toolCalls![1].tool).toBe("file.overwrite");
         });
 
         it("should handle multiple heredocs with different delimiters", () => {
@@ -236,6 +287,55 @@ EOF
             expect(result.toolCalls![0].params.edits[0].content).toContain("\`\`\`tool-call");
             expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "dir.list",');
             expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "task.end",');
+        });
+
+        it("should fail when referenced heredoc delimiter is missing", () => {
+            const text = `\`\`\`tool-call
+[{"tool":"file.edit","params":{"path":"a.ts","edits":[{"content":{"$heredoc":"MISSING"}}]}}]
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(false);
+            expect(result.error?.message).toContain("Heredoc parse error");
+            expect(result.error?.message).toContain("not found");
+        });
+
+        it("should fail when heredoc is not closed", () => {
+            const text = `\`\`\`tool-call
+[{"tool":"file.edit","params":{"path":"a.ts","edits":[{"content":{"$heredoc":"EOF"}}]}}]
+<<<EOF
+line 1
+line 2
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(false);
+            expect(result.error?.message).toContain("Unclosed heredoc");
+        });
+
+        it("should fail on duplicate heredoc delimiters in one block", () => {
+            const text = `\`\`\`tool-call
+[{"tool":"file.edit","params":{"path":"a.ts","edits":[{"content":{"$heredoc":"EOF"}}]}}]
+<<<EOF
+first
+EOF
+<<<EOF
+second
+EOF
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(false);
+            expect(result.error?.message).toContain("Duplicate heredoc delimiter");
+        });
+
+        it("should fail when heredoc is defined but not referenced", () => {
+            const text = `\`\`\`tool-call
+[{"tool":"file.load","params":{"path":"a.ts"}}]
+<<<EOF
+unused
+EOF
+\`\`\``;
+            const result = parseToolCalls(text);
+            expect(result.success).toBe(false);
+            expect(result.error?.message).toContain("defined but not referenced");
         });
     });
 

@@ -1,0 +1,30 @@
+tokenLimit: 128000
+
+llm:
+  model: gpt-4o
+  baseURL: https://api.openai.com/v1
+  temperature: 0.2
+  maxTokens: 4096
+
+security:
+  workspaceRoot: .
+  allowOutsideWorkspace: false
+  watch:
+    enabled: true
+    debounceMs: 80
+  shell:
+    enabled: true
+    timeout: 30
+    blockedCommands:
+      - rm -rf
+      - sudo
+      - :(){:|:&};:
+  file:
+    maxFileSize: 1048576
+    blockedExtensions:
+      - .exe
+      - .bin
+
+logger:
+  level: info
+  style: console

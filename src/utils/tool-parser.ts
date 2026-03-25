@@ -11,8 +11,13 @@ const VALID_TOOL_NAMES = new Set([
   "file.unload",
   "file.edit",
   "file.peek",
+  "file.create",
+  "file.overwrite",
   "todo.set",
   "todo.update",
+  "task.ask",
+  "task.choose",
+  "task.notepad",
   "shell.exec",
   "task.end",
 ]);
@@ -28,15 +33,23 @@ export interface ParseResult {
   };
 }
 
-export function parseToolCalls(text: string): ParseResult {
-  const blocks = extractToolCallBlocks(text);
+class HeredocParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HeredocParseError";
+  }
+}
 
-  if (blocks.length === 0) {
+export function parseToolCalls(text: string): ParseResult {
+  const { blocks, errors: blockErrors } = extractToolCallBlocks(text);
+
+  if (blocks.length === 0 && blockErrors.length === 0) {
     return { success: true, toolCalls: [] };
   }
 
   const allToolCalls: ToolCall[] = [];
-  const errors: string[] = [];
+  const errors: string[] = [...blockErrors];
+  let hasFatalParseError = blockErrors.length > 0;
 
   for (const block of blocks) {
     try {
@@ -57,12 +70,18 @@ export function parseToolCalls(text: string): ParseResult {
           errors.push(validation.error!);
         }
       }
+      validateUnusedHeredocs(parsed, heredocs);
     } catch (error) {
-      errors.push(`JSON parse error: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof HeredocParseError) {
+        hasFatalParseError = true;
+        errors.push(`Heredoc parse error: ${error.message}`);
+      } else {
+        errors.push(`JSON parse error: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
-  if (errors.length > 0 && allToolCalls.length === 0) {
+  if (hasFatalParseError || (errors.length > 0 && allToolCalls.length === 0)) {
     return {
       success: false,
       error: {
@@ -76,8 +95,9 @@ export function parseToolCalls(text: string): ParseResult {
   return { success: true, toolCalls: allToolCalls };
 }
 
-function extractToolCallBlocks(text: string): string[] {
+function extractToolCallBlocks(text: string): { blocks: string[]; errors: string[] } {
   const blocks: string[] = [];
+  const errors: string[] = [];
   const lines = text.split('\n');
 
   let inBlock = false;
@@ -117,7 +137,15 @@ function extractToolCallBlocks(text: string): string[] {
     }
   }
 
-  return blocks;
+  if (inBlock) {
+    if (heredocDelimiter) {
+      errors.push(`Unclosed heredoc '${heredocDelimiter}' inside tool-call block`);
+    } else {
+      errors.push("Unclosed tool-call block: missing closing ```");
+    }
+  }
+
+  return { blocks, errors };
 }
 
 interface HeredocContent {
@@ -139,17 +167,26 @@ function extractHeredocs(blockContent: string): { jsonContent: string; heredocs:
 
     if (heredocMatch) {
       const delimiter = heredocMatch[1];
+      if (heredocs.has(delimiter)) {
+        throw new HeredocParseError(`Duplicate heredoc delimiter '${delimiter}' in one tool-call block`);
+      }
       const heredocLines: string[] = [];
       i++;
+      let closed = false;
 
       while (i < lines.length) {
         if (lines[i].trim() === delimiter) {
           heredocs.set(delimiter, { delimiter, lines: heredocLines });
           i++;
+          closed = true;
           break;
         }
         heredocLines.push(lines[i]);
         i++;
+      }
+
+      if (!closed) {
+        throw new HeredocParseError(`Heredoc '${delimiter}' is not closed`);
       }
     } else {
       jsonLines.push(line);
@@ -187,7 +224,7 @@ function resolveHeredocsInObject(obj: unknown, heredocs: Map<string, HeredocCont
     if (heredoc) {
       return heredoc.lines;
     }
-    throw new Error(`Heredoc '${delimiter}' not found. Make sure the heredoc is defined in the tool-call block.`);
+    throw new HeredocParseError(`Heredoc '${delimiter}' not found. Make sure the heredoc is defined in the same tool-call block.`);
   }
 
   const result: Record<string, unknown> = {};
@@ -195,6 +232,39 @@ function resolveHeredocsInObject(obj: unknown, heredocs: Map<string, HeredocCont
     result[key] = resolveHeredocsInObject(value, heredocs);
   }
   return result;
+}
+
+function collectReferencedHeredocs(obj: unknown, referenced: Set<string>): void {
+  if (obj === null || typeof obj !== "object") {
+    return;
+  }
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      collectReferencedHeredocs(item, referenced);
+    }
+    return;
+  }
+
+  const record = obj as Record<string, unknown>;
+  if (typeof record["$heredoc"] === "string") {
+    referenced.add(record["$heredoc"]);
+    return;
+  }
+
+  for (const value of Object.values(record)) {
+    collectReferencedHeredocs(value, referenced);
+  }
+}
+
+function validateUnusedHeredocs(parsedToolCalls: unknown, heredocs: Map<string, HeredocContent>): void {
+  const referenced = new Set<string>();
+  collectReferencedHeredocs(parsedToolCalls, referenced);
+
+  const unused = Array.from(heredocs.keys()).filter((d) => !referenced.has(d));
+  if (unused.length > 0) {
+    throw new HeredocParseError(`Heredoc delimiter(s) defined but not referenced: ${unused.join(", ")}`);
+  }
 }
 
 function validateToolCall(toolCall: unknown): { valid: boolean; error?: string } {
@@ -307,6 +377,18 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
                 lines.push(`File now has ${data.file_state?.total_lines} lines.`);
                 break;
             }
+            case "file.create": {
+                const data = result.data!;
+                lines.push(`Created: ${toolCall.params.path}`);
+                lines.push(`File now has ${data.total_lines} lines.`);
+                break;
+            }
+            case "file.overwrite": {
+                const data = result.data!;
+                lines.push(`Overwrote: ${toolCall.params.path}`);
+                lines.push(`File now has ${data.total_lines} lines.`);
+                break;
+            }
             case "file.unload": {
                 lines.push(`Unloaded: ${toolCall.params.path}`);
                 lines.push("File removed from workspace context.");
@@ -331,6 +413,21 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
             }
             case "todo.update": {
                 lines.push(`Updated: ${toolCall.params.text} → ${toolCall.params.state}`);
+                break;
+            }
+            case "task.ask": {
+                lines.push(`Asked user: ${toolCall.params.question}`);
+                lines.push(`Answer: ${result.data?.answer || ""}`);
+                break;
+            }
+            case "task.choose": {
+                lines.push(`Asked user to choose: ${toolCall.params.question}`);
+                lines.push(`Selection: ${result.data?.selection || ""}`);
+                break;
+            }
+            case "task.notepad": {
+                lines.push(`Notepad updated with mode: ${toolCall.params.mode || "append"}`);
+                lines.push(`Total notepad lines: ${result.data?.total_lines || 0}`);
                 break;
             }
             case "task.end": {

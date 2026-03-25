@@ -5,6 +5,7 @@ import {
     ContextStatus,
     ContextSections,
     TodoItem,
+    NotepadWorkspace,
 } from "../types";
 import { formatDisplayLine } from "../utils/str";
 
@@ -19,36 +20,42 @@ interface TemplateStrings {
     fileUnloadedMarker: string;
     todoWorkspaceHeader: string;
     todoWorkspaceEmpty: string;
+    notepadWorkspaceHeader: string;
+    notepadWorkspaceEmpty: string;
     sectionDelimiter: string;
     separator: string;
     todoMarkers: Record<TodoItem['state'], string>;
 }
 
 const TEMPLATES: TemplateStrings = {
-    toolDefinitionsHeader: `=========AVAILABLE TOOLS
-The following tools are available for you to use:`,
+    toolDefinitionsHeader: `## Available Tools
+The following tools are available:`,
 
     toolDefinitionsFooter: `Use these tools by making tool calls with the appropriate parameters.`,
 
-    contextStatusHeader: `=========CONTEXT STATUS`,
+    contextStatusHeader: `## Context Status`,
 
-    directoryWorkspaceHeader: `=========DIRECTORY WORKSPACE`,
+    directoryWorkspaceHeader: `## Directory Workspace`,
 
     directoryWorkspaceEmpty: `(empty)`,
 
-    fileWorkspaceHeader: `=========FILE WORKSPACE`,
+    fileWorkspaceHeader: `## File Workspace`,
 
     fileWorkspaceEmpty: `(empty)`,
 
     fileUnloadedMarker: `[UNLOADED]`,
 
-    todoWorkspaceHeader: `=========TODO`,
+    todoWorkspaceHeader: `## Todo`,
 
     todoWorkspaceEmpty: `(empty)`,
 
-    sectionDelimiter: `=========`,
+    notepadWorkspaceHeader: `## Notepad`,
 
-    separator: `---------`,
+    notepadWorkspaceEmpty: `(empty)`,
+
+    sectionDelimiter: `--`,
+
+    separator: `- -`,
 
     todoMarkers: {
         done: `[x]`,
@@ -77,6 +84,7 @@ export class PromptBuilder {
         directoryWorkspace: DirectoryWorkspace,
         fileWorkspace: FileWorkspace,
         todoWorkspace: TodoWorkspace,
+        notepadWorkspace: NotepadWorkspace,
         toolResults: string[],
     ): ContextSections {
         return {
@@ -87,6 +95,7 @@ export class PromptBuilder {
             directoryWorkspace: this.formatDirectoryWorkspace(directoryWorkspace),
             fileWorkspace: this.formatFileWorkspace(fileWorkspace),
             todoWorkspace: this.formatTodoWorkspace(todoWorkspace),
+            notepadWorkspace: this.formatNotepadWorkspace(notepadWorkspace),
             toolResults: this.formatToolResults(toolResults),
         };
     }
@@ -99,6 +108,7 @@ export class PromptBuilder {
             sections.directoryWorkspace,
             sections.fileWorkspace,
             sections.todoWorkspace,
+            sections.notepadWorkspace,
             sections.toolResults,
             "",
             sections.taskPrompt,
@@ -114,6 +124,7 @@ export class PromptBuilder {
             sections.directoryWorkspace,
             sections.fileWorkspace,
             sections.todoWorkspace,
+            sections.notepadWorkspace,
             sections.toolResults,
         ].filter(Boolean);
 
@@ -254,15 +265,32 @@ export class PromptBuilder {
         return parts.join("\n");
     }
 
+    private formatNotepadWorkspace(workspace: NotepadWorkspace): string {
+        if (workspace.lines.length === 0) {
+            return [
+                TEMPLATES.notepadWorkspaceHeader,
+                TEMPLATES.notepadWorkspaceEmpty,
+                TEMPLATES.sectionDelimiter,
+            ].join("\n");
+        }
+
+        const parts: string[] = [TEMPLATES.notepadWorkspaceHeader];
+        for (const line of workspace.lines) {
+            parts.push(`- ${line}`);
+        }
+        parts.push(TEMPLATES.sectionDelimiter);
+        return parts.join("\n");
+    }
+
     private formatToolResults(results: string[]): string {
         if (results.length === 0) {
             return "";
         }
 
         return [
-            "=========TOOL RESULTS",
+            "## Tool Results",
             ...results,
-            "=========",
+            "--",
         ].join("\n");
     }
 
