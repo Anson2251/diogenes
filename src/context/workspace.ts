@@ -295,7 +295,8 @@ export class WorkspaceManager {
         isDirectory: boolean,
     ): Promise<void> {
         // Check if path is within workspace
-        if (!absolutePath.startsWith(this.workspaceRoot)) {
+        const relative = path.relative(this.workspaceRoot, absolutePath);
+        if (relative.startsWith("..") || path.isAbsolute(relative)) {
             throw new Error(
                 `Path ${absolutePath} is outside workspace root ${this.workspaceRoot}`,
             );

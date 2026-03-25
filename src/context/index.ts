@@ -220,12 +220,8 @@ export class DiogenesContextManager {
             case "file.load":
             case "file.unload":
             case "file.edit":
-            case "file.create":
-            case "file.overwrite":
-            case "file.append":
             case "todo.set":
             case "todo.update":
-            case "todo.append":
                 break;
         }
     }

@@ -144,4 +144,4 @@ The file editing tool (`file.edit`) is currently in testing and may contain bugs
 
 Diogenes is released under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-Copyright (c) 2024 Diogenes Contributors
+Copyright (c) 2024

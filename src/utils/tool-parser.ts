@@ -11,12 +11,8 @@ const VALID_TOOL_NAMES = new Set([
   "file.unload",
   "file.edit",
   "file.peek",
-  "file.create",
-  "file.overwrite",
-  "file.append",
   "todo.set",
   "todo.update",
-  "todo.append",
   "shell.exec",
   "task.end",
 ]);
@@ -334,7 +330,7 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
                 break;
             }
             case "todo.update": {
-                lines.push(`Updated: ${toolCall.params.index} → ${toolCall.params.state}`);
+                lines.push(`Updated: ${toolCall.params.text} → ${toolCall.params.state}`);
                 break;
             }
             case "task.end": {
@@ -345,7 +341,7 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
             case "shell.exec": {
                 const data = result.data!;
                 lines.push(`Executed: ${toolCall.params.command}`);
-                lines.push(`Exit code: ${data.exitCode}`);
+                lines.push(`Exit code: ${data.exit_code}`);
                 if (data.stdout) {
                     lines.push(`stdout:\n${truncate(data.stdout, 500)}`);
                 }

@@ -6,6 +6,7 @@ import {
     ContextSections,
     TodoItem,
 } from "../types";
+import { formatDisplayLine } from "../utils/str";
 
 interface TemplateStrings {
     toolDefinitionsHeader: string;
@@ -211,7 +212,7 @@ export class PromptBuilder {
                 for (let i = 0; i < rangeLines.length; i++) {
                     const lineNum = range.start + i;
                     const line = rangeLines[i];
-                    parts.push(`${lineNum.toString().padStart(3)} ${line.length > 0 ? "" : "<EMPTY LINE> "}| ${line}`);
+                    parts.push(formatDisplayLine(lineNum, line, { padWidth: 3 }));
                 }
 
                 currentLine = range.end + 1;

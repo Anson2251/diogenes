@@ -253,9 +253,13 @@ export async function executeTask(
 
                 for (let i = 0; i < toolCalls.length; i++) {
                     const toolCall = toolCalls[i];
-                    if (toolCall.tool === "task.end") {
+                    const result = results[i];
+                    if (toolCall.tool === "task.end" && result?.success) {
                         taskEnded = true;
-                        finalResult = `Task completed: ${toolCall.params?.reason || "No reason provided"}`;
+                        finalResult =
+                            typeof result.data?.summary === "string" && result.data.summary.length > 0
+                                ? result.data.summary
+                                : result.data?.reason || toolCall.params?.reason || "No reason provided";
                         break;
                     }
                 }

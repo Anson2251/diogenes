@@ -10,6 +10,7 @@ describe("FileEditTool", () => {
     const testDir = path.join(__dirname, "test-file-edit-workspace");
     const testFilePath = path.join(testDir, "test.txt");
     const multiLineFilePath = path.join(testDir, "multi-line.txt");
+    const duplicateFilePath = path.join(testDir, "duplicate.txt");
 
     beforeEach(() => {
         fs.mkdirSync(testDir, { recursive: true });
@@ -17,6 +18,10 @@ describe("FileEditTool", () => {
         fs.writeFileSync(
             multiLineFilePath,
             "line 1\nline 2\nline 3\nline 4\nline 5\n",
+        );
+        fs.writeFileSync(
+            duplicateFilePath,
+            "alpha\nrepeat\nbeta\nrepeat\ngamma\n",
         );
         workspace = new WorkspaceManager(testDir);
         tool = new FileEditTool(workspace);
@@ -345,6 +350,137 @@ describe("FileEditTool", () => {
             expect(result.success).toBe(true);
             const content = fs.readFileSync(testFilePath, "utf-8");
             expect(content).toBe("Line A\nLine B\nLine C\n");
+        });
+
+        it("should respect single-line context instead of falling back to line_hint", async () => {
+            const result = await tool.execute({
+                path: duplicateFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 4,
+                                text: "repeat",
+                                before: ["beta"],
+                                after: ["gamma"],
+                            },
+                        },
+                        content: ["REPLACED SECOND"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            const content = fs.readFileSync(duplicateFilePath, "utf-8");
+            expect(content).toContain("alpha\nrepeat\nbeta\nREPLACED SECOND\ngamma\n");
+        });
+
+        it("should report ambiguity when duplicate text has no disambiguating context", async () => {
+            const originalContent = fs.readFileSync(duplicateFilePath, "utf-8");
+
+            const result = await tool.execute({
+                path: duplicateFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 2,
+                                text: "repeat",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("ATOMIC_FAILURE");
+            expect(fs.readFileSync(duplicateFilePath, "utf-8")).toBe(originalContent);
+        });
+
+        it("should include ±5 line windows for each ambiguous match in suggestion", async () => {
+            const result = await tool.execute({
+                path: duplicateFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 2,
+                                text: "repeat",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("ATOMIC_FAILURE");
+            expect(result.error?.suggestion).toContain("Match 1 at line");
+            expect(result.error?.suggestion).toContain("Match 2 at line");
+            expect(result.error?.suggestion).toContain("1 | alpha");
+            expect(result.error?.suggestion).toContain("2 | repeat");
+            expect(result.error?.suggestion).toContain("4 | repeat");
+        });
+
+        it("should reject conflicting context instead of silently matching by line hint", async () => {
+            const originalContent = fs.readFileSync(duplicateFilePath, "utf-8");
+
+            const result = await tool.execute({
+                path: duplicateFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 4,
+                                text: "repeat",
+                                before: ["wrong before"],
+                                after: ["gamma"],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(false);
+            expect(fs.readFileSync(duplicateFilePath, "utf-8")).toBe(originalContent);
+        });
+
+        it("should include anchor hint ±5 lines in suggestion when no match", async () => {
+            const result = await tool.execute({
+                path: multiLineFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 3,
+                                text: "line 3 but wrong",
+                                before: ["line 2"],
+                                after: ["line 4"],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("ATOMIC_FAILURE");
+            expect(result.error?.suggestion).toContain("Anchor hint window around line 3 (±5):");
+            expect(result.error?.suggestion).toContain("1 | line 1");
+            expect(result.error?.suggestion).toContain("3 | line 3");
+            expect(result.error?.suggestion).toContain("5 | line 5");
+            expect(result.error?.suggestion).toContain("Expected anchor context:");
         });
 
         it("should rollback all edits if one fails in atomic mode", async () => {

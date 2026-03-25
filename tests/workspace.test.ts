@@ -239,6 +239,22 @@ describe("WorkspaceManager", () => {
             expect(entry.path).toBe(testFilePath);
         });
 
+        it("should reject absolute paths that only share a prefix with the workspace", async () => {
+            const siblingDir = `${testDir}-outside`;
+            const siblingFilePath = path.join(siblingDir, "secret.txt");
+
+            fs.mkdirSync(siblingDir, { recursive: true });
+            fs.writeFileSync(siblingFilePath, "secret");
+
+            try {
+                await expect(workspace.loadFile(siblingFilePath)).rejects.toThrow(
+                    /outside workspace root/,
+                );
+            } finally {
+                fs.rmSync(siblingDir, { recursive: true, force: true });
+            }
+        });
+
         it("should handle nested directories", async () => {
             const entry = await workspace.loadFile("nested/nested-file.txt");
 

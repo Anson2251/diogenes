@@ -22,7 +22,7 @@ The workspace is YOUR MEMORY of what you've loaded on your table. It tracks thre
 
 **3. Todo Workspace** - Your task list
 - Shows: list of todo items with states (pending/active/done)
-- Use: \`todo.set\`, \`todo.update\`, \`todo.append\` to manage
+- Use: \`todo.set\`, \`todo.update\` to manage
 - Why: Track progress on multi-step tasks
 
 **Workspace Status is Always Visible**: After each tool call, you'll see the current workspace state injected into your context. Use this to:

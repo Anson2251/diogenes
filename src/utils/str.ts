@@ -71,3 +71,47 @@ export function similarityScore(a: string | undefined | null, b: string | undefi
     
     return matches / longer.length;
 }
+
+export interface LineDisplayOptions {
+    padWidth?: number;
+    normalizeCarriageReturn?: boolean;
+}
+
+export function formatDisplayLine(
+    lineNumber: number,
+    line: string | undefined | null,
+    options: LineDisplayOptions = {},
+): string {
+    const { padWidth = 0, normalizeCarriageReturn = true } = options;
+    const raw = line ?? "";
+    const content = normalizeCarriageReturn ? raw.replace(/\r$/, "") : raw;
+    const number = padWidth > 0 ? lineNumber.toString().padStart(padWidth) : lineNumber.toString();
+    return `${number} ${content.length > 0 ? "" : "<EMPTY LINE> "}| ${content}`;
+}
+
+export function clampLineNumber(line: number, totalLines: number): number {
+    if (totalLines <= 0) return 1;
+    return Math.max(1, Math.min(line || 1, totalLines));
+}
+
+export function formatDisplayWindow(
+    lines: string[],
+    centerLine: number,
+    radius: number,
+    options: LineDisplayOptions = {},
+): string[] {
+    if (lines.length === 0) {
+        return ["(empty file)"];
+    }
+
+    const clampedCenter = clampLineNumber(centerLine, lines.length);
+    const start = Math.max(1, clampedCenter - radius);
+    const end = Math.min(lines.length, clampedCenter + radius);
+    const output: string[] = [];
+
+    for (let lineNo = start; lineNo <= end; lineNo++) {
+        output.push(formatDisplayLine(lineNo, lines[lineNo - 1], options));
+    }
+
+    return output;
+}

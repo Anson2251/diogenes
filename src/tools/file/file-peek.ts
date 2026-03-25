@@ -7,6 +7,7 @@ import { ToolResult } from "../../types";
 import { WorkspaceManager } from "../../context/workspace";
 import * as fs from "fs";
 import * as path from "path";
+import { formatDisplayLine } from "../../utils/str";
 
 export class FilePeekTool extends BaseTool {
     private workspace: WorkspaceManager;
@@ -94,7 +95,10 @@ This tool is lightweight and doesn't affect your workspace context.`,
                 );
             }
 
-            const lines = allLines.map((l, i) => `${i+1} ${l.length > 0 ? "" : "<EMPTY LINE> "}| ${l}`).slice(startLine - 1, endLine).map(l => l.replace(/\r$/, ""));
+            const lines: string[] = [];
+            for (let i = startLine; i <= endLine; i++) {
+                lines.push(formatDisplayLine(i, allLines[i - 1]));
+            }
 
             return this.success({
                 lines,

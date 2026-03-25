@@ -15,7 +15,13 @@ import {
     EditError,
     LineAnchor,
 } from "../../types";
-import { rstrip, compareLines, containsOrContained } from "../../utils/str";
+import {
+    rstrip,
+    compareLines,
+    containsOrContained,
+    clampLineNumber,
+    formatDisplayWindow,
+} from "../../utils/str";
 
 interface FileEditParams {
     path: string;
@@ -59,6 +65,9 @@ COMMON FAILURE MODES - AVOID THESE:
 ❌ WRONG: Skipping context: { "line": 10, "text": "const x = 1;" }
 ✅ RIGHT: Include context: { "line": 10, "text": "const x = 1;", "before": ["// init", "import { x }"], "after": ["const y = 2", "return x"] }
 
+❌ WRONG: Reusing a line that appears multiple times without context
+✅ RIGHT: When the same text appears more than once, you MUST provide "before" and/or "after" context to disambiguate the target location
+
 ❌ WRONG: Using JSON escaping for multi-line content: "content": ["line 1\\n", "line 2\\n"]
 ✅ RIGHT: Use heredoc (see below)
 
@@ -80,8 +89,8 @@ Benefits:
 - Essential for code, markdown, or any content with special characters
 
 EDIT MODES:
-- "replace": Replace the anchor line(s) with new content (requires "end" anchor)
-- "delete": Remove the anchor line(s) (requires "end" anchor)
+- "replace": Replace content at the anchor. For a single-line edit, provide only "start". For a multi-line range, provide both "start" and "end".
+- "delete": Remove content at the anchor. For a single-line deletion, provide only "start". For a multi-line range, provide both "start" and "end".
 - "insert_before": Insert new content before the anchor line
 - "insert_after": Insert new content after the anchor line
 
@@ -89,6 +98,11 @@ MULTIPLE EDITS:
 - Edits are applied bottom-to-top (descending line order)
 - Overlapping ranges are rejected
 - MERGE nearby edits into one larger edit instead of many small ones
+
+MULTIPLE MATCHES:
+- If the anchor text appears in multiple places, the edit is ambiguous
+- In that case, include "before" and/or "after" context copied exactly from the file
+- Do not rely on line number alone to disambiguate repeated text
 
 EXAMPLE - Replace multiple lines using heredoc:
 
@@ -197,10 +211,10 @@ EOF
 
             const atomic = options.atomic ?? true;
 
-            const preApplyResults = this.validateAnchors(lines, edits);
+            const preApplyResults = this.validateAnchors(filePath, lines, edits);
 
             const validEdits: Array<{ edit: Edit; matchResult: typeof preApplyResults[0] }> = [];
-            const invalidEdits: Array<{ edit: Edit; error: EditError }> = [];
+            const invalidEdits: Array<{ edit: Edit; error: EditError; suggestion?: string }> = [];
 
             for (let i = 0; i < edits.length; i++) {
                 const result = preApplyResults[i];
@@ -215,6 +229,7 @@ EOF
                             message: result.errorMessage || "Anchor validation failed",
                             candidates: result.candidates,
                         },
+                        suggestion: result.errorSuggestion,
                     });
                     errors.push({
                         index: result.editIndex,
@@ -226,6 +241,19 @@ EOF
             }
 
             if (atomic && invalidEdits.length > 0) {
+                const suggestionParts: string[] = [
+                    "Fix the anchor issues or set atomic: false for partial application.",
+                    "To view exact content again, use tool `file.peek`.",
+                ];
+
+                for (const invalid of invalidEdits) {
+                    if (invalid.suggestion) {
+                        suggestionParts.push("");
+                        suggestionParts.push(`Edit ${invalid.error.index}:`);
+                        suggestionParts.push(invalid.suggestion);
+                    }
+                }
+
                 return this.error(
                     "ATOMIC_FAILURE",
                     `Atomic edit failed: ${invalidEdits.length} of ${edits.length} edits could not be validated`,
@@ -233,10 +261,11 @@ EOF
                         failedEdits: invalidEdits.map((e) => ({
                             index: e.error.index,
                             error: e.error.error,
+                            suggestion: e.suggestion,
                         })),
                         appliedCount: 0,
                     },
-                    "Fix the anchor issues or set atomic: false for partial application. To view the exact content again, use tool `file.peek` instead of `file.load`",
+                    suggestionParts.join("\n"),
                 );
             }
 
@@ -359,6 +388,7 @@ EOF
     }
 
     private validateAnchors(
+        filePath: string,
         lines: string[],
         edits: Edit[],
     ):
@@ -367,6 +397,7 @@ EOF
             editIndex: number;
             errorCode?: string;
             errorMessage?: string;
+            errorSuggestion?: string;
             candidates?: Array<{ line: number; preview: string }>;
             matchedRange: { start: number; end: number };
             matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
@@ -376,6 +407,7 @@ EOF
             editIndex: number;
             errorCode?: string;
             errorMessage?: string;
+            errorSuggestion?: string;
             candidates?: Array<{ line: number; preview: string }>;
             matchedRange: { start: number; end: number };
             matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
@@ -383,7 +415,7 @@ EOF
 
         for (let i = 0; i < edits.length; i++) {
             const edit = edits[i];
-            const match = this.findAnchorMatch(lines, edit);
+            const match = this.findAnchorMatch(filePath, lines, edit);
 
             if (match) {
                 results.push({
@@ -396,6 +428,7 @@ EOF
                 const candidates = this.findCandidates(lines, edit);
                 let errorMessage: string;
                 let errorCode: string;
+                let errorSuggestion: string;
 
                 if (candidates.length === 0) {
                     errorCode = "NO_MATCH";
@@ -406,6 +439,7 @@ TROUBLESHOOTING:
 1. Verify whether you copied the EXACT text from the file again (use file.peek to read it)
 2. Include "before" and "after" context fields to help locate the line
 3. Check if the file has been modified since you last read it`;
+                    errorSuggestion = this.formatNoMatchSuggestion(lines, edit.anchor.start);
                 } else if (candidates.length === 1) {
                     errorCode = "NO_MATCH";
                     const c = candidates[0];
@@ -420,6 +454,7 @@ TROUBLESHOOTING:
 1. Use line ${c.line} instead of ${edit.anchor.start.line}
 2. Copy the EXACT text from the file (the actual line is shown above)
 3. Include "before" and "after" context fields for disambiguation`;
+                    errorSuggestion = this.formatSingleCandidateSuggestion(lines, edit.anchor.start, c.line);
                 } else {
                     errorCode = "AMBIGUOUS_MATCH";
                     errorMessage = `Found ${candidates.length} possible matches for anchor.
@@ -429,6 +464,7 @@ TROUBLESHOOTING:
 1. Add "before" and "after" context fields (2 lines each) to disambiguate
 2. Use a more unique portion of the line as the "text" field
 3. Verify the line number is correct`;
+                    errorSuggestion = this.formatAmbiguousSuggestion(lines, edit.anchor.start, candidates.map((c) => c.line));
                 }
 
                 results.push({
@@ -436,6 +472,7 @@ TROUBLESHOOTING:
                     editIndex: i,
                     errorCode,
                     errorMessage,
+                    errorSuggestion,
                     candidates: candidates.map((c) => ({
                         line: c.line,
                         preview: lines[c.line - 1] || "",
@@ -450,13 +487,16 @@ TROUBLESHOOTING:
     }
 
     private findAnchorMatch(
+        filePath: string,
         lines: string[],
         edit: Edit,
     ): { matchedRange: { start: number; end: number }; matchQuality: "exact" | "fuzzy" | "substring" | "line_hint" } | null {
         const isRange = edit.mode === "replace" || edit.mode === "delete";
-        const loose = this.isLooseWhitespace(lines[0] || "");
+        const loose = this.isLooseWhitespace(filePath);
 
         if (isRange && edit.anchor.end) {
+            let foundAmbiguousMatch = false;
+
             for (const quality of ["exact", "fuzzy", "substring", "line_hint"] as const) {
                 const candidates = this.searchForAnchor(
                     lines,
@@ -467,6 +507,9 @@ TROUBLESHOOTING:
                 );
 
                 if (quality === "line_hint") {
+                    if (foundAmbiguousMatch) {
+                        return null;
+                    }
                     const filtered = this.filterByLineHint(
                         candidates,
                         edit.anchor.start.line,
@@ -493,16 +536,12 @@ TROUBLESHOOTING:
                         matchQuality: quality,
                     };
                 } else if (candidates.length > 1) {
-                    return {
-                        matchedRange: {
-                            start: candidates[0].startLine,
-                            end: candidates[0].endLine,
-                        },
-                        matchQuality: quality,
-                    };
+                    foundAmbiguousMatch = true;
                 }
             }
         } else {
+            let foundAmbiguousMatch = false;
+
             for (const quality of ["exact", "fuzzy", "substring", "line_hint"] as const) {
                 const candidates = this.searchForSingleAnchor(
                     lines,
@@ -512,6 +551,9 @@ TROUBLESHOOTING:
                 );
 
                 if (quality === "line_hint") {
+                    if (foundAmbiguousMatch) {
+                        return null;
+                    }
                     const filtered = candidates.filter(
                         (c) => Math.abs(c.line - edit.anchor.start.line) <= 10,
                     );
@@ -537,13 +579,7 @@ TROUBLESHOOTING:
                         matchQuality: quality,
                     };
                 } else if (candidates.length > 1) {
-                    return {
-                        matchedRange: {
-                            start: candidates[0].line,
-                            end: candidates[0].line,
-                        },
-                        matchQuality: quality,
-                    };
+                    foundAmbiguousMatch = true;
                 }
             }
         }
@@ -662,25 +698,29 @@ TROUBLESHOOTING:
         if (quality === "exact") {
             return (
                 line === anchor.text &&
-                this.compareContext(before, anchor.before, loose) &&
-                this.compareContext(after, anchor.after, loose)
+                this.compareContext(before, anchor.before, loose, "before") &&
+                this.compareContext(after, anchor.after, loose, "after")
             );
         } else if (quality === "fuzzy") {
             return (
-                compareLines(line, anchor.text, true) &&
-                this.compareContextFuzzy(before, anchor.before, loose) &&
-                this.compareContextFuzzy(after, anchor.after, loose)
+                compareLines(line, anchor.text, loose) &&
+                this.compareContextFuzzy(before, anchor.before, loose, "before") &&
+                this.compareContextFuzzy(after, anchor.after, loose, "after")
             );
         } else if (quality === "substring") {
             // Substring matching for end anchor
             return (
                 containsOrContained(line, anchor.text, 15) &&
-                this.compareContextFuzzy(before, anchor.before, loose) &&
-                this.compareContextFuzzy(after, anchor.after, loose)
+                this.compareContextFuzzy(before, anchor.before, loose, "before") &&
+                this.compareContextFuzzy(after, anchor.after, loose, "after")
             );
         } else {
-            // line_hint - just check text similarity without context
-            return compareLines(line, anchor.text, true);
+            // line_hint still requires context to agree when context is provided
+            return (
+                compareLines(line, anchor.text, loose) &&
+                this.compareContextFuzzy(before, anchor.before, loose, "before") &&
+                this.compareContextFuzzy(after, anchor.after, loose, "after")
+            );
         }
     }
 
@@ -711,56 +751,79 @@ TROUBLESHOOTING:
         if (quality === "exact") {
             return (
                 line === anchor.text &&
-                this.compareContext(before, anchor.before, loose) &&
-                this.compareContext(after, anchor.after, loose)
+                this.compareContext(before, anchor.before, loose, "before") &&
+                this.compareContext(after, anchor.after, loose, "after")
             );
         } else if (quality === "fuzzy") {
             return (
-                compareLines(line, anchor.text, true) &&
-                this.compareContextFuzzy(before, anchor.before, loose) &&
-                this.compareContextFuzzy(after, anchor.after, loose)
+                compareLines(line, anchor.text, loose) &&
+                this.compareContextFuzzy(before, anchor.before, loose, "before") &&
+                this.compareContextFuzzy(after, anchor.after, loose, "after")
             );
         } else if (quality === "substring") {
             // Substring matching: check if anchor text is contained in line or vice versa
             // This helps when LLMs provide partial/truncated text
             return (
                 containsOrContained(line, anchor.text, 15) &&
-                this.compareContextFuzzy(before, anchor.before, loose) &&
-                this.compareContextFuzzy(after, anchor.after, loose)
+                this.compareContextFuzzy(before, anchor.before, loose, "before") &&
+                this.compareContextFuzzy(after, anchor.after, loose, "after")
             );
         } else {
-            // line_hint - just check text similarity without context
-            return compareLines(line, anchor.text, true);
+            // line_hint still requires context to agree when context is provided
+            return (
+                compareLines(line, anchor.text, loose) &&
+                this.compareContextFuzzy(before, anchor.before, loose, "before") &&
+                this.compareContextFuzzy(after, anchor.after, loose, "after")
+            );
         }
     }
 
     private compareContext(
         actual: string[],
         expected: string[] | undefined,
-        _loose: boolean,
+        loose: boolean,
+        direction: "before" | "after",
     ): boolean {
         // If no expected context, match succeeds
         if (!expected || expected.length === 0) {
             return true;
         }
-        return (
-            actual[0] === expected[0] && actual[1] === expected[1]
-        );
+
+        const actualContext = this.selectContextLines(actual, expected.length, direction);
+
+        return expected.every((line, index) => compareLines(actualContext[index], line, loose));
     }
 
     private compareContextFuzzy(
         actual: string[],
         expected: string[] | undefined,
-        _loose: boolean,
+        loose: boolean,
+        direction: "before" | "after",
     ): boolean {
         // If no expected context, match succeeds
         if (!expected || expected.length === 0) {
             return true;
         }
-        return (
-            compareLines(actual[0], expected[0], true) &&
-            compareLines(actual[1], expected[1], true)
-        );
+
+        const actualContext = this.selectContextLines(actual, expected.length, direction);
+
+        return expected.every((line, index) => compareLines(actualContext[index], line, loose));
+    }
+
+    private selectContextLines(
+        actual: string[],
+        expectedLength: number,
+        direction: "before" | "after",
+    ): string[] {
+        if (expectedLength <= 0) {
+            return [];
+        }
+
+        if (direction === "before") {
+            return actual.slice(Math.max(0, actual.length - expectedLength));
+        }
+
+        return actual.slice(0, expectedLength);
     }
 
     private filterByLineHint(
@@ -804,6 +867,58 @@ TROUBLESHOOTING:
 
         candidates.sort((a, b) => b.score - a.score);
         return candidates.slice(0, 5);
+    }
+
+    private formatNoMatchSuggestion(lines: string[], anchor: LineAnchor): string {
+        const hintLine = clampLineNumber(anchor.line, lines.length);
+        const parts: string[] = [
+            `Anchor hint window around line ${hintLine} (±5):`,
+            formatDisplayWindow(lines, hintLine, 5).join("\n"),
+        ];
+
+        if (anchor.before?.length || anchor.after?.length) {
+            parts.push("");
+            parts.push("Expected anchor context:");
+            for (const line of anchor.before || []) {
+                parts.push(`before | ${line}`);
+            }
+            parts.push(`anchor | ${anchor.text}`);
+            for (const line of anchor.after || []) {
+                parts.push(`after  | ${line}`);
+            }
+        }
+
+        return parts.join("\n");
+    }
+
+    private formatSingleCandidateSuggestion(lines: string[], anchor: LineAnchor, candidateLine: number): string {
+        const parts: string[] = [
+            `Closest match window around line ${candidateLine} (±5):`,
+            formatDisplayWindow(lines, candidateLine, 5).join("\n"),
+            "",
+            `Anchor hint window around line ${clampLineNumber(anchor.line, lines.length)} (±5):`,
+            formatDisplayWindow(lines, anchor.line, 5).join("\n"),
+        ];
+        return parts.join("\n");
+    }
+
+    private formatAmbiguousSuggestion(lines: string[], anchor: LineAnchor, candidateLines: number[]): string {
+        const parts: string[] = [
+            `Found ${candidateLines.length} possible matches. Each match with ±5 lines:`,
+        ];
+
+        for (let i = 0; i < candidateLines.length; i++) {
+            const line = candidateLines[i];
+            parts.push("");
+            parts.push(`Match ${i + 1} at line ${line}:`);
+            parts.push(formatDisplayWindow(lines, line, 5).join("\n"));
+        }
+
+        parts.push("");
+        parts.push(`Anchor hint window around line ${clampLineNumber(anchor.line, lines.length)} (±5):`);
+        parts.push(formatDisplayWindow(lines, anchor.line, 5).join("\n"));
+
+        return parts.join("\n");
     }
 
     private similarity(a: string, b: string): number {
@@ -933,8 +1048,8 @@ TROUBLESHOOTING:
         }
     }
 
-    private isLooseWhitespace(firstLine: string): boolean {
-        const ext = path.extname(firstLine);
+    private isLooseWhitespace(filePath: string): boolean {
+        const ext = path.extname(filePath);
         const strictExtensions = [".py", ".yaml", ".yml", ".mk", ".makefile"];
         return !strictExtensions.includes(ext.toLowerCase());
     }
