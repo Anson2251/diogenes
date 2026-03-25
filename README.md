@@ -218,6 +218,6 @@ Relevant security options include:
 
 ## License
 
-Diogenes is released under the MIT License. See the [LICENSE](LICENSE) file for details.
+Diogenes is released under the MIT License. See the [LICENSE](./LICENSE) file for details.
 
 Copyright (c) 2024
