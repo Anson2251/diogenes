@@ -1,5 +1,5 @@
 import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { ToolCall, ToolResult } from "../../types";
 import { WorkspaceManager } from "../../context/workspace";
 
 type NotepadMode = "append" | "replace" | "clear";
@@ -93,6 +93,21 @@ Use this to preserve summaries, decisions, or facts you still need after calling
             return `\x1b[36m\x1b[1mNotepad updated\x1b[0m (${result.data.mode}, ${result.data.total_lines} lines)`;
         }
         return undefined;
+    }
+
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
+        if (result.success && result.data) {
+            const mode = typeof result.data.mode === "string" ? result.data.mode : toolCall.params.mode || "append";
+            const totalLines = typeof result.data.total_lines === "number" ? result.data.total_lines : 0;
+            return [
+                `[OK] ${toolCall.tool}`,
+                "---",
+                `Mode: ${mode}`,
+                `Total notepad lines: ${totalLines}`,
+            ].join("\n");
+        }
+
+        return super.formatResultForLLM(toolCall, result);
     }
 
     validateParams(params: unknown): { valid: boolean; errors: string[]; data?: unknown } {
