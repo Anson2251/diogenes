@@ -3,22 +3,22 @@
  */
 
 import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { ToolCall, ToolResult } from "../../types";
 
 export class TaskEndTool extends BaseTool {
     constructor() {
         super({
             namespace: "task",
             name: "end",
-            description: "End the current task",
+            description: "End the current task, either because it is complete or because the user must clarify something before work can continue",
             params: {
                 reason: {
                     type: "string",
-                    description: "Brief summary on why the task is over",
+                    description: "Why the task is complete or blocked. If blocked, state exactly what is missing.",
                 },
                 summary: {
                     type: "string",
-                    description: "What agent done in this task",
+                    description: "What was completed, or the exact clarification/question the user must answer next.",
                 },
             },
             returns: {
@@ -58,5 +58,18 @@ export class TaskEndTool extends BaseTool {
             return `\x1b[35m\x1b[1m✓ Task completed\x1b[0m\n\x1b[1mSummary:\x1b[0m ${result.data.summary}`;
         }
         return undefined;
+    }
+
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
+        if (result.success) {
+            return [
+                `[OK] ${toolCall.tool}`,
+                "---",
+                `Reason: ${result.data?.reason || toolCall.params.reason || ""}`,
+                `Summary: ${result.data?.summary || toolCall.params.summary || ""}`,
+            ].join("\n");
+        }
+
+        return super.formatResultForLLM(toolCall, result);
     }
 }

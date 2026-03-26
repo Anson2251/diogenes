@@ -1,5 +1,5 @@
 import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { ToolCall, ToolResult } from "../../types";
 
 export type ChooseHandler = (question: string, options: string[]) => Promise<string>;
 
@@ -68,5 +68,19 @@ export class TaskChooseTool extends BaseTool {
             return `\x1b[36m\x1b[1mUser selected:\x1b[0m ${result.data.selection}`;
         }
         return undefined;
+    }
+
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
+        if (result.success && typeof result.data?.selection === "string") {
+            return [
+                `[OK] ${toolCall.tool}`,
+                "---",
+                `Question: ${toolCall.params.question}`,
+                `Options: ${Array.isArray(toolCall.params.options) ? toolCall.params.options.join(", ") : ""}`,
+                `Selection: ${result.data.selection}`,
+            ].join("\n");
+        }
+
+        return super.formatResultForLLM(toolCall, result);
     }
 }

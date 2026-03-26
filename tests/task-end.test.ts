@@ -14,7 +14,7 @@ describe("TaskEndTool", () => {
 
             expect(def.namespace).toBe("task");
             expect(def.name).toBe("end");
-            expect(def.description).toBe("End the current task");
+            expect(def.description).toContain("End the current task");
             expect(def.params.reason.type).toBe("string");
             expect(def.params.summary.type).toBe("string");
         });
@@ -128,6 +128,28 @@ describe("TaskEndTool", () => {
             });
 
             expect(result.valid).toBe(true);
+        });
+    });
+
+    describe("formatResultForLLM", () => {
+        it("should format completion details for LLM consumption", async () => {
+            const result = await tool.execute({
+                reason: "Need clarification before editing",
+                summary: "Ask the user which file should be updated.",
+            });
+
+            expect(
+                tool.formatResultForLLM(
+                    {
+                        tool: "task.end",
+                        params: {
+                            reason: "Need clarification before editing",
+                            summary: "Ask the user which file should be updated.",
+                        },
+                    },
+                    result,
+                ),
+            ).toContain("Summary: Ask the user which file should be updated.");
         });
     });
 });

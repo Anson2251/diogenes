@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { ToolDefinition, ToolResult } from "../types";
+import { ToolCall, ToolDefinition, ToolResult } from "../types";
 
 export interface ToolOutputFormatter {
     /**
@@ -11,6 +11,7 @@ export interface ToolOutputFormatter {
      * Return undefined to use default formatting.
      */
     formatResult(result: ToolResult): string | undefined;
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string;
 }
 
 export abstract class BaseTool implements ToolOutputFormatter {
@@ -43,6 +44,24 @@ export abstract class BaseTool implements ToolOutputFormatter {
      */
     formatResult(_result: ToolResult): string | undefined {
         return undefined; // Use default formatting
+    }
+
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
+        const { TRON } = require("@tron-format/tron");
+
+        if (result.success) {
+            return [
+                `[OK] ${toolCall.tool}`,
+                "---",
+                TRON.stringify(result.data ?? { success: true }),
+            ].join("\n");
+        }
+
+        return [
+            `[FAIL] ${toolCall.tool}`,
+            "---",
+            TRON.stringify(result.error ?? { message: `${toolCall.tool} failed` }),
+        ].join("\n");
     }
 
     abstract execute(params: unknown): Promise<ToolResult>;

@@ -200,14 +200,27 @@ export class DiogenesContextManager {
 
     // ==================== Context Management ====================
 
-    async executeToolCalls(toolCalls: ToolCall[]): Promise<ToolResult[]> {
+    async executeToolCalls(
+        toolCalls: ToolCall[],
+        options: {
+            shouldCancel?: () => boolean;
+            onToolStart?: (toolCall: ToolCall, index: number) => void;
+            onToolComplete?: (toolCall: ToolCall, result: ToolResult, index: number) => void;
+        } = {},
+    ): Promise<ToolResult[]> {
         const results: ToolResult[] = [];
         let contextWarning: string | null = null;
 
         for (let i = 0; i < toolCalls.length; i++) {
+            if (options.shouldCancel?.()) {
+                break;
+            }
+
             const toolCall = toolCalls[i];
+            options.onToolStart?.(toolCall, i);
             const result = await this.toolRegistry.executeToolCall(toolCall);
             results.push(result);
+            options.onToolComplete?.(toolCall, result, i);
 
             if (result.success) {
                 this.updateStateFromSingleToolResult(toolCall, result);
@@ -484,7 +497,13 @@ export class DiogenesContextManager {
         if (toolCalls.length > 0) {
             const results = await this.executeToolCalls(toolCalls);
 
-            const formattedResults = formatToolResults(toolCalls, results);
+            const formattedResults = formatToolResults(
+                toolCalls,
+                results,
+                (toolCall, result) =>
+                    this.getTool(toolCall.tool)?.formatResultForLLM(toolCall, result)
+                    ?? JSON.stringify(result, null, 2),
+            );
             this.state.toolResults.push(formattedResults);
 
             if (this.state.toolResults.length > 10) {

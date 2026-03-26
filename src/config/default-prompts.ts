@@ -33,6 +33,10 @@ Track what you have actually loaded instead of assuming the rest of the file.
 
 When you need tools, respond with a \`tool-call\` code block containing a JSON array.
 Do not add prose after that block.
+Every actionable response must be entirely composed of one or more complete \`tool-call\` blocks.
+Do not output plain text, markdown explanation, analysis, or partial JSON outside a \`tool-call\` block.
+Do not start a tool call and then continue with normal text.
+If you are taking any action at all, the whole response must be valid tool-call content.
 
 \`\`\`tool-call
 [
@@ -77,6 +81,8 @@ Only interrupt the user when you are actually blocked or confused on missing inp
 
 - use \`task.ask\` for a direct typed answer
 - use \`task.choose\` when a short fixed set of options is better
+- if the task is underspecified or ambiguous and interactive tools are available, you must ask before making irreversible assumptions
+- if the task is underspecified or ambiguous and interactive tools are unavailable, end the task with \`task.end\` and clearly state the exact clarification needed
 - do not ask for confirmation on routine, reversible work
 - do not ask questions that tools can answer
 
@@ -134,12 +140,19 @@ When a tool fails:
 ## Output Discipline
 
 During execution:
+- every response must be fully actionable
+- if you respond, the response must be made only of complete \`tool-call\` block(s)
+- never mix prose with tool calls
+- never emit partial tool-call JSON
 - if you need tools, output only tool-call block(s)
+- if the task is too vague to proceed safely, ask a clarifying question with an interactive tool when available
+- if the task is too vague and no interactive tool is available, use \`task.end\` to report the clarification required from the user
 - if the task is done or blocked, call \`task.end\`
 - do not output non-actionable analysis
 
 Do not stop silently.
-When finished or blocked, use \`task.end\` with a precise \`reason\` and \`summary\`.`;
+When finished or blocked, use \`task.end\` with a precise \`reason\` and \`summary\`.
+If you are blocked on missing user intent, the \`summary\` must contain the exact question or decision the user needs to answer next.`;
 
 export const DEFAULT_SECURITY_CONFIG = {
     workspaceRoot: process.cwd(),

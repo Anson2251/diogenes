@@ -1,5 +1,5 @@
 import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { ToolCall, ToolResult } from "../../types";
 
 export type AskHandler = (question: string) => Promise<string>;
 
@@ -52,5 +52,18 @@ export class TaskAskTool extends BaseTool {
             return `\x1b[36m\x1b[1mUser answer:\x1b[0m ${result.data.answer}`;
         }
         return undefined;
+    }
+
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
+        if (result.success && typeof result.data?.answer === "string") {
+            return [
+                `[OK] ${toolCall.tool}`,
+                "---",
+                `Question: ${toolCall.params.question}`,
+                `Answer: ${result.data.answer}`,
+            ].join("\n");
+        }
+
+        return super.formatResultForLLM(toolCall, result);
     }
 }

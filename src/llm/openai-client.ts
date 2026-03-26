@@ -88,6 +88,7 @@ export interface OpenAIErrorResponse {
 export class OpenAIClient {
     private config: Required<OpenAIClientConfig>;
     private abortController: AbortController | null = null;
+    private abortReason: "timeout" | "cancelled" | null = null;
 
     constructor(config: OpenAIClientConfig) {
         this.config = {
@@ -132,12 +133,15 @@ export class OpenAIClient {
 
         // Clean up any existing abort controller - abort previous request if still active
         if (this.abortController) {
+          this.abortReason = "cancelled";
           this.abortController.abort();
           // Small delay to allow previous request cleanup before creating new controller
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
         this.abortController = new AbortController();
+        this.abortReason = null;
         const timeoutId = setTimeout(() => {
+            this.abortReason = "timeout";
             this.abortController?.abort();
         }, this.config.timeout);
 
@@ -175,6 +179,9 @@ export class OpenAIClient {
 
             if (error instanceof Error) {
                 if (error.name === "AbortError") {
+                    if (this.abortReason === "cancelled") {
+                        throw new Error("Request cancelled");
+                    }
                     throw new Error(
                         `Request timeout after ${this.config.timeout}ms`,
                     );
@@ -256,11 +263,14 @@ export class OpenAIClient {
 
         // Clean up any existing abort controller
         if (this.abortController) {
+            this.abortReason = "cancelled";
             this.abortController.abort();
             await new Promise((resolve) => setTimeout(resolve, 0));
         }
         this.abortController = new AbortController();
+        this.abortReason = null;
         const timeoutId = setTimeout(() => {
+            this.abortReason = "timeout";
             this.abortController?.abort();
         }, this.config.timeout);
 
@@ -348,6 +358,9 @@ export class OpenAIClient {
 
             if (error instanceof Error) {
                 if (error.name === "AbortError") {
+                    if (this.abortReason === "cancelled") {
+                        throw new Error("Request cancelled");
+                    }
                     throw new Error(
                         `Request timeout after ${this.config.timeout}ms`,
                     );
@@ -403,6 +416,7 @@ export class OpenAIClient {
      */
     abort(): void {
         if (this.abortController) {
+            this.abortReason = "cancelled";
             this.abortController.abort();
             this.abortController = null;
         }

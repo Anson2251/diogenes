@@ -61,6 +61,7 @@ pnpm test
 pnpm run dev
 pnpm run lint
 pnpm run bundle
+pnpm run bundle:acp
 ```
 
 ### Run The CLI
@@ -87,6 +88,12 @@ Start socratic mode:
 
 ```bash
 node dist/cli.js --socratic "Debug the failing test"
+```
+
+Start the ACP server:
+
+```bash
+node dist/acp-cli.js
 ```
 
 ## CLI Modes
@@ -138,6 +145,30 @@ Useful commands:
 - `exit` or `/exit`
 
 Multi-line input ends with `..` on its own line.
+
+### ACP Server
+
+Run the dedicated ACP entrypoint when integrating with editors or other ACP clients.
+
+Preferred:
+
+```bash
+node dist/acp-cli.js
+```
+
+Development shortcut:
+
+```bash
+node dist/cli.js --acp
+```
+
+Create the standalone ACP bundle with:
+
+```bash
+pnpm run bundle:acp
+```
+
+See [docs/acp-server.md](./docs/acp-server.md) for usage details.
 
 ## Core Concepts
 

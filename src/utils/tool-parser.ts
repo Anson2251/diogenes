@@ -4,6 +4,8 @@
 
 import { ToolCall, ToolResult } from "../types";
 
+export type ToolResultFormatter = (toolCall: ToolCall, result: ToolResult) => string;
+
 const VALID_TOOL_NAMES = new Set([
   "dir.list",
   "dir.unload",
@@ -320,7 +322,11 @@ export function formatParseError(error: ParseResult['error']): string {
  * Format tool results for LLM context
  * Provides structured, actionable feedback instead of raw JSON
  */
-export function formatToolResults(toolCalls: ToolCall[], results: ToolResult[]): string {
+export function formatToolResults(
+    toolCalls: ToolCall[],
+    results: ToolResult[],
+    formatter?: ToolResultFormatter,
+): string {
     const parts: string[] = ["===== TOOL RESULTS"];
 
     for (let i = 0; i < toolCalls.length; i++) {
@@ -331,7 +337,9 @@ export function formatToolResults(toolCalls: ToolCall[], results: ToolResult[]):
             continue;
         }
 
-        const formatted = formatSingleToolResult(toolCall, result);
+        const formatted = formatter
+            ? formatter(toolCall, result)
+            : formatSingleToolResult(toolCall, result);
         parts.push(formatted);
 
         if (i < toolCalls.length - 1) {

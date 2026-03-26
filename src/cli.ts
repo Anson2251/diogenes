@@ -8,7 +8,7 @@
 import { config } from "dotenv";
 config();
 
-import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, formatToolResults } from "./index";
+import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, formatToolResults, startACPServer } from "./index";
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
@@ -39,6 +39,7 @@ interface CLIOptions {
     maxIterations?: number;
     socratic?: boolean;
     interactive?: boolean;
+    acp?: boolean;
 }
 
 type QuestionFn = (prompt: string) => Promise<string>;
@@ -76,6 +77,8 @@ function parseArgs(): { task?: string; options: CLIOptions } {
             options.socratic = true;
         } else if (arg === "--interactive" || arg === "-I") {
             options.interactive = true;
+        } else if (arg === "--acp") {
+            options.acp = true;
         } else if (arg === "--max-iterations" || arg === "-i") {
             options.maxIterations = parseInt(args[++i], 10);
         } else if (arg.startsWith("-")) {
@@ -108,6 +111,7 @@ ${colors.bright}Diogenes CLI - LLM-controlled agent framework${colors.reset}
 ${colors.bright}Usage:${colors.reset}
   diogenes [options] <task>
   diogenes [options] --interactive
+  diogenes [options] --acp
   diogenes --help
 
 ${colors.bright}Options:${colors.reset}
@@ -122,6 +126,7 @@ ${colors.bright}Options:${colors.reset}
   -i, --max-iterations <n>      Maximum LLM iterations (default: 20)
   -s, --socratic                Socratic debug mode - you guide the agent
   -I, --interactive             Start interactive mode
+      --acp                     Start ACP stdio server
 
 ${colors.bright}Examples:${colors.reset}
   diogenes "List all TypeScript files in src directory"
@@ -130,6 +135,7 @@ ${colors.bright}Examples:${colors.reset}
   diogenes --workspace ./my-project "Analyze project structure"
   diogenes --interactive        Start interactive mode
   diogenes --socratic "Debug my code"
+  diogenes --acp                Start ACP stdio server
 
 ${colors.bright}Environment Variables:${colors.reset}
   OPENAI_API_KEY                OpenAI API key (alternative to --api-key)
@@ -743,6 +749,18 @@ ${colors.bright}Multiline:${colors.reset}
  */
 async function main(): Promise<void> {
     const { task, options } = parseArgs();
+
+    if (options.acp) {
+        const config = createConfig(options);
+        startACPServer({
+            config,
+            maxIterations: options.maxIterations || 20,
+            input: process.stdin,
+            output: process.stdout,
+            error: process.stderr,
+        });
+        return;
+    }
 
     // Check if API key is available
     const apiKey = getApiKey(options);
