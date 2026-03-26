@@ -214,9 +214,55 @@ describe("FileEditTool", () => {
 
             expect(result.valid).toBe(true);
         });
+
+        it("should reject edit content that is neither string nor string array", () => {
+            const result = tool.validateParams({
+                path: testFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "text",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: { unexpected: true },
+                    },
+                ],
+            });
+
+            expect(result.valid).toBe(false);
+            expect(result.errors).toContain("edits.0.content: Expected string or array of strings");
+        });
     });
 
     describe("execute - multiple edits", () => {
+        it("should treat string content as full lines instead of splitting into characters", async () => {
+            const result = await tool.execute({
+                path: testFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "Hello World",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: "Line replacement (UPDATED)",
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            expect(fs.readFileSync(testFilePath, "utf-8")).toBe("Line replacement (UPDATED)\n");
+        });
+
         it("should apply multiple edits in sequence", async () => {
             const result = await tool.execute({
                 path: multiLineFilePath,

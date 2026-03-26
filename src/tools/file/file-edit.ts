@@ -36,6 +36,8 @@ interface MatchCandidate {
     matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
 }
 
+type EditableContent = string | string[] | undefined;
+
 export class FileEditTool extends BaseTool {
     private workspace: WorkspaceManager;
     private workspaceRoot: string;
@@ -190,6 +192,37 @@ EOF
         this.workspaceRoot = workspace.getWorkspaceRoot();
     }
 
+    validateParams(params: unknown): { valid: boolean; errors: string[]; data?: unknown } {
+        const base = super.validateParams(params);
+        if (!base.valid || !base.data) {
+            return base;
+        }
+
+        const data = base.data as FileEditParams;
+        const errors: string[] = [];
+
+        if (!Array.isArray(data.edits)) {
+            errors.push("edits: Expected an array of edit operations");
+        } else {
+            data.edits.forEach((edit, index) => {
+                if (!edit || typeof edit !== "object") {
+                    errors.push(`edits.${index}: Expected an edit object`);
+                    return;
+                }
+
+                if (!this.isSupportedEditContent(edit.content as EditableContent)) {
+                    errors.push(`edits.${index}.content: Expected string or array of strings`);
+                }
+            });
+        }
+
+        if (errors.length > 0) {
+            return { valid: false, errors };
+        }
+
+        return { valid: true, errors: [], data };
+    }
+
     async execute(params: unknown): Promise<ToolResult> {
         const validation = this.validateParams(params);
         if (!validation.valid || !validation.data) {
@@ -298,7 +331,7 @@ EOF
                 const result = this.applyEdit(
                     modifiedLines,
                     edit.mode,
-                    edit.content,
+                    this.normalizeEditContent(edit.content as EditableContent),
                     startLine,
                     endLine,
                 );
@@ -1123,6 +1156,24 @@ TROUBLESHOOTING:
             default:
                 return { lines, newRange: [startLine, endLine] };
         }
+    }
+
+    private normalizeEditContent(content: EditableContent): string[] | undefined {
+        if (content === undefined) {
+            return undefined;
+        }
+
+        if (typeof content === "string") {
+            return content.split("\n");
+        }
+
+        return content;
+    }
+
+    private isSupportedEditContent(content: EditableContent): content is string | string[] | undefined {
+        return content === undefined
+            || typeof content === "string"
+            || (Array.isArray(content) && content.every((line) => typeof line === "string"));
     }
 
     private isLooseWhitespace(filePath: string): boolean {
