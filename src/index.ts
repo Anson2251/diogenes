@@ -50,6 +50,21 @@ import { createDiogenes } from "./create-diogenes";
 
 // Re-export utility functions
 export { parseToolCalls, formatToolResults } from "./utils/tool-parser";
+export {
+    ResticClient,
+    ResticCommandError,
+    ResticParseError,
+} from "./utils/restic";
+export type {
+    ResticClientOptions,
+    ResticCommandOptions,
+    ResticBackupOptions,
+    ResticBackupResult,
+    ResticListSnapshotsOptions,
+    ResticRestoreOptions,
+    ResticSnapshot,
+    ResticCommandResult,
+} from "./utils/restic";
 
 // ==================== Logger ====================
 export {
