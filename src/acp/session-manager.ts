@@ -37,4 +37,27 @@ export class SessionManager {
         session.cancel();
         return true;
     }
+
+    async disposeSession(sessionId: string): Promise<boolean> {
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+            return false;
+        }
+
+        await session.dispose();
+        this.sessions.delete(sessionId);
+        return true;
+    }
+
+    async disposeAllSessions(): Promise<void> {
+        const sessionIds = Array.from(this.sessions.keys());
+
+        for (const sessionId of sessionIds) {
+            await this.disposeSession(sessionId);
+        }
+    }
+
+    listSessions(): ACPSession[] {
+        return Array.from(this.sessions.values());
+    }
 }

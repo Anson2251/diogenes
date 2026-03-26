@@ -83,6 +83,10 @@ export class ACPServer {
         }
     }
 
+    async dispose(): Promise<void> {
+        await this.sessionManager.disposeAllSessions();
+    }
+
     private handleInitialize(params: InitializeParams | undefined) {
         const requestedVersion = params?.protocolVersion || ACP_PROTOCOL_VERSION;
         this.initialized = true;
@@ -133,6 +137,10 @@ export class ACPServer {
         const session = this.sessionManager.getSession(params.sessionId);
         if (!session) {
             throw new ACPServerError(-32001, `Unknown session: ${params.sessionId}`);
+        }
+        const state = session.getLifecycleState();
+        if (state === "disposing" || state === "disposed") {
+            throw new ACPServerError(-32003, `Session is not available: ${params.sessionId}`);
         }
         if (session.isBusy()) {
             throw new ACPServerError(-32002, `Session is busy: ${params.sessionId}`);

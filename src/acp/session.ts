@@ -9,6 +9,53 @@ export interface ACPNotificationSink {
     (method: string, params: any): void;
 }
 
+export type SessionLifecycleState =
+    | "active"
+    | "running"
+    | "disposing"
+    | "disposed";
+
+export interface SessionMetadata {
+    sessionId: string;
+    cwd: string;
+    createdAt: string;
+    updatedAt: string;
+    state: SessionLifecycleState;
+    hasActiveRun: boolean;
+}
+
+interface SessionOwnedResource {
+    dispose(): Promise<void> | void;
+}
+
+class SessionResourceRegistry {
+    private readonly resources: SessionOwnedResource[] = [];
+
+    register(resource: SessionOwnedResource): void {
+        this.resources.push(resource);
+    }
+
+    async disposeAll(): Promise<void> {
+        const errors: Error[] = [];
+
+        for (let i = this.resources.length - 1; i >= 0; i--) {
+            const resource = this.resources[i];
+
+            try {
+                await resource.dispose();
+            } catch (error) {
+                errors.push(error instanceof Error ? error : new Error(String(error)));
+            }
+        }
+
+        this.resources.length = 0;
+
+        if (errors.length > 0) {
+            throw new AggregateError(errors, "Failed to dispose one or more session resources");
+        }
+    }
+}
+
 const TOOL_CALL_BLOCK_MARKERS = ["```tool-call", "```tool"] as const;
 
 function createTextContent(text: string) {
@@ -442,8 +489,11 @@ export class ACPSession {
     private readonly notify: ACPNotificationSink;
     private readonly diogenes: ReturnType<typeof createDiogenes>;
     private readonly maxIterations: number | undefined;
+    private readonly resources = new SessionResourceRegistry();
     private messageHistory: ConversationMessage[] = [];
+    private lifecycleState: SessionLifecycleState = "active";
     private updatedAt: string;
+    private disposePromise: Promise<void> | null = null;
     private activeRun: {
         id: string;
         cancelled: boolean;
@@ -452,6 +502,7 @@ export class ACPSession {
         nextToolCallSequence: number;
         toolCallIds: Map<string, string>;
     } | null = null;
+    private activePromptPromise: Promise<TaskRunResult> | null = null;
 
     constructor(
         sessionId: string,
@@ -480,6 +531,26 @@ export class ACPSession {
         return this.updatedAt;
     }
 
+    getLifecycleState(): SessionLifecycleState {
+        return this.lifecycleState;
+    }
+
+    getMetadata(): SessionMetadata {
+        return {
+            sessionId: this.sessionId,
+            cwd: this.cwd,
+            createdAt: this.createdAt,
+            updatedAt: this.updatedAt,
+            state: this.lifecycleState,
+            hasActiveRun: this.activeRun !== null,
+        };
+    }
+
+    registerResource(resource: SessionOwnedResource): void {
+        this.ensureUsableForResourceRegistration();
+        this.resources.register(resource);
+    }
+
     isBusy(): boolean {
         return this.activeRun !== null;
     }
@@ -494,9 +565,7 @@ export class ACPSession {
     }
 
     async prompt(prompt: PromptBlock[]): Promise<TaskRunResult> {
-        if (this.activeRun) {
-            throw new Error("Session already has an active run");
-        }
+        this.ensurePromptAllowed();
 
         const promptText = promptBlocksToText(prompt);
         const runId = `${this.sessionId}:run:${Date.now()}`;
@@ -508,20 +577,95 @@ export class ACPSession {
             nextToolCallSequence: 0,
             toolCallIds: new Map(),
         };
+        this.lifecycleState = "running";
         this.updatedAt = new Date().toISOString();
 
+        const runPromise = this.runPrompt(promptText);
+        this.activePromptPromise = runPromise;
+
         try {
-            const result = await runTaskLoop(this.diogenes, promptText, {
-                maxIterations: this.maxIterations ?? Number.POSITIVE_INFINITY,
-                messageHistory: this.messageHistory,
-                shouldCancel: () => this.activeRun?.cancelled === true,
-                onEvent: (event) => this.handleEvent(event),
-            });
-            this.messageHistory = result.messageHistory;
-            this.updatedAt = new Date().toISOString();
-            return result;
+            return await runPromise;
         } finally {
+            this.activePromptPromise = null;
             this.activeRun = null;
+
+            if (this.lifecycleState === "running") {
+                this.lifecycleState = "active";
+            }
+        }
+    }
+
+    async dispose(): Promise<void> {
+        if (this.lifecycleState === "disposed") {
+            return;
+        }
+
+        if (this.disposePromise) {
+            return this.disposePromise;
+        }
+
+        this.disposePromise = this.disposeInternal();
+
+        try {
+            await this.disposePromise;
+        } finally {
+            this.disposePromise = null;
+        }
+    }
+
+    private async disposeInternal(): Promise<void> {
+        if (this.lifecycleState === "disposed") {
+            return;
+        }
+
+        this.lifecycleState = "disposing";
+        this.updatedAt = new Date().toISOString();
+        this.cancel();
+
+        try {
+            await this.activePromptPromise;
+        } catch {
+            // Prompt failures do not block resource cleanup during disposal.
+        }
+
+        await this.resources.disposeAll();
+
+        this.messageHistory = [];
+        this.activeRun = null;
+        this.activePromptPromise = null;
+        this.lifecycleState = "disposed";
+        this.updatedAt = new Date().toISOString();
+    }
+
+    private async runPrompt(promptText: string): Promise<TaskRunResult> {
+        const result = await runTaskLoop(this.diogenes, promptText, {
+            maxIterations: this.maxIterations ?? Number.POSITIVE_INFINITY,
+            messageHistory: this.messageHistory,
+            shouldCancel: () => this.activeRun?.cancelled === true,
+            onEvent: (event) => this.handleEvent(event),
+        });
+        this.messageHistory = result.messageHistory;
+        this.updatedAt = new Date().toISOString();
+        return result;
+    }
+
+    private ensurePromptAllowed(): void {
+        if (this.lifecycleState === "disposing") {
+            throw new Error("Session is disposing");
+        }
+
+        if (this.lifecycleState === "disposed") {
+            throw new Error("Session is disposed");
+        }
+
+        if (this.activeRun) {
+            throw new Error("Session already has an active run");
+        }
+    }
+
+    private ensureUsableForResourceRegistration(): void {
+        if (this.lifecycleState === "disposing" || this.lifecycleState === "disposed") {
+            throw new Error("Cannot register session resources after disposal has started");
         }
     }
 

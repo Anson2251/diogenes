@@ -23,6 +23,21 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
     });
 
     let buffer = "";
+    let disposeStarted = false;
+
+    const disposeServer = () => {
+        if (disposeStarted) {
+            return;
+        }
+
+        disposeStarted = true;
+        void server.dispose().catch((disposeError) => {
+            error.write(
+                `ACP transport dispose error: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}\n`,
+            );
+        });
+    };
+
     input.setEncoding("utf-8");
     input.on("data", async (chunk: string) => {
         buffer += chunk;
@@ -52,6 +67,8 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
             newlineIndex = buffer.indexOf("\n");
         }
     });
+    input.on("end", disposeServer);
+    input.on("close", disposeServer);
 
     return server;
 }
