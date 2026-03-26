@@ -187,6 +187,72 @@ describe("ACPServer", () => {
         ).toBe(false);
     });
 
+    it("uses unique toolCallIds across iterations within the same prompt run", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+            respond: (response) => responses.push(response),
+        });
+
+        vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockImplementationOnce(async (_messages, onChunk) => {
+                onChunk({ type: "content", content: '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["round one"]}}]\n```' });
+                return {
+                    content: '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["round one"]}}]\n```',
+                    reasoning: "",
+                };
+            })
+            .mockImplementationOnce(async (_messages, onChunk) => {
+                onChunk({ type: "content", content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"round two"}}]\n```' });
+                return {
+                    content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"round two"}}]\n```',
+                    reasoning: "",
+                };
+            });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+        const promptResponse = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "Take two tool-call rounds" }],
+            },
+        });
+
+        const finalResponse = await waitFor(
+            () => responses.find((response) => response.id === 3),
+        );
+        const toolCallIds = notifications
+            .filter((item) => item.params?.update?.sessionUpdate === "tool_call")
+            .map((item) => item.params.update.toolCallId);
+
+        expect(promptResponse).toBeNull();
+        expect(finalResponse?.result?.stopReason).toBe("end_turn");
+        expect(toolCallIds).toHaveLength(2);
+        expect(new Set(toolCallIds).size).toBe(2);
+        expect(toolCallIds[0]).not.toBe(toolCallIds[1]);
+    });
+
     it("sends a final reply over stdio with a mocked OpenAI stream", async () => {
         const input = new PassThrough();
         const output = new PassThrough();

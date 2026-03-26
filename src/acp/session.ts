@@ -180,6 +180,10 @@ function formatToolResultFallback(toolName: string, result: ToolResult): string 
     return `${code}${message}${details}`;
 }
 
+function createToolCallId(runId: string, iteration: number, index: number): string {
+    return `${runId}:iter:${iteration}:tool:${index}`;
+}
+
 export class ACPSession {
     readonly sessionId: string;
     readonly cwd: string;
@@ -319,7 +323,7 @@ export class ACPSession {
                     sessionId: this.sessionId,
                     update: {
                         sessionUpdate: "tool_call",
-                        toolCallId: `${runId}:tool:${index}`,
+                        toolCallId: createToolCallId(runId, event.iteration, index),
                         title: createToolCallTitle(toolCall.tool, toolCall.params),
                         kind: mapToolKind(toolCall.tool),
                         status: "pending",
@@ -336,7 +340,7 @@ export class ACPSession {
                 sessionId: this.sessionId,
                 update: {
                     sessionUpdate: "tool_call_update",
-                    toolCallId: `${runId}:tool:${event.index}`,
+                    toolCallId: createToolCallId(runId, event.iteration, event.index),
                     status: "in_progress",
                 },
             });
@@ -348,7 +352,7 @@ export class ACPSession {
                 sessionId: this.sessionId,
                 update: {
                     sessionUpdate: "tool_call_update",
-                    toolCallId: `${runId}:tool:${event.index}`,
+                    toolCallId: createToolCallId(runId, event.iteration, event.index),
                     status: event.result.success ? "completed" : "failed",
                     content: createToolResultContent(
                         formatToolResultFallback(event.toolCall.tool, event.result),
