@@ -187,6 +187,15 @@ export interface SecurityConfig {
         maxFileSize: number;
         blockedExtensions: string[];
     };
+    snapshot: {
+        enabled: boolean;
+        includeDiogenesState: boolean;
+        autoBeforePrompt: boolean;
+        storageRoot: string;
+        resticBinary: string;
+        resticBinaryArgs: string[];
+        timeoutMs: number;
+    };
 }
 
 // ==================== Logger Types ====================

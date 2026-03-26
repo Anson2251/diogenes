@@ -137,6 +137,12 @@ function mergeConfig(
                 ...(override.security?.file || {}),
             };
         }
+        if (base.security?.snapshot || override.security?.snapshot) {
+            (merged.security as any).snapshot = {
+                ...(base.security?.snapshot || {}),
+                ...(override.security?.snapshot || {}),
+            };
+        }
     }
 
     return merged;

@@ -125,7 +125,7 @@ describe("SessionManager lifecycle", () => {
 
     it("disposeSession removes the session from the manager", async () => {
         const manager = new SessionManager({ llm: { apiKey: "test-key", model: "gpt-4" } }, 5, () => {});
-        const session = manager.createSession(process.cwd());
+        const session = await manager.createSession(process.cwd());
 
         expect(manager.getSession(session.sessionId)).toBeDefined();
         await expect(manager.disposeSession(session.sessionId)).resolves.toBe(true);
@@ -135,8 +135,8 @@ describe("SessionManager lifecycle", () => {
     it("disposeAllSessions cleans every session", async () => {
         const manager = new SessionManager({ llm: { apiKey: "test-key", model: "gpt-4" } }, 5, () => {});
 
-        manager.createSession(process.cwd());
-        manager.createSession(process.cwd());
+        await manager.createSession(process.cwd());
+        await manager.createSession(process.cwd());
 
         expect(manager.listSessions()).toHaveLength(2);
         await manager.disposeAllSessions();

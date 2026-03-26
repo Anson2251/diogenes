@@ -1,5 +1,6 @@
 import * as path from "path";
 import type { DiogenesConfig } from "../types";
+import { getDefaultSnapshotStorageRoot, SessionSnapshotManager } from "../snapshot/manager";
 import { ACPSession, type ACPNotificationSink } from "./session";
 
 export class SessionManager {
@@ -12,16 +13,42 @@ export class SessionManager {
         private readonly notify: ACPNotificationSink,
     ) {}
 
-    createSession(cwd: string): ACPSession {
+    async createSession(cwd: string): Promise<ACPSession> {
         const sessionId = `session-${this.nextId++}`;
+        const resolvedCwd = path.resolve(cwd);
         const session = new ACPSession(
             sessionId,
-            path.resolve(cwd),
+            resolvedCwd,
             this.config,
             this.maxIterations,
             this.notify,
         );
+
+        const snapshotConfig = this.config.security?.snapshot;
+
+        if (snapshotConfig?.enabled) {
+            const snapshotManager = new SessionSnapshotManager({
+                sessionId,
+                cwd: resolvedCwd,
+                config: {
+                    ...snapshotConfig,
+                    storageRoot: snapshotConfig.storageRoot || getDefaultSnapshotStorageRoot(),
+                    resticBinaryArgs: snapshotConfig.resticBinaryArgs || [],
+                },
+            });
+
+            try {
+                await snapshotManager.initialize();
+            } catch (error) {
+                await snapshotManager.cleanup().catch(() => undefined);
+                throw error;
+            }
+
+            session.attachSnapshotManager(snapshotManager);
+        }
+
         this.sessions.set(sessionId, session);
+        session.emitAvailableCommandsUpdate();
         return session;
     }
 

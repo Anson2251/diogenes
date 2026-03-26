@@ -97,6 +97,16 @@ export interface SessionUpdateNotification {
     update: any;
 }
 
+export interface AvailableCommandInput {
+    hint: string;
+}
+
+export interface AvailableCommand {
+    name: string;
+    description: string;
+    input?: AvailableCommandInput;
+}
+
 export interface ACPPromptResult {
     stopReason: TaskStopReason;
 }

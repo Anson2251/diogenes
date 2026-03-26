@@ -21,6 +21,7 @@ const VALID_TOOL_NAMES = new Set([
   "task.choose",
   "task.notepad",
   "shell.exec",
+  "snapshot.create",
   "task.end",
 ]);
 
@@ -453,6 +454,14 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
                 if (data.stderr) {
                     lines.push(`stderr:\n${truncate(data.stderr, 500)}`);
                 }
+                break;
+            }
+            case "snapshot.create": {
+                lines.push(`Created snapshot: ${result.data?.snapshot_id || "unknown"}`);
+                if (result.data?.label) {
+                    lines.push(`Label: ${result.data.label}`);
+                }
+                lines.push(`Trigger: ${result.data?.trigger || "llm_manual"}`);
                 break;
             }
             default: {

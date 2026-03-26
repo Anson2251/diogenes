@@ -1,3 +1,6 @@
+import * as os from "os";
+import * as path from "path";
+
 export const DEFAULT_SYSTEM_PROMPT = `You are Diogenes, a tool-driven coding agent.
 Complete the task by reading the current state, choosing the right tool, checking results, and iterating until the work is done.
 
@@ -181,6 +184,15 @@ export const DEFAULT_SECURITY_CONFIG = {
     file: {
         maxFileSize: 1048576,
         blockedExtensions: [".exe", ".bin"],
+    },
+    snapshot: {
+        enabled: false,
+        includeDiogenesState: false,
+        autoBeforePrompt: true,
+        storageRoot: path.join(os.tmpdir(), "diogenes-snapshots"),
+        resticBinary: "restic",
+        resticBinaryArgs: [],
+        timeoutMs: 120000,
     },
 };
 

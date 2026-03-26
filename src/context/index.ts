@@ -94,6 +94,10 @@ export class DiogenesContextManager {
                     ...DEFAULT_SECURITY_CONFIG.file,
                     ...config.security?.file,
                 },
+                snapshot: {
+                    ...DEFAULT_SECURITY_CONFIG.snapshot,
+                    ...config.security?.snapshot,
+                },
                 workspaceRoot: config.security?.workspaceRoot || DEFAULT_SECURITY_CONFIG.workspaceRoot,
             },
             tools: config.tools || [],

@@ -261,6 +261,20 @@ function mergeConfig(
                 enabled: overrideInteraction?.enabled ?? baseInteraction?.enabled ?? DEFAULT_SECURITY_CONFIG.interaction.enabled,
             };
         }
+
+        if (base.security?.snapshot || override.security?.snapshot) {
+            const baseSnapshot = base.security?.snapshot;
+            const overrideSnapshot = override.security?.snapshot;
+            merged.security.snapshot = {
+                enabled: overrideSnapshot?.enabled ?? baseSnapshot?.enabled ?? DEFAULT_SECURITY_CONFIG.snapshot.enabled,
+                includeDiogenesState: overrideSnapshot?.includeDiogenesState ?? baseSnapshot?.includeDiogenesState ?? DEFAULT_SECURITY_CONFIG.snapshot.includeDiogenesState,
+                autoBeforePrompt: overrideSnapshot?.autoBeforePrompt ?? baseSnapshot?.autoBeforePrompt ?? DEFAULT_SECURITY_CONFIG.snapshot.autoBeforePrompt,
+                storageRoot: overrideSnapshot?.storageRoot ?? baseSnapshot?.storageRoot ?? DEFAULT_SECURITY_CONFIG.snapshot.storageRoot,
+                resticBinary: overrideSnapshot?.resticBinary ?? baseSnapshot?.resticBinary ?? DEFAULT_SECURITY_CONFIG.snapshot.resticBinary,
+                resticBinaryArgs: overrideSnapshot?.resticBinaryArgs ?? baseSnapshot?.resticBinaryArgs ?? DEFAULT_SECURITY_CONFIG.snapshot.resticBinaryArgs,
+                timeoutMs: overrideSnapshot?.timeoutMs ?? baseSnapshot?.timeoutMs ?? DEFAULT_SECURITY_CONFIG.snapshot.timeoutMs,
+            };
+        }
     }
 
     return merged;

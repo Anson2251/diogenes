@@ -24,6 +24,7 @@ export { TaskChooseTool } from "./tools/task/task-choose";
 export { TaskNotepadTool } from "./tools/task/task-notepad";
 export { TaskEndTool } from "./tools/task/task-end";
 export { ShellExecTool } from "./tools/shell/shell-exec";
+export { SnapshotCreateTool } from "./tools/snapshot/snapshot-create";
 
 // LLM Client
 export { OpenAIClient } from "./llm/openai-client";
@@ -65,6 +66,27 @@ export type {
     ResticSnapshot,
     ResticCommandResult,
 } from "./utils/restic";
+export {
+    SessionSnapshotManager,
+    getDefaultSnapshotStorageRoot,
+} from "./snapshot/manager";
+export { SnapshotManifestStore } from "./snapshot/manifest-store";
+export {
+    PlaceholderStateSerializer,
+} from "./snapshot/state-serializer";
+export type {
+    SnapshotManager,
+    SnapshotManagerOptions,
+} from "./snapshot/manager";
+export type {
+    SnapshotCreateInput,
+    SnapshotCreateResult,
+    SnapshotSummary,
+    SnapshotTrigger,
+    SessionSnapshotEntry,
+    SessionSnapshotManifest,
+    PersistedDiogenesStatePlaceholder,
+} from "./snapshot/types";
 
 // ==================== Logger ====================
 export {

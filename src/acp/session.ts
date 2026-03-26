@@ -3,7 +3,10 @@ import { createDiogenes } from "../create-diogenes";
 import type { TodoItem, ToolResult } from "../types";
 import type { DiogenesConfig } from "../types";
 import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "../runtime/task-runner";
+import type { SnapshotManager } from "../snapshot/manager";
+import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
 import type { PromptBlock } from "./types";
+import type { AvailableCommand } from "./types";
 
 export interface ACPNotificationSink {
     (method: string, params: any): void;
@@ -162,6 +165,8 @@ function createToolCallTitle(toolName: string, params: Record<string, any> | und
             return "Calling the task done";
         case "shell.exec":
             return `Running command${typeof params?.command === "string" ? `: ${params.command}` : ""}`;
+        case "snapshot.create":
+            return "Creating snapshot";
         default:
             return toolName;
     }
@@ -247,6 +252,9 @@ function mapToolKind(toolName: string): string {
     }
     if (toolName.startsWith("todo.") || toolName.startsWith("task.notepad")) {
         return "think";
+    }
+    if (toolName.startsWith("snapshot.")) {
+        return "other";
     }
     if (toolName.startsWith("file.unload") || toolName.startsWith("dir.unload")) {
         return "other";
@@ -447,6 +455,12 @@ function formatToolResultFallback(
             return parts.join("\n");
         }
 
+        if (toolName === "snapshot.create") {
+            const snapshotId = typeof result.data?.snapshot_id === "string" ? result.data.snapshot_id : "snapshot";
+            const label = typeof result.data?.label === "string" ? result.data.label : undefined;
+            return label ? `Created snapshot ${snapshotId} (${label})` : `Created snapshot ${snapshotId}`;
+        }
+
         if (result.data && Object.keys(result.data).length > 0) {
             return JSON.stringify(result.data, null, 2);
         }
@@ -492,6 +506,8 @@ export class ACPSession {
     private readonly resources = new SessionResourceRegistry();
     private messageHistory: ConversationMessage[] = [];
     private lifecycleState: SessionLifecycleState = "active";
+    private promptTurn = 0;
+    private snapshotManager: SnapshotManager | null = null;
     private updatedAt: string;
     private disposePromise: Promise<void> | null = null;
     private activeRun: {
@@ -551,6 +567,50 @@ export class ACPSession {
         this.resources.register(resource);
     }
 
+    attachSnapshotManager(snapshotManager: SnapshotManager): void {
+        this.snapshotManager = snapshotManager;
+        this.diogenes.registerTool(
+            new SnapshotCreateTool(
+                () => this.snapshotManager,
+                () => this.promptTurn,
+            ),
+        );
+        this.registerResource({
+            dispose: () => snapshotManager.cleanup(),
+        });
+    }
+
+    getAvailableCommands(): AvailableCommand[] {
+        if (!this.snapshotManager) {
+            return [];
+        }
+
+        return [
+            {
+                name: "snapshot",
+                description: "Create a defensive session snapshot",
+                input: {
+                    hint: "optional label for the snapshot",
+                },
+            },
+        ];
+    }
+
+    emitAvailableCommandsUpdate(): void {
+        const availableCommands = this.getAvailableCommands();
+        if (availableCommands.length === 0) {
+            return;
+        }
+
+        this.notify("session/update", {
+            sessionId: this.sessionId,
+            update: {
+                sessionUpdate: "available_commands_update",
+                availableCommands,
+            },
+        });
+    }
+
     isBusy(): boolean {
         return this.activeRun !== null;
     }
@@ -566,6 +626,19 @@ export class ACPSession {
 
     async prompt(prompt: PromptBlock[]): Promise<TaskRunResult> {
         this.ensurePromptAllowed();
+        const turn = ++this.promptTurn;
+
+        const slashCommandResult = await this.tryHandleSlashCommand(prompt, turn);
+        if (slashCommandResult) {
+            return slashCommandResult;
+        }
+
+        if (this.snapshotManager && this.snapshotManager.isAutoBeforePromptEnabled()) {
+            await this.snapshotManager.createSnapshot({
+                trigger: "before_prompt",
+                turn,
+            });
+        }
 
         const promptText = promptBlocksToText(prompt);
         const runId = `${this.sessionId}:run:${Date.now()}`;
@@ -666,6 +739,67 @@ export class ACPSession {
     private ensureUsableForResourceRegistration(): void {
         if (this.lifecycleState === "disposing" || this.lifecycleState === "disposed") {
             throw new Error("Cannot register session resources after disposal has started");
+        }
+    }
+
+    private async tryHandleSlashCommand(prompt: PromptBlock[], turn: number): Promise<TaskRunResult | null> {
+        if (prompt.length !== 1 || prompt[0]?.type !== "text") {
+            return null;
+        }
+
+        const text = prompt[0].text.trim();
+        if (!text.startsWith("/")) {
+            return null;
+        }
+
+        if (text === "/snapshot" || text.startsWith("/snapshot ")) {
+            return this.handleSnapshotSlashCommand(text, turn);
+        }
+
+        return null;
+    }
+
+    private async handleSnapshotSlashCommand(commandText: string, turn: number): Promise<TaskRunResult> {
+        if (!this.snapshotManager) {
+            throw new Error("Session snapshots are not enabled");
+        }
+
+        this.lifecycleState = "running";
+        this.updatedAt = new Date().toISOString();
+
+        try {
+            const label = commandText.slice("/snapshot".length).trim() || undefined;
+            const result = await this.snapshotManager.createSnapshot({
+                trigger: "system_manual",
+                turn,
+                label,
+                reason: "Created via ACP slash command",
+            });
+            const summary = label
+                ? `Created snapshot ${result.snapshotId} with label "${label}".`
+                : `Created snapshot ${result.snapshotId}.`;
+
+            this.notify("session/update", {
+                sessionId: this.sessionId,
+                update: {
+                    sessionUpdate: "agent_message_chunk",
+                    content: createTextContent(summary),
+                },
+            });
+
+            return {
+                success: true,
+                result: summary,
+                iterations: 0,
+                taskEnded: true,
+                stopReason: "end_turn",
+                messageHistory: this.messageHistory,
+            };
+        } finally {
+            if (this.lifecycleState === "running") {
+                this.lifecycleState = "active";
+            }
+            this.updatedAt = new Date().toISOString();
         }
     }
 
