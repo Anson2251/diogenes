@@ -1,6 +1,6 @@
 import * as path from "path";
 import { createDiogenes } from "../create-diogenes";
-import type { ToolResult } from "../types";
+import type { TodoItem, ToolResult } from "../types";
 import type { DiogenesConfig } from "../types";
 import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "../runtime/task-runner";
 import type { PromptBlock } from "./types";
@@ -27,40 +27,62 @@ function createToolResultContent(text: string) {
     ];
 }
 
+function mapTodoStatus(state: TodoItem["state"]): "pending" | "in_progress" | "completed" {
+    switch (state) {
+        case "active":
+            return "in_progress";
+        case "done":
+            return "completed";
+        default:
+            return "pending";
+    }
+}
+
+function mapTodoPriority(state: TodoItem["state"]): "high" | "medium" | "low" {
+    switch (state) {
+        case "active":
+            return "high";
+        case "done":
+            return "low";
+        default:
+            return "medium";
+    }
+}
+
 function createToolCallTitle(toolName: string, params: Record<string, any> | undefined): string {
     const targetPath = typeof params?.path === "string" ? params.path : undefined;
 
     switch (toolName) {
         case "dir.list":
-            return `Listing directory${targetPath ? ` ${targetPath}` : ""}`;
+            return `Surveying directory${targetPath ? ` ${targetPath}` : ""}`;
         case "dir.unload":
-            return `Unloading directory${targetPath ? ` ${targetPath}` : ""}`;
+            return `Packing away directory${targetPath ? ` ${targetPath}` : ""}`;
         case "file.load":
-            return `Loading file${targetPath ? ` ${targetPath}` : ""}`;
+            return `Reading file${targetPath ? ` ${targetPath}` : ""}`;
         case "file.peek":
-            return `Peeking file${targetPath ? ` ${targetPath}` : ""}`;
+            return `Glancing at file${targetPath ? ` ${targetPath}` : ""}`;
         case "file.edit":
             return `Editing file${targetPath ? ` ${targetPath}` : ""}`;
         case "file.create":
             return `Creating file${targetPath ? ` ${targetPath}` : ""}`;
         case "file.overwrite":
-            return `Overwriting file${targetPath ? ` ${targetPath}` : ""}`;
+            return `Rewriting file${targetPath ? ` ${targetPath}` : ""}`;
         case "file.unload":
-            return `Unloading file${targetPath ? ` ${targetPath}` : ""}`;
+            return `Packing away file${targetPath ? ` ${targetPath}` : ""}`;
         case "todo.set":
-            return "Updating todo list";
+            return "Sketching the plan";
         case "todo.update":
-            return `Updating todo item${typeof params?.text === "string" ? ` ${params.text}` : ""}`;
+            return `Advancing plan item${typeof params?.text === "string" ? ` ${params.text}` : ""}`;
         case "task.ask":
-            return "Requesting user input";
+            return "Asking the user";
         case "task.choose":
-            return "Requesting user choice";
+            return "Offering a choice";
         case "task.notepad":
-            return "Updating notepad";
+            return "Saving working notes";
         case "task.end":
-            return "Finishing task";
+            return "Calling the task done";
         case "shell.exec":
-            return `Executing command${typeof params?.command === "string" ? `: ${params.command}` : ""}`;
+            return `Running command${typeof params?.command === "string" ? `: ${params.command}` : ""}`;
         default:
             return toolName;
     }
@@ -144,6 +166,9 @@ function mapToolKind(toolName: string): string {
     if (toolName.startsWith("file.edit") || toolName.startsWith("file.create") || toolName.startsWith("file.overwrite")) {
         return "edit";
     }
+    if (toolName.startsWith("todo.") || toolName.startsWith("task.notepad")) {
+        return "think";
+    }
     if (toolName.startsWith("file.unload") || toolName.startsWith("dir.unload")) {
         return "other";
     }
@@ -161,10 +186,136 @@ function extractLocations(params: Record<string, any> | undefined): Array<{ path
     return [{ path: filePath }];
 }
 
-function formatToolResultFallback(toolName: string, result: ToolResult): string {
+function formatFileEditResult(pathName: string, result: ToolResult): string | null {
+    if (!result.success || !result.data) {
+        return null;
+    }
+
+    const applied = Array.isArray(result.data.applied) ? result.data.applied : [];
+    const errors = Array.isArray(result.data.errors) ? result.data.errors : [];
+    const totalLines = typeof result.data.file_state?.total_lines === "number"
+        ? result.data.file_state.total_lines
+        : undefined;
+
+    const lines: string[] = [];
+    const summary = [`Updated ${pathName}: ${applied.length} edit${applied.length === 1 ? "" : "s"} applied`];
+    if (errors.length > 0) {
+        summary.push(`${errors.length} failed`);
+    }
+    if (typeof totalLines === "number") {
+        summary.push(`${totalLines} total lines`);
+    }
+    lines.push(summary.join(", "));
+
+    for (const edit of applied.slice(0, 3)) {
+        lines.push(
+            `${edit.mode} lines ${edit.matchedRange[0]}-${edit.matchedRange[1]} -> ${edit.newRange[0]}-${edit.newRange[1]}`,
+        );
+    }
+    if (applied.length > 3) {
+        lines.push(`${applied.length - 3} more edit${applied.length - 3 === 1 ? "" : "s"} applied`);
+    }
+
+    for (const error of errors.slice(0, 2)) {
+        lines.push(`Edit ${error.index} failed: ${error.message}`);
+    }
+    if (errors.length > 2) {
+        lines.push(`${errors.length - 2} more edit failures`);
+    }
+
+    return lines.join("\n");
+}
+
+function formatToolResultFallback(
+    toolName: string,
+    result: ToolResult,
+    params?: Record<string, any>,
+): string {
     if (result.success) {
         if (toolName === "task.end" && typeof result.data?.summary === "string" && result.data.summary.length > 0) {
             return result.data.summary;
+        }
+
+        if (toolName === "dir.list") {
+            const count = typeof result.data?.count === "number" ? result.data.count : 0;
+            const files = typeof result.data?.files === "number" ? result.data.files : 0;
+            const dirs = typeof result.data?.dirs === "number" ? result.data.dirs : 0;
+            return `Found ${count} entries (${files} files, ${dirs} directories)`;
+        }
+
+        if (toolName === "file.load") {
+            const ranges = Array.isArray(result.data?.loaded_range)
+                ? result.data.loaded_range.map((range) => `${range[0]}-${range[1]}`).join(", ")
+                : "requested range";
+            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            return `Loaded lines ${ranges} (${totalLines} total lines in file)`;
+        }
+
+        if (toolName === "file.edit") {
+            const pathName = typeof params?.path === "string" ? params.path : "file";
+            const summary = formatFileEditResult(pathName, result);
+            if (summary) {
+                return summary;
+            }
+        }
+
+        if (toolName === "file.unload") {
+            return "Removed file from workspace context";
+        }
+
+        if (toolName === "dir.unload") {
+            return "Removed directory from workspace context";
+        }
+
+        if (toolName === "file.create") {
+            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            return `Created file (${totalLines} line${totalLines === 1 ? "" : "s"})`;
+        }
+
+        if (toolName === "file.overwrite") {
+            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            return `Rewrote file (${totalLines} line${totalLines === 1 ? "" : "s"})`;
+        }
+
+        if (toolName === "todo.set") {
+            const items = Array.isArray(result.data?.items) ? result.data.items.length : 0;
+            return `Updated plan with ${items} item${items === 1 ? "" : "s"}`;
+        }
+
+        if (toolName === "todo.update") {
+            const text = typeof result.data?.text === "string" ? result.data.text : "plan item";
+            const state = typeof result.data?.state === "string" ? result.data.state : "updated";
+            return `Marked "${text}" as ${state}`;
+        }
+
+        if (toolName === "task.notepad") {
+            const mode = typeof result.data?.mode === "string" ? result.data.mode : "append";
+            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+
+            switch (mode) {
+                case "clear":
+                    return "Cleared working notes";
+                case "replace":
+                    return `Replaced working notes (${totalLines} line${totalLines === 1 ? "" : "s"} total)`;
+                default:
+                    return `Updated working notes (${totalLines} line${totalLines === 1 ? "" : "s"} total)`;
+            }
+        }
+
+        if (toolName === "shell.exec") {
+            const exitCode = result.data?.exit_code;
+            const stdout = typeof result.data?.stdout === "string" ? result.data.stdout.trim() : "";
+            const stderr = typeof result.data?.stderr === "string" ? result.data.stderr.trim() : "";
+            const parts = [`Command finished with exit code ${exitCode}`];
+
+            if (stdout.length > 0) {
+                parts.push(`stdout: ${stdout}`);
+            }
+            if (stderr.length > 0) {
+                parts.push(`stderr: ${stderr}`);
+            }
+
+            return parts.join("\n");
         }
 
         if (result.data && Object.keys(result.data).length > 0) {
@@ -323,6 +474,22 @@ export class ACPSession {
         return this.registerToolCallId(iteration, index);
     }
 
+    private emitTodoPlanUpdate(): void {
+        const items = this.diogenes.getWorkspaceManager().getTodoWorkspace().items;
+
+        this.notify("session/update", {
+            sessionId: this.sessionId,
+            update: {
+                sessionUpdate: "plan",
+                entries: items.map((item) => ({
+                    content: item.text,
+                    priority: mapTodoPriority(item.state),
+                    status: mapTodoStatus(item.state),
+                })),
+            },
+        });
+    }
+
     private handleEvent(event: TaskRunEvent): void {
         if (event.type === "llm.stream.delta") {
             if (event.chunk.type === "content" && this.activeRun) {
@@ -393,11 +560,19 @@ export class ACPSession {
                     toolCallId: this.getToolCallId(event.iteration, event.index),
                     status: event.result.success ? "completed" : "failed",
                     content: createToolResultContent(
-                        formatToolResultFallback(event.toolCall.tool, event.result),
-                    ),
-                    rawOutput: event.result,
-                },
+                            formatToolResultFallback(event.toolCall.tool, event.result, event.toolCall.params),
+                        ),
+                        rawOutput: event.result,
+                    },
             });
+
+            if (
+                event.result.success
+                && (event.toolCall.tool === "todo.set" || event.toolCall.tool === "todo.update")
+            ) {
+                this.emitTodoPlanUpdate();
+            }
+
             return;
         }
 
@@ -424,7 +599,7 @@ export class ACPSession {
                     sessionUpdate: "plan",
                     entries: [
                         {
-                            content: createTextContent(`Context warning: ${event.warning}`),
+                            content: `Context warning: ${event.warning}`,
                             priority: "high",
                             status: "in_progress",
                         },

@@ -1,3 +1,6 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { PassThrough } from "stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACPServer } from "../src/acp/server";
@@ -136,7 +139,7 @@ describe("ACPServer", () => {
         expect(
             notifications.some(
                 (item) => item.params.update.sessionUpdate === "tool_call"
-                    && item.params.update.title === "Finishing task"
+                    && item.params.update.title === "Calling the task done"
                     && item.params.update.kind === "other",
             ),
         ).toBe(true);
@@ -251,6 +254,14 @@ describe("ACPServer", () => {
         expect(toolCallIds).toHaveLength(2);
         expect(new Set(toolCallIds).size).toBe(2);
         expect(toolCallIds[0]).not.toBe(toolCallIds[1]);
+        expect(
+            notifications.some(
+                (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                    && item.params.update.status === "completed"
+                    && Array.isArray(item.params.update.content)
+                    && item.params.update.content[0]?.content?.text === "Updated working notes (1 line total)",
+            ),
+        ).toBe(true);
     });
 
     it("uses unique toolCallIds for multiple tool calls in the same iteration", async () => {
@@ -310,6 +321,210 @@ describe("ACPServer", () => {
         expect(toolCallIds).toHaveLength(2);
         expect(new Set(toolCallIds).size).toBe(2);
         expect(toolCallIds[0]).not.toBe(toolCallIds[1]);
+    });
+
+    it("emits complete plan updates for todo tools", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+            respond: (response) => responses.push(response),
+        });
+
+        vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockImplementationOnce(async (_messages, onChunk) => {
+                onChunk({
+                    type: "content",
+                    content: '```tool-call\n[{"tool":"todo.set","params":{"items":[{"text":"Inspect repo","state":"active"},{"text":"Write tests","state":"pending"}]}}]\n```',
+                });
+                return {
+                    content: '```tool-call\n[{"tool":"todo.set","params":{"items":[{"text":"Inspect repo","state":"active"},{"text":"Write tests","state":"pending"}]}}]\n```',
+                    reasoning: "",
+                };
+            })
+            .mockImplementationOnce(async (_messages, onChunk) => {
+                onChunk({
+                    type: "content",
+                    content: '```tool-call\n[{"tool":"todo.update","params":{"text":"Inspect repo","state":"done"}},{"tool":"todo.update","params":{"text":"Write tests","state":"active"}},{"tool":"task.end","params":{"reason":"done","summary":"planned"}}]\n```',
+                });
+                return {
+                    content: '```tool-call\n[{"tool":"todo.update","params":{"text":"Inspect repo","state":"done"}},{"tool":"todo.update","params":{"text":"Write tests","state":"active"}},{"tool":"task.end","params":{"reason":"done","summary":"planned"}}]\n```',
+                    reasoning: "",
+                };
+            });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "Plan and finish" }],
+            },
+        });
+        await waitFor(() => responses.find((response) => response.id === 3));
+
+        const planUpdates = notifications
+            .filter((item) => item.params?.update?.sessionUpdate === "plan")
+            .map((item) => item.params.update.entries);
+        const todoToolCalls = notifications
+            .filter((item) => item.params?.update?.sessionUpdate === "tool_call")
+            .map((item) => item.params.update);
+        const todoToolUpdates = notifications
+            .filter((item) => item.params?.update?.sessionUpdate === "tool_call_update")
+            .map((item) => item.params.update);
+
+        expect(planUpdates).toHaveLength(3);
+        expect(todoToolCalls).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ title: "Sketching the plan", kind: "think" }),
+                expect.objectContaining({ title: "Advancing plan item Inspect repo", kind: "think" }),
+                expect.objectContaining({ title: "Advancing plan item Write tests", kind: "think" }),
+            ]),
+        );
+        expect(todoToolUpdates).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    status: "completed",
+                    content: [
+                        {
+                            type: "content",
+                            content: { type: "text", text: "Updated plan with 2 items" },
+                        },
+                    ],
+                }),
+                expect.objectContaining({
+                    status: "completed",
+                    content: [
+                        {
+                            type: "content",
+                            content: { type: "text", text: 'Marked "Inspect repo" as done' },
+                        },
+                    ],
+                }),
+                expect.objectContaining({
+                    status: "completed",
+                    content: [
+                        {
+                            type: "content",
+                            content: { type: "text", text: 'Marked "Write tests" as active' },
+                        },
+                    ],
+                }),
+            ]),
+        );
+        expect(planUpdates[0]).toEqual([
+            { content: "Inspect repo", priority: "high", status: "in_progress" },
+            { content: "Write tests", priority: "medium", status: "pending" },
+        ]);
+        expect(planUpdates[1]).toEqual([
+            { content: "Inspect repo", priority: "low", status: "completed" },
+            { content: "Write tests", priority: "medium", status: "pending" },
+        ]);
+        expect(planUpdates[2]).toEqual([
+            { content: "Inspect repo", priority: "low", status: "completed" },
+            { content: "Write tests", priority: "high", status: "in_progress" },
+        ]);
+    });
+
+    it("formats file.edit updates as human-readable summaries", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-file-edit-"));
+        const filePath = path.join(workspaceDir, "sample.ts");
+
+        fs.writeFileSync(
+            filePath,
+            [
+                "const greeting = 'hello';",
+                "console.log(greeting);",
+            ].join("\n"),
+            "utf-8",
+        );
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+                respond: (response) => responses.push(response),
+            });
+            const fileEditToolCall = `\`\`\`tool-call
+[{"tool":"file.edit","params":{"path":"sample.ts","edits":[{"mode":"replace","anchor":{"start":{"line":1,"text":"const greeting = 'hello';"}},"content":["const greeting = 'hello there';"]}]}},{"tool":"task.end","params":{"reason":"done","summary":"edited file"}}]
+\`\`\``;
+
+            vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
+                async (_messages, onChunk) => {
+                    onChunk({
+                        type: "content",
+                        content: fileEditToolCall,
+                    });
+                    return {
+                        content: fileEditToolCall,
+                        reasoning: "",
+                    };
+                },
+            );
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId =
+                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Update the greeting" }],
+                },
+            });
+            await waitFor(() => responses.find((response) => response.id === 3));
+
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "completed"
+                        && Array.isArray(item.params.update.content)
+                        && item.params.update.content[0]?.content?.text === [
+                            "Updated sample.ts: 1 edit applied, 2 total lines",
+                            "replace lines 1-1 -> 1-1",
+                        ].join("\n"),
+                ),
+            ).toBe(true);
+        } finally {
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
     });
 
     it("sends a final reply over stdio with a mocked OpenAI stream", async () => {
