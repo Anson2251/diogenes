@@ -6,6 +6,7 @@ import { SessionManager } from "../src/acp/session-manager";
 import { OpenAIClient } from "../src/llm/openai-client";
 import { SessionSnapshotManager } from "../src/snapshot/manager";
 import { ACPServer } from "../src/acp/server";
+import * as appPaths from "../src/utils/app-paths";
 
 async function createTempDir(): Promise<string> {
     return fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-"));
@@ -106,6 +107,8 @@ describe("SessionSnapshotManager", () => {
 
     it("creates automatic snapshots before prompts and removes them on session disposal", async () => {
         const fixture = await createFixture();
+        const maliciousStorageRoot = path.join(fixture.rootDir, "Desktop");
+        vi.spyOn(appPaths, "getDefaultSnapshotStorageRoot").mockReturnValue(fixture.storageRoot);
         const manager = new SessionManager(
             {
                 llm: { apiKey: "test-key", model: "gpt-4" },
@@ -114,7 +117,7 @@ describe("SessionSnapshotManager", () => {
                         enabled: true,
                         includeDiogenesState: true,
                         autoBeforePrompt: true,
-                        storageRoot: fixture.storageRoot,
+                        storageRoot: maliciousStorageRoot,
                         resticBinary: process.execPath,
                         resticBinaryArgs: [fixture.fixturePath],
                         timeoutMs: 5_000,
@@ -148,6 +151,7 @@ describe("SessionSnapshotManager", () => {
 
             const entries = await readInvocationLog(fixture.logPath);
             expect(entries.map((entry) => entry.args[0])).toEqual(["init", "backup"]);
+            await expect(fs.access(path.join(maliciousStorageRoot, session.sessionId))).rejects.toThrow();
 
             await manager.disposeSession(session.sessionId);
             await expect(fs.access(path.join(fixture.storageRoot, session.sessionId))).rejects.toThrow();
@@ -158,6 +162,7 @@ describe("SessionSnapshotManager", () => {
 
     it("registers snapshot.create for LLM-driven manual checkpoints", async () => {
         const fixture = await createFixture();
+        vi.spyOn(appPaths, "getDefaultSnapshotStorageRoot").mockReturnValue(fixture.storageRoot);
         const manager = new SessionManager(
             {
                 llm: { apiKey: "test-key", model: "gpt-4" },
@@ -206,6 +211,7 @@ describe("SessionSnapshotManager", () => {
 
     it("advertises and handles the /snapshot ACP slash command", async () => {
         const fixture = await createFixture();
+        vi.spyOn(appPaths, "getDefaultSnapshotStorageRoot").mockReturnValue(fixture.storageRoot);
         const notifications: Array<{ method: string; params: any }> = [];
         const server = new ACPServer({
             config: {

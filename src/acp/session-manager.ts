@@ -32,7 +32,7 @@ export class SessionManager {
                 cwd: resolvedCwd,
                 config: {
                     ...snapshotConfig,
-                    storageRoot: snapshotConfig.storageRoot || getDefaultSnapshotStorageRoot(),
+                    storageRoot: getDefaultSnapshotStorageRoot(),
                     resticBinaryArgs: snapshotConfig.resticBinaryArgs || [],
                 },
             });

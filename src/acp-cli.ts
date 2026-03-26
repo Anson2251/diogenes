@@ -8,13 +8,13 @@ import { PassThrough, Writable } from "stream";
 import * as yaml from "yaml";
 import { startACPServer } from "./index";
 import type { DiogenesConfig } from "./types";
+import { ensureDiogenesAppDirsSync, findDefaultConfigFileSync } from "./utils/app-paths";
 
 interface ACPCLIOptions {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
     workspace?: string;
-    configFile?: string;
     envFile?: string;
     maxIterations?: number;
     debugStdioFile?: string;
@@ -38,8 +38,6 @@ function parseArgs(): ACPCLIOptions {
             options.baseUrl = args[++i];
         } else if (arg === "--workspace" || arg === "-w") {
             options.workspace = args[++i];
-        } else if (arg === "--config-file" || arg === "--config" || arg === "-c") {
-            options.configFile = args[++i];
         } else if (arg === "--env-file" || arg === "-e") {
             options.envFile = args[++i];
         } else if (arg === "--max-iterations" || arg === "-i") {
@@ -68,7 +66,6 @@ Options:
   -m, --model <model>           LLM model
   -b, --base-url <url>          OpenAI-compatible API base URL
   -w, --workspace <path>        Workspace directory
-  -c, --config-file <path>      JSON or YAML config file
   -e, --env-file <path>         Env file to load before reading environment variables
   -i, --max-iterations <n>      Maximum iterations per session/prompt run
       --debug-stdio-file <path> Mirror ACP stdin/stdout/stderr to a debug log file
@@ -149,7 +146,9 @@ function mergeConfig(
 }
 
 function createConfig(options: ACPCLIOptions): DiogenesConfig {
-    const fileConfig = options.configFile ? loadConfig(options.configFile) : {};
+    const appPaths = ensureDiogenesAppDirsSync();
+    const configPath = findDefaultConfigFileSync() || undefined;
+    const fileConfig = configPath ? loadConfig(configPath) : {};
 
     const envConfig: Partial<DiogenesConfig> = {};
     if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL || process.env.DIOGENES_MODEL) {
@@ -182,6 +181,10 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
         ...(merged.security || {}),
         interaction: {
             enabled: false,
+        },
+        snapshot: {
+            ...((merged.security as any)?.snapshot || {}),
+            storageRoot: appPaths.snapshotDir,
         },
     };
 

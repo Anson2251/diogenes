@@ -1,5 +1,4 @@
-import * as os from "os";
-import * as path from "path";
+import { getDefaultSnapshotStorageRoot } from "../utils/app-paths";
 
 export const DEFAULT_SYSTEM_PROMPT = `You are Diogenes, a tool-driven coding agent.
 Complete the task by reading the current state, choosing the right tool, checking results, and iterating until the work is done.
@@ -186,10 +185,10 @@ export const DEFAULT_SECURITY_CONFIG = {
         blockedExtensions: [".exe", ".bin"],
     },
     snapshot: {
-        enabled: false,
+        enabled: true,
         includeDiogenesState: false,
         autoBeforePrompt: true,
-        storageRoot: path.join(os.tmpdir(), "diogenes-snapshots"),
+        storageRoot: getDefaultSnapshotStorageRoot(),
         resticBinary: "restic",
         resticBinaryArgs: [],
         timeoutMs: 120000,

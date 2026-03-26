@@ -15,6 +15,7 @@ import * as path from "path";
 import * as yaml from "yaml"
 import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
 import { parseSocraticToolInput } from "./utils/socratic-parser";
+import { ensureDiogenesAppDirsSync, findDefaultConfigFileSync, resolveDiogenesAppPaths } from "./utils/app-paths";
 
 // ANSI color codes for terminal output
 const colors = {
@@ -34,15 +35,16 @@ interface CLIOptions {
     model?: string;
     baseUrl?: string;
     workspace?: string;
-    config?: string;
     verbose?: boolean;
     maxIterations?: number;
     socratic?: boolean;
     interactive?: boolean;
     acp?: boolean;
+    clearAppData?: boolean;
 }
 
 type QuestionFn = (prompt: string) => Promise<string>;
+const CLEAR_APP_DATA_PASSPHRASE = "delete diogenes data";
 
 /**
  * Parse command-line arguments
@@ -69,8 +71,6 @@ function parseArgs(): { task?: string; options: CLIOptions } {
             options.baseUrl = args[++i];
         } else if (arg === "--workspace" || arg === "-w") {
             options.workspace = args[++i];
-        } else if (arg === "--config" || arg === "-c") {
-            options.config = args[++i];
         } else if (arg === "--verbose" || arg === "-V") {
             options.verbose = true;
         } else if (arg === "--socratic" || arg === "-s") {
@@ -79,6 +79,8 @@ function parseArgs(): { task?: string; options: CLIOptions } {
             options.interactive = true;
         } else if (arg === "--acp") {
             options.acp = true;
+        } else if (arg === "--clear-app-data") {
+            options.clearAppData = true;
         } else if (arg === "--max-iterations" || arg === "-i") {
             options.maxIterations = parseInt(args[++i], 10);
         } else if (arg.startsWith("-")) {
@@ -121,12 +123,12 @@ ${colors.bright}Options:${colors.reset}
   -m, --model <model>           LLM model to use (default: gpt-4)
   -b, --base-url <url>          OpenAI-compatible API base URL
   -w, --workspace <path>        Workspace directory (default: current directory)
-  -c, --config <path>           Configuration file path
   -V, --verbose                 Enable verbose output
   -i, --max-iterations <n>      Maximum LLM iterations (default: 20)
   -s, --socratic                Socratic debug mode - you guide the agent
   -I, --interactive             Start interactive mode
       --acp                     Start ACP stdio server
+      --clear-app-data          Delete Diogenes config and local storage after confirmation
 
 ${colors.bright}Examples:${colors.reset}
   diogenes "List all TypeScript files in src directory"
@@ -136,6 +138,7 @@ ${colors.bright}Examples:${colors.reset}
   diogenes --interactive        Start interactive mode
   diogenes --socratic "Debug my code"
   diogenes --acp                Start ACP stdio server
+  diogenes --clear-app-data     Delete Diogenes config and local storage
 
 ${colors.bright}Environment Variables:${colors.reset}
   OPENAI_API_KEY                OpenAI API key (alternative to --api-key)
@@ -144,8 +147,9 @@ ${colors.bright}Environment Variables:${colors.reset}
   DIOGENES_MODEL                Default LLM model
 
 ${colors.bright}Configuration:${colors.reset}
-  Environment variables can be loaded from a .env file in the current directory
-  or specified via --config option. Create a .env file with your credentials:
+  Environment variables can be loaded from a .env file in the current directory.
+  Diogenes loads config only from the platform-managed config directory. Create a config file there
+  (config.yaml, config.yml, or config.json) or create a .env file with your credentials:
 
   OPENAI_API_KEY=sk-your-api-key-here
   OPENAI_BASE_URL=https://api.openai.com/v1
@@ -269,7 +273,7 @@ function mergeConfig(
                 enabled: overrideSnapshot?.enabled ?? baseSnapshot?.enabled ?? DEFAULT_SECURITY_CONFIG.snapshot.enabled,
                 includeDiogenesState: overrideSnapshot?.includeDiogenesState ?? baseSnapshot?.includeDiogenesState ?? DEFAULT_SECURITY_CONFIG.snapshot.includeDiogenesState,
                 autoBeforePrompt: overrideSnapshot?.autoBeforePrompt ?? baseSnapshot?.autoBeforePrompt ?? DEFAULT_SECURITY_CONFIG.snapshot.autoBeforePrompt,
-                storageRoot: overrideSnapshot?.storageRoot ?? baseSnapshot?.storageRoot ?? DEFAULT_SECURITY_CONFIG.snapshot.storageRoot,
+                storageRoot: DEFAULT_SECURITY_CONFIG.snapshot.storageRoot,
                 resticBinary: overrideSnapshot?.resticBinary ?? baseSnapshot?.resticBinary ?? DEFAULT_SECURITY_CONFIG.snapshot.resticBinary,
                 resticBinaryArgs: overrideSnapshot?.resticBinaryArgs ?? baseSnapshot?.resticBinaryArgs ?? DEFAULT_SECURITY_CONFIG.snapshot.resticBinaryArgs,
                 timeoutMs: overrideSnapshot?.timeoutMs ?? baseSnapshot?.timeoutMs ?? DEFAULT_SECURITY_CONFIG.snapshot.timeoutMs,
@@ -300,7 +304,9 @@ function getApiKey(options: CLIOptions): string | undefined {
  * Create Diogenes configuration from CLI options
  */
 function createConfig(options: CLIOptions): DiogenesConfig {
-    const fileConfig = options.config ? loadConfig(options.config) : {};
+    const appPaths = ensureDiogenesAppDirsSync();
+    const configPath = findDefaultConfigFileSync() || undefined;
+    const fileConfig = configPath ? loadConfig(configPath) : {};
 
     const envConfig: Partial<DiogenesConfig> = {};
     if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL || process.env.DIOGENES_MODEL) {
@@ -347,6 +353,14 @@ function createConfig(options: CLIOptions): DiogenesConfig {
             : note;
     }
 
+    merged.security = {
+        ...(merged.security || {}),
+        snapshot: {
+            ...((merged.security as any)?.snapshot || {}),
+            storageRoot: appPaths.snapshotDir,
+        },
+    };
+
     return merged as DiogenesConfig;
 }
 
@@ -370,6 +384,32 @@ function createQuestionFn(rl: readline.Interface): QuestionFn {
         new Promise((resolve) => {
             rl.question(prompt, resolve);
         });
+}
+
+async function clearDiogenesAppData(
+    question: QuestionFn,
+    output: NodeJS.WriteStream = process.stdout,
+): Promise<boolean> {
+    const appPaths = resolveDiogenesAppPaths();
+    const uniqueTargets = Array.from(new Set([appPaths.configDir, appPaths.dataDir]));
+
+    output.write(`${colors.red}${colors.bright}Danger:${colors.reset} this will delete Diogenes config and local storage.\n`);
+    output.write(`- Config: ${appPaths.configDir}\n`);
+    output.write(`- Local data: ${appPaths.dataDir}\n`);
+    output.write(`Type ${colors.bright}${CLEAR_APP_DATA_PASSPHRASE}${colors.reset} to continue.\n`);
+
+    const answer = (await question("> ")).trim();
+    if (answer !== CLEAR_APP_DATA_PASSPHRASE) {
+        output.write("Cancelled. Confirmation phrase did not match.\n");
+        return false;
+    }
+
+    for (const target of uniqueTargets) {
+        await fs.promises.rm(target, { recursive: true, force: true });
+    }
+
+    output.write("Diogenes config and local storage have been removed.\n");
+    return true;
 }
 
 async function readTerminatedBlock(
@@ -776,6 +816,22 @@ ${colors.bright}Multiline:${colors.reset}
 async function main(): Promise<void> {
     const { task, options } = parseArgs();
 
+    if (options.clearAppData) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+
+        try {
+            const question = createQuestionFn(rl);
+            await clearDiogenesAppData(question, process.stdout);
+        } finally {
+            rl.close();
+        }
+
+        return;
+    }
+
     if (options.acp) {
         const config = createConfig(options);
         startACPServer({
@@ -865,4 +921,4 @@ if (require.main === module) {
     });
 }
 
-export { main }; // For testing
+export { main, parseArgs, clearDiogenesAppData, CLEAR_APP_DATA_PASSPHRASE }; // For testing

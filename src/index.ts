@@ -56,6 +56,13 @@ export {
     ResticCommandError,
     ResticParseError,
 } from "./utils/restic";
+export {
+    resolveDiogenesAppPaths,
+    ensureDiogenesAppDirs,
+    ensureDiogenesAppDirsSync,
+    findDefaultConfigFileSync,
+    getDefaultSnapshotStorageRoot as getDefaultSnapshotStorageRootFromAppPaths,
+} from "./utils/app-paths";
 export type {
     ResticClientOptions,
     ResticCommandOptions,

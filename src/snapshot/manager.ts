@@ -1,9 +1,9 @@
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
-import * as os from "os";
 import * as path from "path";
 import type { SecurityConfig } from "../types";
 import { ResticClient } from "../utils/restic";
+import { getDefaultSnapshotStorageRoot as getDefaultSnapshotStorageRootFromAppPaths } from "../utils/app-paths";
 import { SnapshotManifestStore } from "./manifest-store";
 import { PlaceholderStateSerializer, type SnapshotStateSerializer } from "./state-serializer";
 import type { SnapshotCreateInput, SnapshotCreateResult, SnapshotSummary } from "./types";
@@ -167,5 +167,5 @@ export class SessionSnapshotManager implements SnapshotManager {
 }
 
 export function getDefaultSnapshotStorageRoot(): string {
-    return path.join(os.tmpdir(), "diogenes-snapshots");
+    return getDefaultSnapshotStorageRootFromAppPaths();
 }
