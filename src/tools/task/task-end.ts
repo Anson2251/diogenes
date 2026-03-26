@@ -10,7 +10,7 @@ export class TaskEndTool extends BaseTool {
         super({
             namespace: "task",
             name: "end",
-            description: "End the current task, either because it is complete or because the user must clarify something before work can continue. The summary may be multi-line Markdown and may be fairly detailed when that helps the user understand what happened or decide the next step.",
+            description: "End the current task, either because it is complete or because the user must clarify something before work can continue. The summary may be multi-line Markdown and may be fairly detailed when that helps the user understand what happened or decide the next step. If the summary is long or spans multiple lines, prefer heredoc.",
             params: {
                 reason: {
                     type: "string",
@@ -18,7 +18,7 @@ export class TaskEndTool extends BaseTool {
                 },
                 summary: {
                     type: "string",
-                    description: "A user-facing summary of what was completed, or the exact clarification/question the user must answer next. Multi-line Markdown is allowed. Be detailed when useful, because the user may respond with follow-up instructions based directly on this summary.",
+                    description: "A user-facing summary of what was completed, or the exact clarification/question the user must answer next. Multi-line Markdown is allowed. If the summary is long or spans multiple lines, prefer heredoc. Be detailed when useful, because the user may respond with follow-up instructions based directly on this summary.",
                 },
             },
             returns: {
@@ -71,5 +71,46 @@ export class TaskEndTool extends BaseTool {
         }
 
         return super.formatResultForLLM(toolCall, result);
+    }
+
+    validateParams(params: unknown): { valid: boolean; errors: string[]; data?: unknown } {
+        if (!params || typeof params !== "object") {
+            return {
+                valid: false,
+                errors: ["reason: Required", "summary: Required"],
+            };
+        }
+
+        const data = params as { reason?: unknown; summary?: unknown };
+        const errors: string[] = [];
+
+        if (typeof data.reason !== "string") {
+            errors.push("reason: Expected string");
+        }
+
+        if (typeof data.summary !== "string" && !this.isStringArray(data.summary)) {
+            errors.push("summary: Expected string or array of strings");
+        }
+
+        if (errors.length > 0) {
+            return { valid: false, errors };
+        }
+
+        return {
+            valid: true,
+            errors: [],
+            data: {
+                reason: data.reason,
+                summary: this.normalizeSummary(data.summary as string | string[]),
+            },
+        };
+    }
+
+    private isStringArray(value: unknown): value is string[] {
+        return Array.isArray(value) && value.every((item) => typeof item === "string");
+    }
+
+    private normalizeSummary(summary: string | string[]): string {
+        return Array.isArray(summary) ? summary.join("\n") : summary;
     }
 }

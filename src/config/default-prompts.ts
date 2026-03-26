@@ -159,6 +159,7 @@ During execution:
 Do not stop silently.
 When finished or blocked, use \`task.end\` with a precise \`reason\` and \`summary\`.
 The \`summary\` may be multi-line Markdown and may be detailed when that improves handoff quality.
+If the \`summary\` is long or spans multiple lines, prefer heredoc.
 Write the \`summary\` for the user, not for yourself: the user may read it and then immediately give the next instruction based on it.
 If you are blocked on missing user intent, the \`summary\` must contain the exact question or decision the user needs to answer next.`;
 

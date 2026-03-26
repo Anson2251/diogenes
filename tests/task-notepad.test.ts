@@ -18,6 +18,7 @@ describe("TaskNotepadTool", () => {
         });
 
         expect(result.success).toBe(true);
+        expect(result.data?.lines).toEqual(["fact one", "fact two"]);
         expect(workspace.getNotepadWorkspace().lines).toEqual(["fact one", "fact two"]);
     });
 

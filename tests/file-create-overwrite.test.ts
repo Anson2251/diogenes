@@ -70,6 +70,17 @@ describe("FileCreateTool and FileOverwriteTool", () => {
         const entry = workspace.getFileEntry("existing.txt");
         expect(entry?.content).toEqual(["new line 1", "new line 2"]);
         expect(entry?.ranges).toEqual([{ start: 1, end: 2 }]);
+        expect(result.data?._diff?.path).toBe(existingFilePath);
+        expect(result.data?._diff?.oldText).toBe("old line 1\nold line 2\n");
+        expect(result.data?._diff?.newText).toBe("new line 1\nnew line 2\nnew line 3");
+        expect(result.data?._diff?.hunks).toEqual([
+            {
+                oldStart: 1,
+                oldEnd: 3,
+                newStart: 1,
+                newEnd: 3,
+            },
+        ]);
     });
 
     it("should reject file.create with invalid content type", async () => {

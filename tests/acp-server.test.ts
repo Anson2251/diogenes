@@ -259,7 +259,11 @@ describe("ACPServer", () => {
                 (item) => item.params?.update?.sessionUpdate === "tool_call_update"
                     && item.params.update.status === "completed"
                     && Array.isArray(item.params.update.content)
-                    && item.params.update.content[0]?.content?.text === "Updated working notes (1 line total)",
+                    && item.params.update.content[0]?.content?.text === [
+                        "Updated working notes (1 line total)",
+                        "",
+                        "round one",
+                    ].join("\n"),
             ),
         ).toBe(true);
     });
@@ -687,6 +691,88 @@ describe("ACPServer", () => {
                         && item.params.update.content[0].content.text.includes("Could not apply edits to sample.ts")
                         && item.params.update.content[0].content.text.includes("Closest match:")
                         && !item.params.update.content[0].content.text.includes("failedEdits"),
+                ),
+            ).toBe(true);
+        } finally {
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
+
+    it("returns overwrite diffs in ACP updates for file.overwrite", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-file-overwrite-"));
+        const filePath = path.join(workspaceDir, "notes.txt");
+
+        fs.writeFileSync(
+            filePath,
+            ["old line 1", "old line 2"].join("\n"),
+            "utf-8",
+        );
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+                respond: (response) => responses.push(response),
+            });
+            const fileOverwriteToolCall = `\`\`\`tool-call
+[{"tool":"file.overwrite","params":{"path":"notes.txt","content":["new line 1","new line 2","new line 3"]}},{"tool":"task.end","params":{"reason":"done","summary":"overwrote file"}}]
+\`\`\``;
+
+            vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
+                async (_messages, onChunk) => {
+                    onChunk({
+                        type: "content",
+                        content: fileOverwriteToolCall,
+                    });
+                    return {
+                        content: fileOverwriteToolCall,
+                        reasoning: "",
+                    };
+                },
+            );
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId =
+                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Overwrite the file" }],
+                },
+            });
+            await waitFor(() => responses.find((response) => response.id === 3));
+
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "completed"
+                        && Array.isArray(item.params.update.content)
+                        && item.params.update.content.some(
+                            (content: any) =>
+                                content.type === "diff"
+                                && content.path === filePath
+                                && content.oldText === "old line 1\nold line 2"
+                                && content.newText === "new line 1\nnew line 2\nnew line 3",
+                        ),
                 ),
             ).toBe(true);
         } finally {

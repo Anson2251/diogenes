@@ -16,9 +16,11 @@ describe("TaskEndTool", () => {
             expect(def.name).toBe("end");
             expect(def.description).toContain("End the current task");
             expect(def.description).toContain("multi-line Markdown");
+            expect(def.description).toContain("prefer heredoc");
             expect(def.params.reason.type).toBe("string");
             expect(def.params.summary.type).toBe("string");
             expect(def.params.summary.description).toContain("Multi-line Markdown is allowed");
+            expect(def.params.summary.description).toContain("prefer heredoc");
             expect(def.params.summary.description).toContain("follow-up instructions");
         });
     });
@@ -87,6 +89,16 @@ describe("TaskEndTool", () => {
             expect(result.data?.reason).toBe("任务完成");
             expect(result.data?.summary).toBe("修复了所有错误 🔧");
         });
+
+        it("should normalize summary arrays into multi-line text", async () => {
+            const result = await tool.execute({
+                reason: "Task completed successfully",
+                summary: ["line 1", "line 2"],
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.data?.summary).toBe("line 1\nline 2");
+        });
     });
 
     describe("validateParams", () => {
@@ -113,6 +125,16 @@ describe("TaskEndTool", () => {
             });
 
             expect(result.valid).toBe(false);
+        });
+
+        it("should accept summary as an array of strings", () => {
+            const result = tool.validateParams({
+                reason: "Task reason",
+                summary: ["line 1", "line 2"],
+            });
+
+            expect(result.valid).toBe(true);
+            expect((result.data as { summary: string }).summary).toBe("line 1\nline 2");
         });
 
         it("should validate non-string summary parameter", () => {

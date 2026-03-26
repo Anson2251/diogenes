@@ -84,6 +84,7 @@ Use this to preserve summaries, decisions, or facts you still need after calling
 
         return this.success({
             mode,
+            lines,
             total_lines: this.workspace.getNotepadWorkspace().lines.length,
         });
     }

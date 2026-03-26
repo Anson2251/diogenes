@@ -39,7 +39,7 @@ function createACPToolResultContent(
 
     const diffData = result.success ? result.data?._diff : undefined;
     if (
-        (toolName === "file.edit" || toolName === "file.create")
+        (toolName === "file.edit" || toolName === "file.create" || toolName === "file.overwrite")
         && diffData
         && typeof diffData.path === "string"
         && typeof diffData.newText === "string"
@@ -358,14 +358,29 @@ function formatToolResultFallback(
         if (toolName === "task.notepad") {
             const mode = typeof result.data?.mode === "string" ? result.data.mode : "append";
             const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            const noteLines = Array.isArray(result.data?.lines)
+                ? result.data.lines.filter((line): line is string => typeof line === "string")
+                : [];
 
             switch (mode) {
                 case "clear":
                     return "Cleared working notes";
                 case "replace":
-                    return `Replaced working notes (${totalLines} line${totalLines === 1 ? "" : "s"} total)`;
+                    return [
+                        `Replaced working notes (${totalLines} line${totalLines === 1 ? "" : "s"} total)`,
+                        noteLines.length > 0 ? "" : undefined,
+                        ...noteLines,
+                    ]
+                        .filter((line): line is string => typeof line === "string")
+                        .join("\n");
                 default:
-                    return `Updated working notes (${totalLines} line${totalLines === 1 ? "" : "s"} total)`;
+                    return [
+                        `Updated working notes (${totalLines} line${totalLines === 1 ? "" : "s"} total)`,
+                        noteLines.length > 0 ? "" : undefined,
+                        ...noteLines,
+                    ]
+                        .filter((line): line is string => typeof line === "string")
+                        .join("\n");
             }
         }
 

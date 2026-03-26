@@ -3,6 +3,7 @@ import * as path from "path";
 import { BaseTool } from "../base-tool";
 import { ToolResult } from "../../types";
 import { WorkspaceManager } from "../../context/workspace";
+import { computeMyersLineDiffHunks } from "../../utils/str";
 
 interface FileOverwriteParams {
     path: string;
@@ -61,6 +62,7 @@ Use this when replacing most or all of a file.
                 throw new Error(`Path ${filePath} is not a file`);
             }
 
+            const previousContent = await fs.promises.readFile(absolutePath, "utf-8");
             const lines = this.normalizeContent(content);
             const serialized = lines.join("\n");
             await fs.promises.writeFile(absolutePath, serialized, "utf-8");
@@ -79,6 +81,12 @@ Use this when replacing most or all of a file.
                         total_lines_in_workspace: workspaceUpdate.content.length,
                     }
                     : undefined,
+                _diff: {
+                    path: absolutePath,
+                    oldText: previousContent,
+                    newText: serialized,
+                    hunks: computeMyersLineDiffHunks(previousContent, serialized),
+                },
             });
         } catch (error) {
             return this.error(

@@ -997,6 +997,7 @@ TROUBLESHOOTING:
         if (anchor.before?.length || anchor.after?.length) {
             parts.push("");
             parts.push("Expected anchor context:");
+            parts.push("```");
             for (const line of anchor.before || []) {
                 parts.push(`before | ${line}`);
             }
@@ -1004,6 +1005,7 @@ TROUBLESHOOTING:
             for (const line of anchor.after || []) {
                 parts.push(`after  | ${line}`);
             }
+            parts.push("```");
         }
 
         return parts.join("\n");
