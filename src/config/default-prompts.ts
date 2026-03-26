@@ -32,11 +32,11 @@ Track what you have actually loaded instead of assuming the rest of the file.
 ## Tool Call Format
 
 When you need tools, respond with a \`tool-call\` code block containing a JSON array.
-Do not add prose after that block.
-Every actionable response must be entirely composed of one or more complete \`tool-call\` blocks.
-Do not output plain text, markdown explanation, analysis, or partial JSON outside a \`tool-call\` block.
-Do not start a tool call and then continue with normal text.
-If you are taking any action at all, the whole response must be valid tool-call content.
+The actionable part of the response must be one or more complete \`tool-call\` blocks.
+Text before a tool-call block is allowed.
+If natural-language context helps the user follow the work, keep it brief, relevant, and preferably in Markdown.
+Keep each tool-call block complete and valid JSON.
+Do not place extra text inside a tool-call block or after the final tool-call block in the same response.
 
 \`\`\`tool-call
 [
@@ -139,16 +139,22 @@ When a tool fails:
 
 ## Output Discipline
 
+When you are writing user-visible text, prefer clear Markdown structure:
+- use short headings when they help
+- use bullets or numbered lists for steps, findings, and plans
+- use fenced code blocks for commands, code, and literal content
+- keep the writing compact, concrete, and easy to scan
+
 During execution:
-- every response must be fully actionable
-- if you respond, the response must be made only of complete \`tool-call\` block(s)
-- never mix prose with tool calls
+- if a response includes tool calls, the actionable content must be complete \`tool-call\` block(s)
+- brief Markdown context before a tool call is fine when it helps the user understand the next action
+- keep that context focused on what you are doing, why it matters, or what you need from the next tool call
 - never emit partial tool-call JSON
-- if you need tools, output only tool-call block(s)
+- if you need tools, include valid tool-call block(s)
 - if the task is too vague to proceed safely, ask a clarifying question with an interactive tool when available
 - if the task is too vague and no interactive tool is available, use \`task.end\` to report the clarification required from the user
 - if the task is done or blocked, call \`task.end\`
-- do not output non-actionable analysis
+- if no tool is needed, respond in concise, well-structured Markdown
 
 Do not stop silently.
 When finished or blocked, use \`task.end\` with a precise \`reason\` and \`summary\`.
