@@ -7,14 +7,25 @@ import { FilePeekTool } from "../src/tools/file/file-peek";
 describe("FilePeekTool", () => {
     const testDir = path.join(__dirname, "test-file-peek-workspace");
     const testFilePath = path.join(testDir, "peek.txt");
+    const ignoredFilePath = path.join(testDir, "secret.txt");
+    const ignoredDirPath = path.join(testDir, "ignored-dir");
+    const ignoredNestedFilePath = path.join(ignoredDirPath, "hidden.txt");
     let workspace: WorkspaceManager;
     let tool: FilePeekTool;
 
     beforeEach(() => {
         fs.mkdirSync(testDir, { recursive: true });
+        fs.mkdirSync(ignoredDirPath, { recursive: true });
         fs.writeFileSync(
             testFilePath,
             Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n"),
+            "utf-8",
+        );
+        fs.writeFileSync(ignoredFilePath, "top secret", "utf-8");
+        fs.writeFileSync(ignoredNestedFilePath, "hidden content", "utf-8");
+        fs.writeFileSync(
+            path.join(testDir, ".gitignore"),
+            "secret.txt\nignored-dir/\n",
             "utf-8",
         );
         workspace = new WorkspaceManager(testDir);
@@ -63,5 +74,21 @@ describe("FilePeekTool", () => {
 
         expect(result.success).toBe(true);
         expect(result.data?.preview_range).toEqual([1, 30]);
+    });
+
+    it("should reject files listed in .gitignore", async () => {
+        const result = await tool.execute({ path: "secret.txt" });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("FILE_ERROR");
+        expect(result.error?.message).toContain("ignored by .gitignore");
+    });
+
+    it("should reject files inside ignored directories", async () => {
+        const result = await tool.execute({ path: "ignored-dir/hidden.txt" });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.code).toBe("FILE_ERROR");
+        expect(result.error?.message).toContain("ignored by .gitignore");
     });
 });

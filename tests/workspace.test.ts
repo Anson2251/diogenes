@@ -23,13 +23,23 @@ describe("WorkspaceManager", () => {
     const multiLineFilePath = path.join(testDir, "multi-line.txt");
     const nestedDir = path.join(testDir, "nested");
     const nestedFilePath = path.join(nestedDir, "nested-file.txt");
+    const ignoredDir = path.join(testDir, "ignored-dir");
+    const ignoredFilePath = path.join(testDir, "secret.txt");
+    const ignoredNestedFilePath = path.join(ignoredDir, "hidden.txt");
 
     beforeEach(async () => {
         fs.mkdirSync(testDir, { recursive: true });
         fs.mkdirSync(nestedDir, { recursive: true });
+        fs.mkdirSync(ignoredDir, { recursive: true });
         fs.writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
         fs.writeFileSync(multiLineFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10");
         fs.writeFileSync(nestedFilePath, "nested content");
+        fs.writeFileSync(ignoredFilePath, "top secret");
+        fs.writeFileSync(ignoredNestedFilePath, "hidden content");
+        fs.writeFileSync(
+            path.join(testDir, ".gitignore"),
+            "secret.txt\nignored-dir/\n",
+        );
         workspace = new WorkspaceManager(testDir);
     });
 
@@ -50,8 +60,12 @@ describe("WorkspaceManager", () => {
         it("should sort directories before files", async () => {
             const entries = await workspace.loadDirectory(".");
 
+            const firstFileIndex = entries.findIndex((entry) => entry.type === "FILE");
+
             expect(entries[0].type).toBe("DIR");
-            expect(entries[1].type).toBe("FILE");
+            expect(firstFileIndex).toBeGreaterThan(0);
+            expect(entries.slice(0, firstFileIndex).every((entry) => entry.type === "DIR")).toBe(true);
+            expect(entries.slice(firstFileIndex).every((entry) => entry.type === "FILE")).toBe(true);
         });
 
         it("should throw error for non-existent directory", async () => {
@@ -122,6 +136,18 @@ describe("WorkspaceManager", () => {
 
         it("should throw error when path is a directory", async () => {
             await expect(workspace.loadFile("nested")).rejects.toThrow();
+        });
+
+        it("should reject files listed in .gitignore", async () => {
+            await expect(workspace.loadFile("secret.txt")).rejects.toThrow(
+                /ignored by \.gitignore/,
+            );
+        });
+
+        it("should reject files inside ignored directories", async () => {
+            await expect(workspace.loadFile("ignored-dir/hidden.txt")).rejects.toThrow(
+                /ignored by \.gitignore/,
+            );
         });
 
         it("should handle negative start line by clamping to 1", async () => {

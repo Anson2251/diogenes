@@ -11,12 +11,22 @@ describe("FileLoadTool", () => {
     const testFilePath = path.join(testDir, "test.txt");
     const multiLineFilePath = path.join(testDir, "multi-line.txt");
     const nestedFilePath = path.join(testDir, "nested.txt");
+    const ignoredFilePath = path.join(testDir, "secret.txt");
+    const ignoredDirPath = path.join(testDir, "ignored-dir");
+    const ignoredNestedFilePath = path.join(ignoredDirPath, "hidden.txt");
 
     beforeEach(() => {
         fs.mkdirSync(testDir, { recursive: true });
+        fs.mkdirSync(ignoredDirPath, { recursive: true });
         fs.writeFileSync(testFilePath, "single line");
         fs.writeFileSync(multiLineFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10");
         fs.writeFileSync(nestedFilePath, "nested content");
+        fs.writeFileSync(ignoredFilePath, "top secret");
+        fs.writeFileSync(ignoredNestedFilePath, "hidden content");
+        fs.writeFileSync(
+            path.join(testDir, ".gitignore"),
+            "secret.txt\nignored-dir/\n",
+        );
         workspace = new WorkspaceManager(testDir);
         tool = new FileLoadTool(workspace);
     });
@@ -99,6 +109,22 @@ describe("FileLoadTool", () => {
 
             expect(result.success).toBe(false);
             expect(result.error?.code).toBe("FILE_ERROR");
+        });
+
+        it("should reject files listed in .gitignore", async () => {
+            const result = await tool.execute({ path: "secret.txt" });
+
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("FILE_ERROR");
+            expect(result.error?.message).toContain("ignored by .gitignore");
+        });
+
+        it("should reject files inside ignored directories", async () => {
+            const result = await tool.execute({ path: "ignored-dir/hidden.txt" });
+
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("FILE_ERROR");
+            expect(result.error?.message).toContain("ignored by .gitignore");
         });
 
         it("should add file to workspace", async () => {

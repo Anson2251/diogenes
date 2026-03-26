@@ -6,7 +6,6 @@ import { BaseTool } from "../base-tool";
 import { ToolResult } from "../../types";
 import { WorkspaceManager } from "../../context/workspace";
 import * as fs from "fs";
-import * as path from "path";
 import { formatDisplayLine } from "../../utils/str";
 
 export class FilePeekTool extends BaseTool {
@@ -68,7 +67,7 @@ This tool is lightweight and doesn't affect your workspace context.`,
         };
 
         try {
-            const absolutePath = this.resolvePath(filePath);
+            const absolutePath = await this.workspace.resolveReadableFilePath(filePath);
 
             const content = await fs.promises.readFile(absolutePath, "utf-8");
             const allLines = content.split("\n");
@@ -114,14 +113,6 @@ This tool is lightweight and doesn't affect your workspace context.`,
                 "Check if the file exists and is readable",
             );
         }
-    }
-
-    private resolvePath(filePath: string): string {
-        const root = (this.workspace as any).workspaceRoot as string;
-        if (path.isAbsolute(filePath)) {
-            return filePath;
-        }
-        return path.resolve(root, filePath);
     }
 
     formatResult(result: ToolResult): string | undefined {

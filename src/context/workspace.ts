@@ -15,6 +15,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { rstrip } from "../utils/str";
 
+interface GitIgnoreRule {
+    pattern: string;
+    negated: boolean;
+}
+
 interface WorkspaceWatchOptions {
     enabled?: boolean;
     debounceMs?: number;
@@ -102,8 +107,7 @@ export class WorkspaceManager {
         start?: number,
         end?: number,
     ): Promise<FileWorkspaceEntry> {
-        const absolutePath = this.resolvePath(filePath);
-        await this.validatePath(absolutePath, false);
+        const absolutePath = await this.resolveReadableFilePath(filePath);
 
         // Get current file stats
         const content = await fs.promises.readFile(absolutePath, "utf-8");
@@ -159,6 +163,13 @@ export class WorkspaceManager {
         this.fileWorkspace[absolutePath] = entry;
         this.ensureFileWatcher(absolutePath);
         return { ...entry };
+    }
+
+    async resolveReadableFilePath(filePath: string): Promise<string> {
+        const absolutePath = this.resolvePath(filePath);
+        await this.validatePath(absolutePath, false);
+        await this.validateReadAccess(absolutePath);
+        return absolutePath;
     }
 
     unloadFile(filePath: string): boolean {
@@ -435,6 +446,138 @@ export class WorkspaceManager {
             }
             throw error;
         }
+    }
+
+    private async validateReadAccess(absolutePath: string): Promise<void> {
+        if (await this.isGitIgnored(absolutePath)) {
+            const relativePath = this.toWorkspaceRelativePath(absolutePath);
+            throw new Error(
+                `Path ${relativePath} is blocked because it is ignored by .gitignore`,
+            );
+        }
+    }
+
+    private async isGitIgnored(absolutePath: string): Promise<boolean> {
+        const relativePath = this.toWorkspaceRelativePath(absolutePath);
+        const pathParts = path.dirname(relativePath) === "."
+            ? []
+            : path.dirname(relativePath).split(path.sep);
+        const ignoreDirs = [this.workspaceRoot];
+
+        let currentDir = this.workspaceRoot;
+        for (const part of pathParts) {
+            currentDir = path.join(currentDir, part);
+            ignoreDirs.push(currentDir);
+        }
+
+        let ignored = false;
+        for (const ignoreDir of ignoreDirs) {
+            const rules = await this.readGitIgnoreRules(ignoreDir);
+            if (rules.length === 0) {
+                continue;
+            }
+
+            const relativeToIgnoreDir = this.normalizeForGitIgnore(
+                path.relative(ignoreDir, absolutePath),
+            );
+
+            for (const rule of rules) {
+                if (this.matchesGitIgnoreRule(relativeToIgnoreDir, rule.pattern)) {
+                    ignored = !rule.negated;
+                }
+            }
+        }
+
+        return ignored;
+    }
+
+    private async readGitIgnoreRules(directory: string): Promise<GitIgnoreRule[]> {
+        const ignorePath = path.join(directory, ".gitignore");
+
+        try {
+            const content = await fs.promises.readFile(ignorePath, "utf-8");
+            return content
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0 && !line.startsWith("#"))
+                .map((line) => ({
+                    negated: line.startsWith("!"),
+                    pattern: this.normalizeForGitIgnore(
+                        line.startsWith("!") ? line.slice(1) : line,
+                    ).replace(/\/+$/, (match) => (match ? "/" : match)),
+                }));
+        } catch (error) {
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                error.code === "ENOENT"
+            ) {
+                return [];
+            }
+            throw error;
+        }
+    }
+
+    private matchesGitIgnoreRule(relativePath: string, pattern: string): boolean {
+        if (!pattern) {
+            return false;
+        }
+
+        const directoryOnly = pattern.endsWith("/");
+        const normalizedPattern = directoryOnly ? pattern.slice(0, -1) : pattern;
+        const anchored = normalizedPattern.startsWith("/");
+        const body = anchored ? normalizedPattern.slice(1) : normalizedPattern;
+        const hasSlash = body.includes("/");
+        const regexBody = this.escapeGitIgnorePattern(body);
+
+        if (!regexBody) {
+            return false;
+        }
+
+        const prefix = anchored || hasSlash ? "^" : "(?:^|.*/)";
+        const suffix = directoryOnly ? "(?:/.*)?$" : "(?:$|/.*$)";
+        return new RegExp(`${prefix}${regexBody}${suffix}`).test(relativePath);
+    }
+
+    private escapeGitIgnorePattern(pattern: string): string {
+        let escaped = "";
+
+        for (let i = 0; i < pattern.length; i++) {
+            const char = pattern[i];
+            const next = pattern[i + 1];
+
+            if (char === "*") {
+                if (next === "*") {
+                    escaped += ".*";
+                    i++;
+                } else {
+                    escaped += "[^/]*";
+                }
+                continue;
+            }
+
+            if (char === "?") {
+                escaped += "[^/]";
+                continue;
+            }
+
+            if ("\\^$+?.()|{}[]".includes(char)) {
+                escaped += `\\${char}`;
+                continue;
+            }
+
+            escaped += char;
+        }
+
+        return escaped;
+    }
+
+    private toWorkspaceRelativePath(absolutePath: string): string {
+        return path.relative(this.workspaceRoot, absolutePath);
+    }
+
+    private normalizeForGitIgnore(value: string): string {
+        return value.split(path.sep).join("/");
     }
 
     // ==================== Statistics ====================
