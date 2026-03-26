@@ -39,7 +39,7 @@ export class DirUnloadTool extends BaseTool {
         const success = this.workspace.unloadDirectory(path);
 
         if (success) {
-            return this.success({ success: true });
+            return this.success({ success: true, path });
         } else {
             return this.error(
                 "NOT_FOUND",

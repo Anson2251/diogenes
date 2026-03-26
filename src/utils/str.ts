@@ -115,3 +115,152 @@ export function formatDisplayWindow(
 
     return output;
 }
+
+export interface MyersDiffHunk {
+    oldStart: number;
+    oldEnd: number;
+    newStart: number;
+    newEnd: number;
+}
+
+type MyersDiffOp =
+    | { type: "equal"; line: string }
+    | { type: "delete"; line: string }
+    | { type: "insert"; line: string };
+
+function buildMyersDiffOps(oldLines: string[], newLines: string[]): MyersDiffOp[] {
+    const max = oldLines.length + newLines.length;
+    const offset = max;
+    const trace: number[][] = [];
+    let v = new Array(2 * max + 1).fill(0);
+
+    for (let d = 0; d <= max; d++) {
+        trace.push([...v]);
+
+        for (let k = -d; k <= d; k += 2) {
+            const index = k + offset;
+            let x: number;
+
+            if (k === -d || (k !== d && v[index - 1] < v[index + 1])) {
+                x = v[index + 1];
+            } else {
+                x = v[index - 1] + 1;
+            }
+
+            let y = x - k;
+            while (x < oldLines.length && y < newLines.length && oldLines[x] === newLines[y]) {
+                x++;
+                y++;
+            }
+
+            v[index] = x;
+            if (x >= oldLines.length && y >= newLines.length) {
+                trace.push([...v]);
+                const ops: MyersDiffOp[] = [];
+                let backtrackX = oldLines.length;
+                let backtrackY = newLines.length;
+
+                for (let depth = trace.length - 1; depth > 0; depth--) {
+                    const previous = trace[depth - 1];
+                    const currentK = backtrackX - backtrackY;
+                    const currentIndex = currentK + offset;
+                    let previousK: number;
+
+                    if (
+                        currentK === -(depth - 1)
+                        || (currentK !== (depth - 1) && previous[currentIndex - 1] < previous[currentIndex + 1])
+                    ) {
+                        previousK = currentK + 1;
+                    } else {
+                        previousK = currentK - 1;
+                    }
+
+                    const previousX = previous[previousK + offset];
+                    const previousY = previousX - previousK;
+
+                    while (backtrackX > previousX && backtrackY > previousY) {
+                        ops.push({ type: "equal", line: oldLines[backtrackX - 1] });
+                        backtrackX--;
+                        backtrackY--;
+                    }
+
+                    if (depth === 1) {
+                        continue;
+                    }
+
+                    if (backtrackX === previousX) {
+                        ops.push({ type: "insert", line: newLines[backtrackY - 1] });
+                        backtrackY--;
+                    } else {
+                        ops.push({ type: "delete", line: oldLines[backtrackX - 1] });
+                        backtrackX--;
+                    }
+                }
+
+                while (backtrackX > 0 && backtrackY > 0) {
+                    ops.push({ type: "equal", line: oldLines[backtrackX - 1] });
+                    backtrackX--;
+                    backtrackY--;
+                }
+                while (backtrackX > 0) {
+                    ops.push({ type: "delete", line: oldLines[backtrackX - 1] });
+                    backtrackX--;
+                }
+                while (backtrackY > 0) {
+                    ops.push({ type: "insert", line: newLines[backtrackY - 1] });
+                    backtrackY--;
+                }
+
+                return ops.reverse();
+            }
+        }
+    }
+
+    return [];
+}
+
+export function computeMyersLineDiffHunks(oldText: string, newText: string): MyersDiffHunk[] {
+    const oldLines = oldText.split("\n");
+    const newLines = newText.split("\n");
+    const ops = buildMyersDiffOps(oldLines, newLines);
+    const hunks: MyersDiffHunk[] = [];
+    let oldLine = 1;
+    let newLine = 1;
+    let current: MyersDiffHunk | null = null;
+
+    for (const op of ops) {
+        if (op.type === "equal") {
+            if (current) {
+                hunks.push(current);
+                current = null;
+            }
+            oldLine++;
+            newLine++;
+            continue;
+        }
+
+        if (!current) {
+            current = {
+                oldStart: oldLine,
+                oldEnd: oldLine - 1,
+                newStart: newLine,
+                newEnd: newLine - 1,
+            };
+        }
+
+        if (op.type === "delete") {
+            current.oldEnd = oldLine;
+            oldLine++;
+            continue;
+        }
+
+        current.newEnd = newLine;
+        newLine++;
+    }
+
+    if (current) {
+        hunks.push(current);
+    }
+
+    return hunks;
+}

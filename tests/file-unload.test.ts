@@ -16,7 +16,7 @@ describe("FileUnloadTool", () => {
         const result = await tool.execute({ path: "loaded.txt" });
 
         expect(result.success).toBe(true);
-        expect(result.data).toEqual({ success: true });
+        expect(result.data).toEqual({ success: true, path: "loaded.txt" });
     });
 
     it("should return not found when file is not loaded", async () => {

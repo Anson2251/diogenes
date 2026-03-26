@@ -263,6 +263,39 @@ describe("FileEditTool", () => {
             expect(fs.readFileSync(testFilePath, "utf-8")).toBe("Line replacement (UPDATED)\n");
         });
 
+        it("should include Myers diff metadata after a successful edit", async () => {
+            const result = await tool.execute({
+                path: testFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 1,
+                                text: "Hello World",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: ["Hello There"],
+                    },
+                ],
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.data?._diff?.path).toBe(testFilePath);
+            expect(result.data?._diff?.oldText).toBe("Hello World\n");
+            expect(result.data?._diff?.newText).toBe("Hello There\n");
+            expect(result.data?._diff?.hunks).toEqual([
+                {
+                    oldStart: 1,
+                    oldEnd: 1,
+                    newStart: 1,
+                    newEnd: 1,
+                },
+            ]);
+        });
+
         it("should apply multiple edits in sequence", async () => {
             const result = await tool.execute({
                 path: multiLineFilePath,
@@ -520,11 +553,49 @@ describe("FileEditTool", () => {
 
             expect(result.success).toBe(false);
             expect(result.error?.code).toBe("ATOMIC_FAILURE");
-            expect(result.error?.suggestion).toContain("Match 1 at line");
-            expect(result.error?.suggestion).toContain("Match 2 at line");
+            expect(result.error?.suggestion).toContain("Match 1:");
+            expect(result.error?.suggestion).toContain("Match 2:");
+            expect(result.error?.suggestion).toContain("Lines 1-6 of 6");
             expect(result.error?.suggestion).toContain("1 | alpha");
             expect(result.error?.suggestion).toContain("2 | repeat");
             expect(result.error?.suggestion).toContain("4 | repeat");
+        });
+
+        it("should format atomic failures for the llm as readable text instead of JSON", async () => {
+            const result = await tool.execute({
+                path: duplicateFilePath,
+                edits: [
+                    {
+                        mode: "replace",
+                        anchor: {
+                            start: {
+                                line: 2,
+                                text: "repeat",
+                                before: [],
+                                after: [],
+                            },
+                        },
+                        content: ["SHOULD NOT APPLY"],
+                    },
+                ],
+            });
+
+            const formatted = tool.formatResultForLLM(
+                {
+                    tool: "file.edit",
+                    params: { path: "duplicate.txt", edits: [] },
+                } as any,
+                result,
+            );
+
+            expect(formatted).toContain("[FAIL] file.edit");
+            expect(formatted).toContain("Could not apply edits to duplicate.txt");
+            expect(formatted).toContain("Atomic mode left the file unchanged.");
+            expect(formatted).toContain("Edit 1 failed: AMBIGUOUS_MATCH");
+            expect(formatted).toContain("Match 1:");
+            expect(formatted).toContain("Lines 1-6 of 6");
+            expect(formatted).not.toContain("failedEdits");
+            expect(formatted).not.toContain("\"suggestion\"");
         });
 
         it("should reject conflicting context instead of silently matching by line hint", async () => {
@@ -573,7 +644,8 @@ describe("FileEditTool", () => {
 
             expect(result.success).toBe(false);
             expect(result.error?.code).toBe("ATOMIC_FAILURE");
-            expect(result.error?.suggestion).toContain("Anchor hint window around line 3 (±5):");
+            expect(result.error?.suggestion).toContain("Anchor hint:");
+            expect(result.error?.suggestion).toContain("Lines 1-6 of 6");
             expect(result.error?.suggestion).toContain("1 | line 1");
             expect(result.error?.suggestion).toContain("3 | line 3");
             expect(result.error?.suggestion).toContain("5 | line 5");
@@ -601,8 +673,9 @@ describe("FileEditTool", () => {
 
             expect(result.success).toBe(false);
             expect(result.error?.code).toBe("ATOMIC_FAILURE");
-            expect(result.error?.suggestion).toContain("Closest match window around line 3 (±5):");
+            expect(result.error?.suggestion).toContain("Closest match:");
             expect(result.error?.suggestion).not.toContain("Anchor hint window around line 3 (±5):");
+            expect(result.error?.suggestion).toContain("Lines 1-6 of 6");
             expect(result.error?.suggestion).toContain("Mismatch details:");
             expect(result.error?.suggestion).toContain("before[0] expected: wrong before");
             expect(result.error?.suggestion).toContain("before[0] actual:   line 2");

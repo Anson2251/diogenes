@@ -92,6 +92,11 @@ Use this when the file does not exist yet.
                         total_lines_in_workspace: workspaceUpdate.content.length,
                     }
                     : undefined,
+                _diff: {
+                    path: absolutePath,
+                    oldText: null,
+                    newText: serialized,
+                },
             });
         } catch (error) {
             return this.error(

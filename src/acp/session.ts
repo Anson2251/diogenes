@@ -27,6 +27,38 @@ function createToolResultContent(text: string) {
     ];
 }
 
+function createACPToolResultContent(
+    toolName: string,
+    params: Record<string, any> | undefined,
+    result: ToolResult,
+    formattedText?: string,
+) {
+    const content: any[] = createToolResultContent(
+        formattedText ?? formatToolResultFallback(toolName, result, params),
+    );
+
+    const diffData = result.success ? result.data?._diff : undefined;
+    if (
+        (toolName === "file.edit" || toolName === "file.create")
+        && diffData
+        && typeof diffData.path === "string"
+        && typeof diffData.newText === "string"
+        && (
+            toolName === "file.create"
+            || (Array.isArray(diffData.hunks) && diffData.hunks.length > 0)
+        )
+    ) {
+        content.push({
+            type: "diff",
+            path: path.normalize(diffData.path),
+            oldText: diffData.oldText ?? null,
+            newText: diffData.newText,
+        });
+    }
+
+    return content;
+}
+
 function mapTodoStatus(state: TodoItem["state"]): "pending" | "in_progress" | "completed" {
     switch (state) {
         case "active":
@@ -251,6 +283,31 @@ function formatToolResultFallback(
             return `Loaded lines ${ranges} (${totalLines} total lines in file)`;
         }
 
+        if (toolName === "file.peek") {
+            const filePath = typeof params?.path === "string" ? params.path : "unknown file";
+            const previewRange = Array.isArray(result.data?.preview_range)
+                ? result.data.preview_range as [number, number]
+                : [1, 1];
+            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            const lines = Array.isArray(result.data?.lines)
+                ? result.data.lines.filter((line): line is string => typeof line === "string")
+                : [];
+            const note = typeof result.data?._note === "string" ? result.data._note : "";
+
+            return [
+                `Peeked ${filePath}`,
+                `Lines ${previewRange[0]}-${previewRange[1]} of ${totalLines}`,
+                "",
+                "```",
+                ...lines,
+                "```",
+                "",
+                note,
+            ]
+                .filter((line, index, all) => line.length > 0 || (index > 0 && all[index - 1].length > 0))
+                .join("\n");
+        }
+
         if (toolName === "file.edit") {
             const pathName = typeof params?.path === "string" ? params.path : "file";
             const summary = formatFileEditResult(pathName, result);
@@ -260,11 +317,21 @@ function formatToolResultFallback(
         }
 
         if (toolName === "file.unload") {
-            return "Removed file from workspace context";
+            const targetPath = typeof result.data?.path === "string"
+                ? result.data.path
+                : typeof params?.path === "string"
+                    ? params.path
+                    : "file";
+            return `Removed ${targetPath} from workspace context`;
         }
 
         if (toolName === "dir.unload") {
-            return "Removed directory from workspace context";
+            const targetPath = typeof result.data?.path === "string"
+                ? result.data.path
+                : typeof params?.path === "string"
+                    ? params.path
+                    : "directory";
+            return `Removed ${targetPath} from workspace context`;
         }
 
         if (toolName === "file.create") {
@@ -326,6 +393,17 @@ function formatToolResultFallback(
     }
 
     const message = result.error?.message || `${toolName} failed`;
+    if (toolName === "file.edit") {
+        const target = typeof params?.path === "string" ? params.path : "the target file";
+        const parts = [`Could not apply edits to ${target}`, message];
+
+        if (typeof result.error?.suggestion === "string" && result.error.suggestion.length > 0) {
+            parts.push("", result.error.suggestion);
+        }
+
+        return parts.join("\n");
+    }
+
     const code = result.error?.code ? `[${result.error.code}] ` : "";
     const details = result.error?.details ? `\n${JSON.stringify(result.error.details, null, 2)}` : "";
     return `${code}${message}${details}`;
@@ -553,17 +631,25 @@ export class ACPSession {
         }
 
         if (event.type === "tool.execution.completed") {
+            const tool = this.diogenes.getTool(event.toolCall.tool);
+            const formattedACPText = event.toolCall.tool === "file.edit" && !event.result.success
+                ? tool?.formatResultForLLM(event.toolCall, event.result)
+                : undefined;
+
             this.notify("session/update", {
                 sessionId: this.sessionId,
                 update: {
                     sessionUpdate: "tool_call_update",
                     toolCallId: this.getToolCallId(event.iteration, event.index),
                     status: event.result.success ? "completed" : "failed",
-                    content: createToolResultContent(
-                            formatToolResultFallback(event.toolCall.tool, event.result, event.toolCall.params),
-                        ),
-                        rawOutput: event.result,
-                    },
+                    content: createACPToolResultContent(
+                        event.toolCall.tool,
+                        event.toolCall.params,
+                        event.result,
+                        formattedACPText,
+                    ),
+                    rawOutput: event.result,
+                },
             });
 
             if (

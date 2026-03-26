@@ -10,7 +10,7 @@ export class TaskEndTool extends BaseTool {
         super({
             namespace: "task",
             name: "end",
-            description: "End the current task, either because it is complete or because the user must clarify something before work can continue",
+            description: "End the current task, either because it is complete or because the user must clarify something before work can continue. The summary may be multi-line Markdown and may be fairly detailed when that helps the user understand what happened or decide the next step.",
             params: {
                 reason: {
                     type: "string",
@@ -18,7 +18,7 @@ export class TaskEndTool extends BaseTool {
                 },
                 summary: {
                     type: "string",
-                    description: "What was completed, or the exact clarification/question the user must answer next.",
+                    description: "A user-facing summary of what was completed, or the exact clarification/question the user must answer next. Multi-line Markdown is allowed. Be detailed when useful, because the user may respond with follow-up instructions based directly on this summary.",
                 },
             },
             returns: {

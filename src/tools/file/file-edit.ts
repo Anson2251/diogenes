@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { ToolCall, ToolResult } from "../../types";
 import { WorkspaceManager } from "../../context/workspace";
 import {
     Edit,
@@ -16,6 +16,7 @@ import {
     LineAnchor,
 } from "../../types";
 import {
+    computeMyersLineDiffHunks,
     rstrip,
     compareLines,
     containsOrContained,
@@ -361,6 +362,12 @@ EOF
                     modified_regions: applied.map((a) => a.newRange),
                 },
                 workspace_update: workspaceUpdate,
+                _diff: {
+                    path: absolutePath,
+                    oldText: content,
+                    newText: newContent,
+                    hunks: computeMyersLineDiffHunks(content, newContent),
+                },
             });
         } catch (error) {
             return this.error(
@@ -370,6 +377,22 @@ EOF
                 "Check if the file exists and is writable",
             );
         }
+    }
+
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
+        const failureLines = this.formatReadableFailure(
+            result,
+            typeof toolCall.params.path === "string" ? toolCall.params.path : undefined,
+        );
+        if (failureLines) {
+            return [
+                `[FAIL] ${toolCall.tool}`,
+                "---",
+                ...failureLines,
+            ].join("\n");
+        }
+
+        return super.formatResultForLLM(toolCall, result);
     }
 
     private validateAnchors(
@@ -570,6 +593,49 @@ TROUBLESHOOTING:
         }
 
         return null;
+    }
+
+    private formatReadableFailure(result: ToolResult, filePath?: string): string[] | null {
+        if (result.success || !result.error) {
+            return null;
+        }
+
+        const target = filePath ? `${filePath}` : "the target file";
+        const lines: string[] = [];
+
+        if (result.error.code === "ATOMIC_FAILURE") {
+            const failedEdits = Array.isArray(result.error.details?.failedEdits)
+                ? result.error.details.failedEdits as Array<{ index?: number; error?: string; suggestion?: string }>
+                : [];
+
+            lines.push(`Could not apply edits to ${target}`);
+            lines.push(result.error.message);
+            lines.push("Atomic mode left the file unchanged.");
+
+            for (const failedEdit of failedEdits) {
+                lines.push("");
+                lines.push(`Edit ${(failedEdit.index ?? 0) + 1} failed: ${failedEdit.error ?? "UNKNOWN_ERROR"}`);
+                if (typeof failedEdit.suggestion === "string" && failedEdit.suggestion.length > 0) {
+                    lines.push(failedEdit.suggestion);
+                }
+            }
+
+            if (typeof result.error.suggestion === "string" && result.error.suggestion.length > 0 && failedEdits.length === 0) {
+                lines.push("");
+                lines.push(result.error.suggestion);
+            }
+
+            return lines;
+        }
+
+        lines.push(`Could not edit ${target}`);
+        lines.push(result.error.message);
+        if (typeof result.error.suggestion === "string" && result.error.suggestion.length > 0) {
+            lines.push("");
+            lines.push(result.error.suggestion);
+        }
+
+        return lines;
     }
 
     private searchForAnchor(
@@ -924,8 +990,8 @@ TROUBLESHOOTING:
     private formatNoMatchSuggestion(lines: string[], anchor: LineAnchor): string {
         const hintLine = clampLineNumber(anchor.line, lines.length);
         const parts: string[] = [
-            `Anchor hint window around line ${hintLine} (±5):`,
-            formatDisplayWindow(lines, hintLine, 5).join("\n"),
+            "Anchor hint:",
+            this.formatPeekStyleWindow(lines, hintLine),
         ];
 
         if (anchor.before?.length || anchor.after?.length) {
@@ -947,8 +1013,8 @@ TROUBLESHOOTING:
         const clampedHintLine = clampLineNumber(anchor.line, lines.length);
         const mismatchDetails = this.formatAnchorMismatchDetails(lines, anchor, candidateLine);
         const parts: string[] = [
-            `Closest match window around line ${candidateLine} (±5):`,
-            formatDisplayWindow(lines, candidateLine, 5).join("\n"),
+            "Closest match:",
+            this.formatPeekStyleWindow(lines, candidateLine),
         ];
 
         if (mismatchDetails.length > 0) {
@@ -959,8 +1025,8 @@ TROUBLESHOOTING:
 
         if (candidateLine !== clampedHintLine) {
             parts.push("");
-            parts.push(`Anchor hint window around line ${clampedHintLine} (±5):`);
-            parts.push(formatDisplayWindow(lines, clampedHintLine, 5).join("\n"));
+            parts.push("Anchor hint:");
+            parts.push(this.formatPeekStyleWindow(lines, clampedHintLine));
         }
 
         return parts.join("\n");
@@ -968,21 +1034,35 @@ TROUBLESHOOTING:
 
     private formatAmbiguousSuggestion(lines: string[], anchor: LineAnchor, candidateLines: number[]): string {
         const parts: string[] = [
-            `Found ${candidateLines.length} possible matches. Each match with ±5 lines:`,
+            `Found ${candidateLines.length} possible matches.`,
         ];
 
         for (let i = 0; i < candidateLines.length; i++) {
             const line = candidateLines[i];
             parts.push("");
-            parts.push(`Match ${i + 1} at line ${line}:`);
-            parts.push(formatDisplayWindow(lines, line, 5).join("\n"));
+            parts.push(`Match ${i + 1}:`);
+            parts.push(this.formatPeekStyleWindow(lines, line));
         }
 
         parts.push("");
-        parts.push(`Anchor hint window around line ${clampLineNumber(anchor.line, lines.length)} (±5):`);
-        parts.push(formatDisplayWindow(lines, anchor.line, 5).join("\n"));
+        parts.push("Anchor hint:");
+        parts.push(this.formatPeekStyleWindow(lines, anchor.line));
 
         return parts.join("\n");
+    }
+
+    private formatPeekStyleWindow(lines: string[], centerLine: number): string {
+        const clampedCenter = clampLineNumber(centerLine, lines.length);
+        const start = Math.max(1, clampedCenter - 5);
+        const end = Math.min(lines.length, clampedCenter + 5);
+
+        return [
+            `Lines ${start}-${end} of ${lines.length}`,
+            "",
+            "```",
+            ...formatDisplayWindow(lines, clampedCenter, 5),
+            "```",
+        ].join("\n");
     }
 
     private formatAnchorMismatchDetails(
@@ -1248,6 +1328,8 @@ TROUBLESHOOTING:
 
             return lines.join("\n");
         }
-        return undefined;
+
+        const failureLines = this.formatReadableFailure(result);
+        return failureLines ? failureLines.join("\n") : undefined;
     }
 }

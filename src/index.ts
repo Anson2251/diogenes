@@ -44,7 +44,7 @@ export * from "./types";
 import type { DiogenesConfig } from "./types";
 import { DiogenesContextManager } from "./context";
 import { Logger, ConsoleLogger, ToolResultData } from "./utils/logger";
-import { runTaskLoop, type TaskRunEvent, type TaskRunResult } from "./runtime/task-runner";
+import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "./runtime/task-runner";
 export { createDiogenes } from "./create-diogenes";
 import { createDiogenes } from "./create-diogenes";
 
@@ -75,6 +75,8 @@ export interface TaskExecutionOptions {
      * Use NullLogger for silent operation.
      */
     logger?: Logger;
+    diogenes?: DiogenesContextManager;
+    messageHistory?: ConversationMessage[];
 }
 
 /**
@@ -95,13 +97,15 @@ export async function executeTask(
     error?: string;
     iterations: number;
     taskEnded: boolean;
+    messageHistory: ConversationMessage[];
 }> {
     const logger = options.logger || new ConsoleLogger();
-    const diogenes = createDiogenes(config);
+    const diogenes = options.diogenes || createDiogenes(config);
     const startTime = Date.now();
 
     const result = await runTaskLoop(diogenes, taskDescription, {
         maxIterations: options.maxIterations || 20,
+        messageHistory: options.messageHistory,
         onEvent: (event) => handleLoggerEvent(diogenes, logger, startTime, event),
     });
 
@@ -111,6 +115,7 @@ export async function executeTask(
         error: result.error,
         iterations: result.iterations,
         taskEnded: result.taskEnded,
+        messageHistory: result.messageHistory,
     };
 }
 

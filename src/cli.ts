@@ -8,7 +8,7 @@
 import { config } from "dotenv";
 config();
 
-import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, formatToolResults, startACPServer } from "./index";
+import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, formatToolResults, startACPServer, type ConversationMessage, type DiogenesContextManager } from "./index";
 import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
@@ -435,7 +435,11 @@ async function executeTaskWithProgress(
     taskDescription: string,
     config: DiogenesConfig,
     options: CLIOptions,
-): Promise<void> {
+    state?: {
+        diogenes?: DiogenesContextManager;
+        messageHistory?: ConversationMessage[];
+    },
+): Promise<ConversationMessage[]> {
     const logger = createLogger(options);
 
     // Print model name before starting
@@ -443,10 +447,13 @@ async function executeTaskWithProgress(
     console.log(`${colors.cyan}Using model: ${modelName}${colors.reset}\n`);
 
     try {
-        await executeTask(taskDescription, config, {
+        const result = await executeTask(taskDescription, config, {
             maxIterations: options.maxIterations || 20,
             logger: logger,
+            diogenes: state?.diogenes,
+            messageHistory: state?.messageHistory,
         });
+        return result.messageHistory || [];
     } catch (error) {
         logger.taskError(error as Error);
         process.exit(1);
@@ -503,6 +510,8 @@ async function interactiveMode(
             },
         },
     };
+    const interactiveDiogenes = createDiogenes(interactiveConfig);
+    let messageHistory: ConversationMessage[] = [];
 
     while (true) {
         const input = await question(`${colors.blue}diogenes>${colors.reset} `);
@@ -551,7 +560,10 @@ ${colors.bright}Available commands:${colors.reset}
 
         // Execute the task
         console.log();
-        await executeTaskWithProgress(trimmed, interactiveConfig, options);
+        messageHistory = await executeTaskWithProgress(trimmed, interactiveConfig, options, {
+            diogenes: interactiveDiogenes,
+            messageHistory,
+        });
         console.log();
     }
 

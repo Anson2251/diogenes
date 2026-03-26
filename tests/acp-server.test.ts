@@ -264,6 +264,70 @@ describe("ACPServer", () => {
         ).toBe(true);
     });
 
+    it("inserts a NEW TASK user message on later prompts in the same session", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const streamSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"first prompt done"}}]\n```',
+                reasoning: "",
+            })
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"second prompt done"}}]\n```',
+                reasoning: "",
+            });
+
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+            respond: (response) => responses.push(response),
+        });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "first prompt" }],
+            },
+        });
+        await waitFor(() => responses.find((response) => response.id === 3));
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 4,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "second prompt" }],
+            },
+        });
+        await waitFor(() => responses.find((response) => response.id === 4));
+
+        const secondPromptMessages = streamSpy.mock.calls[1]?.[0] ?? [];
+        expect(secondPromptMessages.some((message) => message.content.includes("========= TASK\nfirst prompt\n========="))).toBe(true);
+        expect(secondPromptMessages.at(-1)?.content).toContain("========= NEW TASK");
+        expect(secondPromptMessages.at(-1)?.content).toContain("second prompt");
+    });
+
     it("uses unique toolCallIds for multiple tool calls in the same iteration", async () => {
         const notifications: Array<{ method: string; params: any }> = [];
         const responses: any[] = [];
@@ -520,6 +584,345 @@ describe("ACPServer", () => {
                             "Updated sample.ts: 1 edit applied, 2 total lines",
                             "replace lines 1-1 -> 1-1",
                         ].join("\n"),
+                ),
+            ).toBe(true);
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "completed"
+                        && Array.isArray(item.params.update.content)
+                        && item.params.update.content.some(
+                            (content: any) =>
+                                content.type === "diff"
+                                && content.path === filePath
+                                && content.oldText === [
+                                    "const greeting = 'hello';",
+                                    "console.log(greeting);",
+                                ].join("\n")
+                                && content.newText === [
+                                    "const greeting = 'hello there';",
+                                    "console.log(greeting);",
+                                ].join("\n"),
+                        ),
+                ),
+            ).toBe(true);
+        } finally {
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
+
+    it("formats file.edit failures as human-readable ACP content", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-file-edit-fail-"));
+        const filePath = path.join(workspaceDir, "sample.ts");
+
+        fs.writeFileSync(
+            filePath,
+            [
+                "const greeting = 'hello';",
+                "console.log(greeting);",
+            ].join("\n"),
+            "utf-8",
+        );
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+                respond: (response) => responses.push(response),
+            });
+            const fileEditToolCall = `\`\`\`tool-call
+[{"tool":"file.edit","params":{"path":"sample.ts","edits":[{"mode":"replace","anchor":{"start":{"line":1,"text":"const missing = 'hello';","before":[],"after":[]}},"content":["const greeting = 'hello there';"]}]}},{"tool":"task.end","params":{"reason":"done","summary":"attempted edit"}}]
+\`\`\``;
+
+            vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
+                async (_messages, onChunk) => {
+                    onChunk({
+                        type: "content",
+                        content: fileEditToolCall,
+                    });
+                    return {
+                        content: fileEditToolCall,
+                        reasoning: "",
+                    };
+                },
+            );
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId =
+                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Update the greeting" }],
+                },
+            });
+            await waitFor(() => responses.find((response) => response.id === 3));
+
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "failed"
+                        && Array.isArray(item.params.update.content)
+                        && typeof item.params.update.content[0]?.content?.text === "string"
+                        && item.params.update.content[0].content.text.includes("[FAIL] file.edit")
+                        && item.params.update.content[0].content.text.includes("Could not apply edits to sample.ts")
+                        && item.params.update.content[0].content.text.includes("Closest match:")
+                        && !item.params.update.content[0].content.text.includes("failedEdits"),
+                ),
+            ).toBe(true);
+        } finally {
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
+
+    it("returns created file content in ACP updates for file.create", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-file-create-"));
+        const createdPath = path.join(workspaceDir, "notes.txt");
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+                respond: (response) => responses.push(response),
+            });
+            const fileCreateToolCall = `\`\`\`tool-call
+[{"tool":"file.create","params":{"path":"notes.txt","content":["line 1","line 2"]}},{"tool":"task.end","params":{"reason":"done","summary":"created file"}}]
+\`\`\``;
+
+            vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
+                async (_messages, onChunk) => {
+                    onChunk({
+                        type: "content",
+                        content: fileCreateToolCall,
+                    });
+                    return {
+                        content: fileCreateToolCall,
+                        reasoning: "",
+                    };
+                },
+            );
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId =
+                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Create a file" }],
+                },
+            });
+            await waitFor(() => responses.find((response) => response.id === 3));
+
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "completed"
+                        && Array.isArray(item.params.update.content)
+                        && item.params.update.content.some(
+                            (content: any) =>
+                                content.type === "diff"
+                                && content.path === createdPath
+                                && content.oldText === null
+                                && content.newText === "line 1\nline 2",
+                        ),
+                ),
+            ).toBe(true);
+        } finally {
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
+
+    it("formats file.peek updates as human-readable ACP content", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-file-peek-"));
+        const filePath = path.join(workspaceDir, "peek.txt");
+
+        fs.writeFileSync(
+            filePath,
+            ["line 1", "line 2", "line 3"].join("\n"),
+            "utf-8",
+        );
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+                respond: (response) => responses.push(response),
+            });
+            const toolCall = `\`\`\`tool-call
+[{"tool":"file.peek","params":{"path":"peek.txt","start":2,"end":3}},{"tool":"task.end","params":{"reason":"done","summary":"peeked file"}}]
+\`\`\``;
+
+            vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
+                async (_messages, onChunk) => {
+                    onChunk({ type: "content", content: toolCall });
+                    return {
+                        content: toolCall,
+                        reasoning: "",
+                    };
+                },
+            );
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId =
+                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Peek the file" }],
+                },
+            });
+            await waitFor(() => responses.find((response) => response.id === 3));
+
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "completed"
+                        && Array.isArray(item.params.update.content)
+                        && item.params.update.content[0]?.content?.text === [
+                            "Peeked peek.txt",
+                            "Lines 2-3 of 3",
+                            "",
+                            "```",
+                            "2 | line 2",
+                            "3 | line 3",
+                            "```",
+                            "",
+                            "Peeked content not loaded into workspace. Use file.load to load for editing.",
+                        ].join("\n"),
+                ),
+            ).toBe(true);
+        } finally {
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
+
+    it("includes relative paths in ACP updates for unload tools", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-unload-"));
+        const filePath = path.join(workspaceDir, "sample.ts");
+
+        fs.writeFileSync(filePath, "const greeting = 'hello';\n", "utf-8");
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+                respond: (response) => responses.push(response),
+            });
+            const toolCall = `\`\`\`tool-call
+[{"tool":"file.load","params":{"path":"sample.ts"}},{"tool":"dir.list","params":{"path":"."}},{"tool":"file.unload","params":{"path":"sample.ts"}},{"tool":"dir.unload","params":{"path":"."}},{"tool":"task.end","params":{"reason":"done","summary":"unloaded"}}]
+\`\`\``;
+
+            vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
+                async (_messages, onChunk) => {
+                    onChunk({ type: "content", content: toolCall });
+                    return {
+                        content: toolCall,
+                        reasoning: "",
+                    };
+                },
+            );
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId =
+                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Load and unload context" }],
+                },
+            });
+            await waitFor(() => responses.find((response) => response.id === 3));
+
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "completed"
+                        && Array.isArray(item.params.update.content)
+                        && item.params.update.content[0]?.content?.text === "Removed sample.ts from workspace context",
+                ),
+            ).toBe(true);
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
+                        && item.params.update.status === "completed"
+                        && Array.isArray(item.params.update.content)
+                        && item.params.update.content[0]?.content?.text === "Removed . from workspace context",
                 ),
             ).toBe(true);
         } finally {

@@ -46,6 +46,14 @@ export interface TaskRunOptions {
     shouldCancel?: () => boolean;
 }
 
+function createTaskMessage(taskDescription: string, isFollowUpTask: boolean): ConversationMessage {
+    const title = isFollowUpTask ? "NEW TASK" : "TASK";
+    return {
+        role: "user",
+        content: `========= ${title}\n${taskDescription}\n=========`,
+    };
+}
+
 function emit(options: TaskRunOptions, event: TaskRunEvent): void {
     options.onEvent?.(event);
 }
@@ -75,6 +83,7 @@ export async function runTaskLoop(
 ): Promise<TaskRunResult> {
     const maxIterations = options.maxIterations || 20;
     const messageHistory = [...(options.messageHistory || [])];
+    messageHistory.push(createTaskMessage(taskDescription, messageHistory.length > 0));
 
     if (!diogenes.hasLLMClient()) {
         throw new Error(
@@ -105,10 +114,6 @@ export async function runTaskLoop(
                 {
                     role: "system",
                     content: `${systemPrompt}\n${contextOnly}`,
-                },
-                {
-                    role: "user",
-                    content: `========= TASK\n${taskDescription}\n=========`,
                 },
                 ...messageHistory,
             ];

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeTask } from "../src/index";
+import { createDiogenes, executeTask } from "../src/index";
 import { OpenAIClient } from "../src/llm/openai-client";
 import { Logger, LogLevel } from "../src/utils/logger";
 
@@ -83,6 +83,54 @@ describe("executeTask", () => {
         const secondCallMessages = streamSpy.mock.calls[1]?.[0];
         expect(secondCallMessages.at(-1)?.content).toContain("task.notepad");
         expect(secondCallMessages.at(-1)?.content).toContain("Total notepad lines: 1");
+    });
+
+    it("should insert a NEW TASK user message when continuing after completion", async () => {
+        const streamSpy = vi
+            .spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"first task complete"}}]\n```',
+                reasoning: "",
+            })
+            .mockResolvedValueOnce({
+                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"second task complete"}}]\n```',
+                reasoning: "",
+            });
+
+        const diogenes = createDiogenes({
+            llm: { apiKey: "test-key", model: "gpt-4" },
+            security: { workspaceRoot: process.cwd() },
+        });
+
+        const firstResult = await executeTask(
+            "first task",
+            undefined,
+            {
+                maxIterations: 1,
+                logger: new SilentLogger(),
+                diogenes,
+            },
+        );
+
+        const secondResult = await executeTask(
+            "second task",
+            undefined,
+            {
+                maxIterations: 1,
+                logger: new SilentLogger(),
+                diogenes,
+                messageHistory: firstResult.messageHistory,
+            },
+        );
+
+        expect(firstResult.result).toBe("first task complete");
+        expect(secondResult.result).toBe("second task complete");
+        expect(streamSpy).toHaveBeenCalledTimes(2);
+
+        const secondCallMessages = streamSpy.mock.calls[1]?.[0] ?? [];
+        expect(secondCallMessages.some((message) => message.content.includes("========= TASK\nfirst task\n========="))).toBe(true);
+        expect(secondCallMessages.at(-1)?.content).toContain("========= NEW TASK");
+        expect(secondCallMessages.at(-1)?.content).toContain("second task");
     });
 
     it("does not end the task when task.end validation fails", async () => {
