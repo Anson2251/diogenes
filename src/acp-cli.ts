@@ -271,7 +271,7 @@ function main(): void {
 
     startACPServer({
         config,
-        maxIterations: options.maxIterations || 20,
+        maxIterations: options.maxIterations,
         input,
         output,
         error,

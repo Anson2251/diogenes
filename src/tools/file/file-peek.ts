@@ -3,7 +3,7 @@
  */
 
 import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { ToolCall, ToolResult } from "../../types";
 import { WorkspaceManager } from "../../context/workspace";
 import * as fs from "fs";
 import { formatDisplayLine } from "../../utils/str";
@@ -126,5 +126,28 @@ This tool is lightweight and doesn't affect your workspace context.`,
             return `\x1b[32m✓\x1b[0m Peeked lines ${start}-${end} of ${total}:\n${formatted}${warning}`;
         }
         return undefined;
+    }
+
+    formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
+        if (!result.success || !result.data?.lines || !result.data?.preview_range) {
+            return super.formatResultForLLM(toolCall, result);
+        }
+
+        const filePath = typeof toolCall.params.path === "string" ? toolCall.params.path : "unknown file";
+        const [start, end] = result.data.preview_range as [number, number];
+        const total = result.data.total_lines as number;
+        const lines = result.data.lines as string[];
+        const note = typeof result.data._note === "string" ? result.data._note : "";
+
+        return [
+            `Peeked ${filePath}`,
+            `Lines ${start}-${end} of ${total}`,
+            "",
+            ...lines,
+            "",
+            note ? note : "",
+        ]
+            .filter((line, index, all) => line.length > 0 || (index > 0 && all[index - 1].length > 0))
+            .join("\n");
     }
 }

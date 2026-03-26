@@ -8,7 +8,7 @@ export class SessionManager {
 
     constructor(
         private readonly config: DiogenesConfig,
-        private readonly maxIterations: number,
+        private readonly maxIterations: number | undefined,
         private readonly notify: ACPNotificationSink,
     ) {}
 

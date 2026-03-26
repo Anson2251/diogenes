@@ -91,4 +91,50 @@ describe("FilePeekTool", () => {
         expect(result.error?.code).toBe("FILE_ERROR");
         expect(result.error?.message).toContain("ignored by .gitignore");
     });
+
+    it("should format peek results for LLM consumption", async () => {
+        const result = await tool.execute({
+            path: "peek.txt",
+            start: 2,
+            end: 4,
+        });
+
+        expect(result.success).toBe(true);
+        expect(
+            tool.formatResultForLLM(
+                {
+                    tool: "file.peek",
+                    params: { path: "peek.txt", start: 2, end: 4 },
+                },
+                result,
+            ),
+        ).toContain("Peeked peek.txt");
+        expect(
+            tool.formatResultForLLM(
+                {
+                    tool: "file.peek",
+                    params: { path: "peek.txt", start: 2, end: 4 },
+                },
+                result,
+            ),
+        ).toContain("Lines 2-4 of 40");
+        expect(
+            tool.formatResultForLLM(
+                {
+                    tool: "file.peek",
+                    params: { path: "peek.txt", start: 2, end: 4 },
+                },
+                result,
+            ),
+        ).toContain("2 | line 2");
+        expect(
+            tool.formatResultForLLM(
+                {
+                    tool: "file.peek",
+                    params: { path: "peek.txt", start: 2, end: 4 },
+                },
+                result,
+            ),
+        ).toContain("Peeked content not loaded into workspace.");
+    });
 });

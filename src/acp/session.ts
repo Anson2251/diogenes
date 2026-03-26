@@ -180,8 +180,14 @@ function formatToolResultFallback(toolName: string, result: ToolResult): string 
     return `${code}${message}${details}`;
 }
 
-function createToolCallId(runId: string, iteration: number, index: number): string {
-    return `${runId}:iter:${iteration}:tool:${index}`;
+function createSkippedToolResult(warning: string): ToolResult {
+    return {
+        success: false,
+        error: {
+            code: "SKIPPED",
+            message: warning,
+        },
+    };
 }
 
 export class ACPSession {
@@ -191,7 +197,7 @@ export class ACPSession {
 
     private readonly notify: ACPNotificationSink;
     private readonly diogenes: ReturnType<typeof createDiogenes>;
-    private readonly maxIterations: number;
+    private readonly maxIterations: number | undefined;
     private messageHistory: ConversationMessage[] = [];
     private updatedAt: string;
     private activeRun: {
@@ -199,13 +205,15 @@ export class ACPSession {
         cancelled: boolean;
         streamedContent: string;
         emittedContentLength: number;
+        nextToolCallSequence: number;
+        toolCallIds: Map<string, string>;
     } | null = null;
 
     constructor(
         sessionId: string,
         cwd: string,
         config: DiogenesConfig,
-        maxIterations: number,
+        maxIterations: number | undefined,
         notify: ACPNotificationSink,
     ) {
         this.sessionId = sessionId;
@@ -253,15 +261,17 @@ export class ACPSession {
             cancelled: false,
             streamedContent: "",
             emittedContentLength: 0,
+            nextToolCallSequence: 0,
+            toolCallIds: new Map(),
         };
         this.updatedAt = new Date().toISOString();
 
         try {
             const result = await runTaskLoop(this.diogenes, promptText, {
-                maxIterations: this.maxIterations,
+                maxIterations: this.maxIterations ?? Number.POSITIVE_INFINITY,
                 messageHistory: this.messageHistory,
                 shouldCancel: () => this.activeRun?.cancelled === true,
-                onEvent: (event) => this.handleEvent(runId, event),
+                onEvent: (event) => this.handleEvent(event),
             });
             this.messageHistory = result.messageHistory;
             this.updatedAt = new Date().toISOString();
@@ -285,7 +295,35 @@ export class ACPSession {
         }));
     }
 
-    private handleEvent(runId: string, event: TaskRunEvent): void {
+    private getToolCallKey(iteration: number, index: number): string {
+        return `${iteration}:${index}`;
+    }
+
+    private registerToolCallId(iteration: number, index: number): string {
+        if (!this.activeRun) {
+            return `${this.sessionId}:toolcall:missing-run`;
+        }
+
+        const key = this.getToolCallKey(iteration, index);
+        const existing = this.activeRun.toolCallIds.get(key);
+        if (existing) {
+            return existing;
+        }
+
+        const toolCallId = `${this.activeRun.id}:toolcall:${++this.activeRun.nextToolCallSequence}`;
+        this.activeRun.toolCallIds.set(key, toolCallId);
+        return toolCallId;
+    }
+
+    private getToolCallId(iteration: number, index: number): string {
+        if (!this.activeRun) {
+            return `${this.sessionId}:toolcall:missing-run`;
+        }
+
+        return this.registerToolCallId(iteration, index);
+    }
+
+    private handleEvent(event: TaskRunEvent): void {
         if (event.type === "llm.stream.delta") {
             if (event.chunk.type === "content" && this.activeRun) {
                 this.activeRun.streamedContent += event.chunk.content;
@@ -323,7 +361,7 @@ export class ACPSession {
                     sessionId: this.sessionId,
                     update: {
                         sessionUpdate: "tool_call",
-                        toolCallId: createToolCallId(runId, event.iteration, index),
+                        toolCallId: this.registerToolCallId(event.iteration, index),
                         title: createToolCallTitle(toolCall.tool, toolCall.params),
                         kind: mapToolKind(toolCall.tool),
                         status: "pending",
@@ -340,7 +378,7 @@ export class ACPSession {
                 sessionId: this.sessionId,
                 update: {
                     sessionUpdate: "tool_call_update",
-                    toolCallId: createToolCallId(runId, event.iteration, event.index),
+                    toolCallId: this.getToolCallId(event.iteration, event.index),
                     status: "in_progress",
                 },
             });
@@ -352,7 +390,7 @@ export class ACPSession {
                 sessionId: this.sessionId,
                 update: {
                     sessionUpdate: "tool_call_update",
-                    toolCallId: createToolCallId(runId, event.iteration, event.index),
+                    toolCallId: this.getToolCallId(event.iteration, event.index),
                     status: event.result.success ? "completed" : "failed",
                     content: createToolResultContent(
                         formatToolResultFallback(event.toolCall.tool, event.result),
@@ -364,6 +402,22 @@ export class ACPSession {
         }
 
         if (event.type === "context.warning") {
+            for (const index of event.skippedIndexes) {
+                const skippedResult = createSkippedToolResult(event.warning);
+                this.notify("session/update", {
+                    sessionId: this.sessionId,
+                    update: {
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: this.getToolCallId(event.iteration, index),
+                        status: "failed",
+                        content: createToolResultContent(
+                            formatToolResultFallback("tool", skippedResult),
+                        ),
+                        rawOutput: skippedResult,
+                    },
+                });
+            }
+
             this.notify("session/update", {
                 sessionId: this.sessionId,
                 update: {

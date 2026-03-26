@@ -24,7 +24,7 @@ export class ACPServer {
         const config: DiogenesConfig = options.config || {};
         this.sessionManager = new SessionManager(
             config,
-            options.maxIterations || 20,
+            options.maxIterations,
             (method, params) => this.options.notify?.(method, params),
         );
     }

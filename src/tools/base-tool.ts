@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { ToolCall, ToolDefinition, ToolResult } from "../types";
+import { TRON } from "@tron-format/tron";
 
 export interface ToolOutputFormatter {
     /**
@@ -31,7 +32,7 @@ export abstract class BaseTool implements ToolOutputFormatter {
      * Format the tool result for display/logging.
      * Override this method to customize output for specific tools.
      * Return undefined to use the default formatter.
-     * 
+     *
      * @example
      * ```typescript
      * formatResult(result: ToolResult): string | undefined {
@@ -47,8 +48,6 @@ export abstract class BaseTool implements ToolOutputFormatter {
     }
 
     formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
-        const { TRON } = require("@tron-format/tron");
-
         if (result.success) {
             return [
                 `[OK] ${toolCall.tool}`,

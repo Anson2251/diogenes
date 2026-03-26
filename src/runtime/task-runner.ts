@@ -34,7 +34,7 @@ export type TaskRunEvent =
     | { type: "tool.execution.started"; iteration: number; index: number; toolCall: ToolCall }
     | { type: "tool.execution.completed"; iteration: number; index: number; toolCall: ToolCall; result: ToolResult }
     | { type: "parse.error"; iteration: number; message: string }
-    | { type: "context.warning"; iteration: number; warning: string; skippedTools: string[] }
+    | { type: "context.warning"; iteration: number; warning: string; skippedTools: string[]; skippedIndexes: number[] }
     | { type: "run.completed"; result: TaskRunResult }
     | { type: "run.failed"; error: string; iterations: number }
     | { type: "run.cancelled"; iterations: number };
@@ -202,7 +202,7 @@ export async function runTaskLoop(
                     return cancelledResult(iterations, messageHistory);
                 }
 
-                let contextWarningData: { warning: string; skippedTools?: string[] } | null = null;
+                let contextWarningData: { warning: string; skippedTools?: string[]; skippedIndexes?: number[] } | null = null;
 
                 for (let i = 0; i < results.length; i++) {
                     const toolCall = toolCalls[i];
@@ -212,6 +212,7 @@ export async function runTaskLoop(
                         contextWarningData = {
                             warning: result.data._contextWarning,
                             skippedTools: toolCalls.slice(i + 1).map((t) => t.tool),
+                            skippedIndexes: toolCalls.slice(i + 1).map((_, offset) => i + 1 + offset),
                         };
                     }
 
@@ -238,6 +239,7 @@ export async function runTaskLoop(
                         iteration: iterations,
                         warning: contextWarningData.warning,
                         skippedTools: contextWarningData.skippedTools || [],
+                        skippedIndexes: contextWarningData.skippedIndexes || [],
                     });
                     resultContent += `\n\n[CONTEXT WARNING]\n${contextWarningData.warning}\n`;
                     if (contextWarningData.skippedTools && contextWarningData.skippedTools.length > 0) {
