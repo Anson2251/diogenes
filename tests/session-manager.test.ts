@@ -64,6 +64,32 @@ describe("ACP session lifecycle", () => {
         expect(session.getMetadata().hasActiveRun).toBe(false);
     });
 
+    it("updates session title and description when task.end includes metadata", async () => {
+        const notifications: any[] = [];
+        const session = new ACPSession(
+            "session-test",
+            process.cwd(),
+            {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            5,
+            (method, params) => notifications.push({ method, params }),
+        );
+
+        vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
+            content: '```tool-call\n[{"tool":"task.end","params":{"title":"Implement restore flow","description":"Adds session restore support and rehydrates snapshot state.","reason":"done","summary":"done"}}]\n```',
+            reasoning: "",
+        });
+
+        await session.prompt([{ type: "text", text: "finish" }]);
+
+        expect(session.getMetadata()).toEqual(expect.objectContaining({
+            title: "Implement restore flow",
+            description: "Adds session restore support and rehydrates snapshot state.",
+        }));
+        expect(notifications.some((item) => item.params?.update?.sessionUpdate === "session_metadata_update")).toBe(true);
+    });
+
     it("disposes idle sessions and clears registered resources", async () => {
         const session = createSession();
         const disposeSpy = vi.fn(async () => {});

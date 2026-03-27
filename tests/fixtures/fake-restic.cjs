@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require("fs");
+const path = require("path");
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -75,6 +76,16 @@ async function main() {
     }
 
     if (subcommand === "restore") {
+        const targetIndex = args.indexOf("--target");
+        const target = targetIndex >= 0 ? args[targetIndex + 1] : null;
+        const rootName = process.env.FAKE_RESTIC_RESTORE_ROOTNAME || "workspace";
+        const restoreRoot = target ? path.join(target, rootName) : null;
+        if (restoreRoot) {
+            fs.mkdirSync(restoreRoot, { recursive: true });
+            fs.writeFileSync(path.join(restoreRoot, "hello.txt"), process.env.FAKE_RESTIC_RESTORE_HELLO || "restored\n");
+            fs.mkdirSync(path.join(restoreRoot, "nested"), { recursive: true });
+            fs.writeFileSync(path.join(restoreRoot, "nested", "data.json"), process.env.FAKE_RESTIC_RESTORE_JSON || '{"restored":true}\n');
+        }
         process.stdout.write("restore complete\n");
         return;
     }

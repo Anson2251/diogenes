@@ -4,7 +4,8 @@ import type { TodoItem, ToolResult } from "../types";
 import type { DiogenesConfig } from "../types";
 import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "../runtime/task-runner";
 import type { SnapshotManager } from "../snapshot/manager";
-import type { SnapshotStateProvider } from "../snapshot/state-serializer";
+import type { SnapshotStateProvider, SnapshotStateRestorer } from "../snapshot/state-serializer";
+import type { PersistedDiogenesState } from "../snapshot/types";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
 import type { PromptBlock } from "./types";
 import type { AvailableCommand } from "./types";
@@ -24,6 +25,8 @@ export interface SessionMetadata {
     cwd: string;
     createdAt: string;
     updatedAt: string;
+    title: string | null;
+    description: string | null;
     state: SessionLifecycleState;
     hasActiveRun: boolean;
 }
@@ -496,7 +499,7 @@ function createSkippedToolResult(warning: string): ToolResult {
     };
 }
 
-export class ACPSession implements SnapshotStateProvider {
+export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer {
     readonly sessionId: string;
     readonly cwd: string;
     readonly createdAt: string;
@@ -510,6 +513,8 @@ export class ACPSession implements SnapshotStateProvider {
     private lifecycleState: SessionLifecycleState = "active";
     private promptTurn = 0;
     private snapshotManager: SnapshotManager | null = null;
+    private title: string | null = null;
+    private description: string | null = null;
     private updatedAt: string;
     private disposePromise: Promise<void> | null = null;
     private activeRun: {
@@ -572,9 +577,33 @@ export class ACPSession implements SnapshotStateProvider {
             cwd: this.cwd,
             createdAt: this.createdAt,
             updatedAt: this.updatedAt,
+            title: this.title,
+            description: this.description,
             state: this.lifecycleState,
             hasActiveRun: this.activeRun !== null,
         };
+    }
+
+    async restorePersistedState(state: PersistedDiogenesState): Promise<void> {
+        const workspace = this.diogenes.getWorkspaceManager();
+        workspace.clearLoadedState();
+        workspace.setTodoItems(state.workspace.todo.map((item) => ({ ...item })));
+        workspace.setNotepadLines([...state.workspace.notepad]);
+
+        for (const dirPath of state.workspace.loadedDirectories) {
+            await workspace.loadDirectory(dirPath);
+        }
+
+        for (const file of state.workspace.loadedFiles) {
+            for (const range of file.ranges) {
+                await workspace.loadFile(file.path, range.start, range.end);
+            }
+        }
+
+        this.messageHistory = state.messageHistory.map((message) => ({ ...message }));
+        this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
+        this.updatedAt = new Date().toISOString();
+        this.emitTodoPlanUpdate();
     }
 
     registerResource(resource: SessionOwnedResource): void {
@@ -593,6 +622,18 @@ export class ACPSession implements SnapshotStateProvider {
         this.registerResource({
             dispose: () => snapshotManager.cleanup(),
         });
+    }
+
+    async restoreSnapshot(snapshotId: string): Promise<void> {
+        if (!this.snapshotManager) {
+            throw new Error("Session snapshots are not enabled");
+        }
+
+        if (this.isBusy()) {
+            throw new Error("Cannot restore while session is busy");
+        }
+
+        await this.snapshotManager.restoreSnapshot({ snapshotId });
     }
 
     getAvailableCommands(): AvailableCommand[] {
@@ -896,6 +937,19 @@ export class ACPSession implements SnapshotStateProvider {
         });
     }
 
+    private emitSessionMetadataUpdate(): void {
+        this.notify("session/update", {
+            sessionId: this.sessionId,
+            update: {
+                sessionUpdate: "session_metadata_update",
+                metadata: {
+                    title: this.title,
+                    description: this.description,
+                },
+            },
+        });
+    }
+
     private handleEvent(event: TaskRunEvent): void {
         if (event.type === "llm.stream.delta") {
             if (event.chunk.type === "content" && this.activeRun) {
@@ -985,6 +1039,25 @@ export class ACPSession implements SnapshotStateProvider {
                 && (event.toolCall.tool === "todo.set" || event.toolCall.tool === "todo.update")
             ) {
                 this.emitTodoPlanUpdate();
+            }
+
+            if (event.result.success && event.toolCall.tool === "task.end") {
+                const title = typeof event.result.data?.title === "string"
+                    ? event.result.data.title.trim()
+                    : "";
+                const description = typeof event.result.data?.description === "string"
+                    ? event.result.data.description.trim()
+                    : "";
+                const reason = typeof event.result.data?.reason === "string"
+                    ? event.result.data.reason.trim()
+                    : "";
+                const summary = typeof event.result.data?.summary === "string"
+                    ? event.result.data.summary.trim()
+                    : "";
+
+                this.title = title || reason || this.title;
+                this.description = description || summary || this.description;
+                this.emitSessionMetadataUpdate();
             }
 
             return;

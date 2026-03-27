@@ -406,6 +406,22 @@ export class WorkspaceManager {
         return { lines: [...this.notepadWorkspace.lines] };
     }
 
+    clearLoadedState(): void {
+        for (const dirPath of Object.keys(this.directoryWorkspace)) {
+            this.unloadDirectory(dirPath);
+        }
+
+        for (const absolutePath of Object.keys(this.fileWorkspace)) {
+            const entry = this.fileWorkspace[absolutePath];
+            if (entry) {
+                this.unloadFile(entry.path);
+            }
+        }
+
+        this.setTodoItems([]);
+        this.clearNotepad();
+    }
+
     // ==================== Utility Methods ====================
 
     private resolvePath(inputPath: string): string {

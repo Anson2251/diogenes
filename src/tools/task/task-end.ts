@@ -12,6 +12,16 @@ export class TaskEndTool extends BaseTool {
             name: "end",
             description: "End the current task, either because it is complete or because the user must clarify something before work can continue. The summary may be multi-line Markdown and may be fairly detailed when that helps the user understand what happened or decide the next step. If the summary is long or spans multiple lines, prefer heredoc.",
             params: {
+                title: {
+                    type: "string",
+                    optional: true,
+                    description: "A short session title summarizing the task outcome",
+                },
+                description: {
+                    type: "string",
+                    optional: true,
+                    description: "A brief one or two sentence session description for future management views",
+                },
                 reason: {
                     type: "string",
                     description: "Why the task is complete or blocked. If blocked, state exactly what is missing.",
@@ -38,13 +48,17 @@ export class TaskEndTool extends BaseTool {
             );
         }
 
-        const { reason, summary } = validation.data as {
+        const { title, description, reason, summary } = validation.data as {
+            title?: string;
+            description?: string;
             reason: string;
             summary: string;
         };
 
         return this.success({
             success: true,
+            title,
+            description,
             reason,
             summary,
         });
@@ -81,8 +95,16 @@ export class TaskEndTool extends BaseTool {
             };
         }
 
-        const data = params as { reason?: unknown; summary?: unknown };
+        const data = params as { title?: unknown; description?: unknown; reason?: unknown; summary?: unknown };
         const errors: string[] = [];
+
+        if (data.title !== undefined && typeof data.title !== "string") {
+            errors.push("title: Expected string");
+        }
+
+        if (data.description !== undefined && typeof data.description !== "string") {
+            errors.push("description: Expected string");
+        }
 
         if (typeof data.reason !== "string") {
             errors.push("reason: Expected string");
@@ -100,6 +122,8 @@ export class TaskEndTool extends BaseTool {
             valid: true,
             errors: [],
             data: {
+                title: data.title,
+                description: data.description,
                 reason: data.reason,
                 summary: this.normalizeSummary(data.summary as string | string[]),
             },

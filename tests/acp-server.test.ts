@@ -1169,4 +1169,79 @@ describe("ACPServer", () => {
         expect(cancelled).toBe(true);
         expect(notifications).toEqual([]);
     });
+
+    it("restores a snapshot through the host-controlled ACP method", async () => {
+        const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "acp-restore-"));
+        const workspaceDir = path.join(root, "workspace");
+        const storageRoot = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const logPath = path.join(root, "restic.log");
+        const notifications: any[] = [];
+
+        await fs.promises.mkdir(workspaceDir, { recursive: true });
+        await fs.promises.writeFile(path.join(workspaceDir, "hello.txt"), "hello\n", "utf8");
+
+        vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
+            content: '```tool-call\n[{"tool":"task.end","params":{"title":"Initial snapshot","description":"Creates the baseline snapshot.","reason":"done","summary":"done"}}]\n```',
+            reasoning: "",
+        });
+
+        process.env.FAKE_RESTIC_LOG = logPath;
+        process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(workspaceDir);
+        process.env.FAKE_RESTIC_RESTORE_HELLO = "restored via acp\n";
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: true,
+                            autoBeforePrompt: true,
+                            storageRoot,
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: workspaceDir } });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: { sessionId, prompt: [{ type: "text", text: "take baseline" }] },
+            });
+
+            const manifest = JSON.parse(await fs.promises.readFile(path.join(storageRoot, sessionId, "manifest.json"), "utf8"));
+            await fs.promises.writeFile(path.join(workspaceDir, "hello.txt"), "mutated\n", "utf8");
+
+            const restoreResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/restore",
+                params: { sessionId, snapshotId: manifest.snapshots[0].snapshotId },
+            });
+
+            expect(restoreResponse && "result" in restoreResponse ? restoreResponse.result.restored : null).toBe(true);
+            expect(await fs.promises.readFile(path.join(workspaceDir, "hello.txt"), "utf8")).toBe("restored via acp\n");
+            expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_started")).toBe(true);
+            expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_completed")).toBe(true);
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;
+            delete process.env.FAKE_RESTIC_RESTORE_HELLO;
+            process.env.HOME = originalHome;
+            await fs.promises.rm(root, { recursive: true, force: true });
+        }
+    });
 });

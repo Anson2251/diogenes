@@ -92,6 +92,11 @@ export interface CancelSessionParams {
     sessionId: string;
 }
 
+export interface RestoreSessionParams {
+    sessionId: string;
+    snapshotId: string;
+}
+
 export interface SessionUpdateNotification {
     sessionId: string;
     update: any;

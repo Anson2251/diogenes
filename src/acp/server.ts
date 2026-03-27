@@ -11,6 +11,7 @@ import type {
     JsonRpcSuccessResponse,
     NewSessionParams,
     PromptSessionParams,
+    RestoreSessionParams,
 } from "./types";
 
 const JSON_RPC_VERSION = "2.0";
@@ -68,6 +69,12 @@ export class ACPServer {
                     this.ensureInitialized(message.id ?? null);
                     this.handleCancel(message.params as CancelSessionParams);
                     return null;
+                case "session/restore":
+                    this.ensureInitialized(message.id ?? null);
+                    return this.success(
+                        message.id ?? null,
+                        await this.handleRestore(message.params as RestoreSessionParams),
+                    );
                 default:
                     return this.error(message.id ?? null, -32601, `Method not found: ${message.method}`);
             }
@@ -123,6 +130,7 @@ export class ACPServer {
         const session = await this.sessionManager.createSession(params.cwd);
         return {
             sessionId: session.sessionId,
+            metadata: session.getMetadata(),
         };
     }
 
@@ -181,6 +189,52 @@ export class ACPServer {
             throw new ACPServerError(-32602, "session/cancel requires sessionId");
         }
         this.sessionManager.cancelSession(params.sessionId);
+    }
+
+    private async handleRestore(params: RestoreSessionParams | undefined) {
+        if (!params?.sessionId || !params.snapshotId) {
+            throw new ACPServerError(-32602, "session/restore requires sessionId and snapshotId");
+        }
+
+        const session = this.sessionManager.getSession(params.sessionId);
+        if (!session) {
+            throw new ACPServerError(-32001, `Unknown session: ${params.sessionId}`);
+        }
+        if (session.isBusy()) {
+            throw new ACPServerError(-32002, `Session is busy: ${params.sessionId}`);
+        }
+
+        this.options.notify?.("session/update", {
+            sessionId: params.sessionId,
+            update: {
+                sessionUpdate: "snapshot_restore_started",
+                snapshotId: params.snapshotId,
+            },
+        });
+
+        try {
+            await session.restoreSnapshot(params.snapshotId);
+        } catch (error) {
+            this.options.notify?.("session/update", {
+                sessionId: params.sessionId,
+                update: {
+                    sessionUpdate: "snapshot_restore_failed",
+                    snapshotId: params.snapshotId,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
+            throw error;
+        }
+
+        this.options.notify?.("session/update", {
+            sessionId: params.sessionId,
+            update: {
+                sessionUpdate: "snapshot_restore_completed",
+                snapshotId: params.snapshotId,
+            },
+        });
+
+        return { restored: true, metadata: session.getMetadata() };
     }
 
     private ensureInitialized(_id: string | number | null): void {

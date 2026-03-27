@@ -35,6 +35,10 @@ export interface SnapshotCreateResult {
     diogenesStatePath?: string | null;
 }
 
+export interface SnapshotRestoreInput {
+    snapshotId: string;
+}
+
 export interface SnapshotSummary {
     snapshotId: string;
     createdAt: string;

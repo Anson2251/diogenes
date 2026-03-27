@@ -36,6 +36,7 @@ export class SessionManager {
                     resticBinaryArgs: snapshotConfig.resticBinaryArgs || [],
                 },
                 stateProvider: session,
+                stateRestorer: session,
             });
 
             try {

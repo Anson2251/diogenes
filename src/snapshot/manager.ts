@@ -5,14 +5,15 @@ import type { SecurityConfig } from "../types";
 import { ResticClient } from "../utils/restic";
 import { getDefaultSessionsStorageRoot as getDefaultSessionsStorageRootFromAppPaths } from "../utils/app-paths";
 import { SnapshotManifestStore } from "./manifest-store";
-import { DiogenesStateSerializer, type SnapshotStateProvider, type SnapshotStateSerializer } from "./state-serializer";
-import type { SnapshotCreateInput, SnapshotCreateResult, SnapshotSummary } from "./types";
+import { DiogenesStateSerializer, type SnapshotStateProvider, type SnapshotStateRestorer, type SnapshotStateSerializer } from "./state-serializer";
+import type { SnapshotCreateInput, SnapshotCreateResult, SnapshotRestoreInput, SnapshotSummary } from "./types";
 
 export interface SnapshotManager {
     initialize(): Promise<void>;
     isAutoBeforePromptEnabled(): boolean;
     createSnapshot(input: SnapshotCreateInput): Promise<SnapshotCreateResult>;
     listSnapshots(): Promise<SnapshotSummary[]>;
+    restoreSnapshot(input: SnapshotRestoreInput): Promise<void>;
     cleanup(): Promise<void>;
 }
 
@@ -21,6 +22,7 @@ export interface SnapshotManagerOptions {
     cwd: string;
     config: SecurityConfig["snapshot"];
     stateProvider: SnapshotStateProvider;
+    stateRestorer?: SnapshotStateRestorer;
     stateSerializer?: SnapshotStateSerializer;
 }
 
@@ -139,6 +141,36 @@ export class SessionSnapshotManager implements SnapshotManager {
         }));
     }
 
+    async restoreSnapshot(input: SnapshotRestoreInput): Promise<void> {
+        await this.initialize();
+
+        const entries = await this.manifestStore.list();
+        const entry = entries.find((candidate) => candidate.snapshotId === input.snapshotId);
+        if (!entry) {
+            throw new Error(`Unknown snapshot: ${input.snapshotId}`);
+        }
+
+        const stagingDir = path.join(this.sessionDir, "restore-staging", randomUUID());
+        await fs.mkdir(stagingDir, { recursive: true });
+
+        try {
+            await this.restic.restore({
+                snapshotId: entry.resticSnapshotId,
+                target: stagingDir,
+            });
+
+            const restoredRoot = path.join(stagingDir, this.getRelativeWorkspacePath());
+            await this.replaceWorkspaceFromStaging(restoredRoot);
+
+            if (entry.diogenesStatePath && this.options.stateRestorer) {
+                const state = await this.stateSerializer.deserialize(entry.diogenesStatePath);
+                await this.options.stateRestorer.restorePersistedState(state);
+            }
+        } finally {
+            await fs.rm(stagingDir, { recursive: true, force: true });
+        }
+    }
+
     async cleanup(): Promise<void> {
         if (this.cleanedUp) {
             return;
@@ -163,6 +195,23 @@ export class SessionSnapshotManager implements SnapshotManager {
             throw new Error(`Unsupported workspace root for snapshotting: ${this.options.cwd}`);
         }
         return relativePath;
+    }
+
+    private async replaceWorkspaceFromStaging(restoredRoot: string): Promise<void> {
+        const restoredStat = await fs.stat(restoredRoot).catch(() => null);
+        if (!restoredStat?.isDirectory()) {
+            throw new Error(`Restored workspace root is missing: ${restoredRoot}`);
+        }
+
+        const currentEntries = await fs.readdir(this.options.cwd);
+        await Promise.all(currentEntries.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+
+        const restoredEntries = await fs.readdir(restoredRoot);
+        await Promise.all(restoredEntries.map((entry) => fs.cp(
+            path.join(restoredRoot, entry),
+            path.join(this.options.cwd, entry),
+            { recursive: true, force: true },
+        )));
     }
 }
 

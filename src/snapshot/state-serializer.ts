@@ -11,6 +11,10 @@ export interface SnapshotStateProvider {
     getUpdatedAt(): string;
 }
 
+export interface SnapshotStateRestorer {
+    restorePersistedState(state: PersistedDiogenesState): Promise<void> | void;
+}
+
 export interface SnapshotStateSerializer {
     serialize(params: {
         snapshotId: string;

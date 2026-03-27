@@ -87,11 +87,13 @@ export type {
 } from "./snapshot/manager";
 export type {
     SnapshotStateProvider,
+    SnapshotStateRestorer,
     SnapshotStateSerializer,
 } from "./snapshot/state-serializer";
 export type {
     SnapshotCreateInput,
     SnapshotCreateResult,
+    SnapshotRestoreInput,
     SnapshotSummary,
     SnapshotTrigger,
     SessionSnapshotEntry,

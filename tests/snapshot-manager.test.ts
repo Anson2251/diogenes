@@ -134,6 +134,73 @@ describe("SessionSnapshotManager", () => {
         }
     });
 
+    it("restores workspace files from staging and rehydrates persisted state", async () => {
+        const fixture = await createFixture();
+        const diogenes = createDiogenes({
+            security: {
+                workspaceRoot: fixture.workspaceDir,
+            },
+        });
+        const workspace = diogenes.getWorkspaceManager();
+        await workspace.loadDirectory(".");
+        await workspace.loadFile("hello.txt", 1, 1);
+        workspace.setTodoItems([{ text: "before restore", state: "active" }]);
+        workspace.setNotepadLines(["keep me"]);
+
+        let restoredState: any = null;
+        const manager = new SessionSnapshotManager({
+            sessionId: "session-restore",
+            cwd: fixture.workspaceDir,
+            config: {
+                enabled: true,
+                includeDiogenesState: true,
+                autoBeforePrompt: true,
+                storageRoot: fixture.storageRoot,
+                resticBinary: process.execPath,
+                resticBinaryArgs: [fixture.fixturePath],
+                timeoutMs: 5_000,
+            },
+            stateProvider: {
+                getWorkspaceManager: () => workspace,
+                getMessageHistory: () => [{ role: "assistant", content: "captured before restore" }],
+                getCreatedAt: () => "2026-03-26T00:00:00.000Z",
+                getUpdatedAt: () => "2026-03-26T00:01:00.000Z",
+            },
+            stateRestorer: {
+                restorePersistedState: async (state) => {
+                    restoredState = state;
+                },
+            },
+        });
+
+        process.env.FAKE_RESTIC_LOG = fixture.logPath;
+        process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(fixture.workspaceDir);
+        process.env.FAKE_RESTIC_RESTORE_HELLO = "restored from snapshot\n";
+        try {
+            await manager.initialize();
+            const snapshot = await manager.createSnapshot({
+                trigger: "system_manual",
+                turn: 1,
+                label: "restore-point",
+            });
+
+            await fs.writeFile(path.join(fixture.workspaceDir, "hello.txt"), "mutated\n", "utf8");
+            await manager.restoreSnapshot({ snapshotId: snapshot.snapshotId });
+
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe("restored from snapshot\n");
+            expect(restoredState).toEqual(expect.objectContaining({
+                kind: "diogenes_state",
+                messageHistory: [{ role: "assistant", content: "captured before restore" }],
+            }));
+            expect(restoredState.workspace.todo).toEqual([{ text: "before restore", state: "active" }]);
+            expect(restoredState.workspace.notepad).toEqual(["keep me"]);
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;
+            delete process.env.FAKE_RESTIC_RESTORE_HELLO;
+        }
+    });
+
     it("creates automatic snapshots before prompts and removes them on session disposal", async () => {
         const fixture = await createFixture();
         const maliciousStorageRoot = path.join(fixture.rootDir, "Desktop");
