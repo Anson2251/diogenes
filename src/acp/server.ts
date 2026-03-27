@@ -5,6 +5,7 @@ import type {
     ACPServerOptions,
     CancelSessionParams,
     DiogenesDeleteSessionParams,
+    DiogenesPruneSessionsParams,
     DiogenesDisposeSessionParams,
     DiogenesGetSessionParams,
     DiogenesRestoreSessionParams,
@@ -126,6 +127,12 @@ export class ACPServer {
                         message.id ?? null,
                         await this.handleDeleteSession(message.params as DiogenesDeleteSessionParams | undefined),
                     );
+                case "_diogenes/session/prune":
+                    this.ensureInitialized(message.id ?? null);
+                    return this.success(
+                        message.id ?? null,
+                        await this.handlePruneSessions(message.params as DiogenesPruneSessionsParams | undefined),
+                    );
                 default:
                     return this.error(message.id ?? null, -32601, `Method not found: ${message.method}`);
             }
@@ -169,6 +176,7 @@ export class ACPServer {
                             getSession: true,
                             disposeSession: true,
                             deleteSession: true,
+                            pruneSessions: true,
                             listSnapshots: true,
                             restoreSnapshot: true,
                             sessionDetailsInMeta: true,
@@ -182,6 +190,7 @@ export class ACPServer {
                             listSnapshots: "_diogenes/session/snapshots",
                             disposeSession: "_diogenes/session/dispose",
                             deleteSession: "_diogenes/session/delete",
+                            pruneSessions: "_diogenes/session/prune",
                             restoreSnapshot: "_diogenes/session/restore",
                         },
                     },
@@ -330,12 +339,26 @@ export class ACPServer {
         if (params?.cwd && !path.isAbsolute(params.cwd)) {
             throw new ACPServerError(-32602, "session/list cwd must be an absolute path");
         }
+        if (params?.pageSize !== undefined && (!Number.isInteger(params.pageSize) || params.pageSize <= 0)) {
+            throw new ACPServerError(-32602, "session/list pageSize must be a positive integer");
+        }
 
-        const sessions = await this.sessionManager.listSessionMetadata({
+        const result = await this.sessionManager.listSessionMetadata({
             cwd: params?.cwd,
+            cursor: params?.cursor,
+            pageSize: params?.pageSize,
         });
 
-        return { sessions: sessions.map((session) => this.createSessionSummary(session)) };
+        return {
+            sessions: result.sessions.map((session) => this.createSessionSummary(session)),
+            nextCursor: result.nextCursor,
+            _meta: {
+                diogenes: {
+                    pageSize: result.pageSize,
+                    supportsCursorPagination: true,
+                },
+            },
+        };
     }
 
     private async handleGetSession(params: DiogenesGetSessionParams | undefined) {
@@ -404,6 +427,16 @@ export class ACPServer {
         return {
             deleted: true,
             sessionId: params.sessionId,
+        };
+    }
+
+    private async handlePruneSessions(params: DiogenesPruneSessionsParams | undefined) {
+        const result = await this.sessionManager.pruneSessions({ dryRun: params?.dryRun });
+        return {
+            deletedSessionIds: result.deletedSessionIds,
+            keptSessionIds: result.keptSessionIds,
+            reasonsBySessionId: result.reasonsBySessionId,
+            dryRun: params?.dryRun === true,
         };
     }
 

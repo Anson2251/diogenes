@@ -50,7 +50,8 @@ type CLICommand =
     | { kind: "sessions.list" }
     | { kind: "sessions.get"; sessionId: string }
     | { kind: "sessions.snapshots"; sessionId: string }
-    | { kind: "sessions.delete"; sessionId: string };
+    | { kind: "sessions.delete"; sessionId: string }
+    | { kind: "sessions.prune"; dryRun: boolean };
 
 type QuestionFn = (prompt: string) => Promise<string>;
 const CLEAR_APP_DATA_PASSPHRASE = "delete diogenes data";
@@ -85,6 +86,8 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
                     process.exit(1);
                 }
                 return { options, command: { kind: "sessions.snapshots", sessionId } };
+            case "prune":
+                return { options, command: { kind: "sessions.prune", dryRun: args.includes("--dry-run") } };
             case "delete":
             case "remove":
                 if (!sessionId) {
@@ -164,6 +167,7 @@ ${colors.bright}Usage:${colors.reset}
   diogenes sessions get <sessionId>
   diogenes sessions snapshots <sessionId>
   diogenes sessions delete <sessionId>
+  diogenes sessions prune [--dry-run]
   diogenes --help
 
 ${colors.bright}Options:${colors.reset}
@@ -192,6 +196,7 @@ ${colors.bright}Examples:${colors.reset}
   diogenes sessions list        List managed session metadata
   diogenes sessions get <id>    Show one managed session and its snapshots
   diogenes sessions delete <id> Delete managed session artifacts
+  diogenes sessions prune       Remove broken managed session artifacts
 
 ${colors.bright}Environment Variables:${colors.reset}
   OPENAI_API_KEY                OpenAI API key (alternative to --api-key)
@@ -1001,6 +1006,11 @@ async function handleSessionCommand(command: Exclude<CLICommand, { kind: "run" }
         case "sessions.delete": {
             await sessionStore.removeSession(command.sessionId);
             console.log(JSON.stringify({ deleted: true, sessionId: command.sessionId }, null, 2));
+            return;
+        }
+        case "sessions.prune": {
+            const result = await sessionStore.pruneSessions({ dryRun: command.dryRun });
+            console.log(JSON.stringify({ ...result, dryRun: command.dryRun }, null, 2));
             return;
         }
     }

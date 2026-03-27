@@ -6,6 +6,14 @@ import { ACPSession, type ACPNotificationSink } from "./session";
 import { SessionStore } from "./session-store";
 import type { LoadSessionParams, StoredSessionMetadata } from "./types";
 
+const DEFAULT_SESSION_LIST_PAGE_SIZE = 20;
+const MAX_SESSION_LIST_PAGE_SIZE = 100;
+
+interface SessionListCursor {
+    updatedAt: string;
+    sessionId: string;
+}
+
 export class SessionManager {
     private readonly sessions = new Map<string, ACPSession>();
     private readonly sessionStore = new SessionStore();
@@ -142,6 +150,14 @@ export class SessionManager {
             return false;
         }
 
+        const hasMessages = session.getMessageHistory().length > 0;
+        if (!hasMessages) {
+            await session.dispose();
+            this.sessions.delete(sessionId);
+            await this.sessionStore.removeSession(sessionId);
+            return true;
+        }
+
         await session.persistClosedState();
         await session.dispose();
         this.sessions.delete(sessionId);
@@ -176,7 +192,11 @@ export class SessionManager {
         return Array.from(this.sessions.values());
     }
 
-    async listSessionMetadata(options: { cwd?: string; includeSnapshots?: boolean } = {}): Promise<Array<StoredSessionMetadata & { snapshotCount: number; snapshots?: Awaited<ReturnType<ACPSession["listSnapshots"]>> }>> {
+    async listSessionMetadata(options: { cwd?: string; includeSnapshots?: boolean; cursor?: string; pageSize?: number } = {}): Promise<{
+        sessions: Array<StoredSessionMetadata & { snapshotCount: number; snapshots?: Awaited<ReturnType<ACPSession["listSnapshots"]>> }>;
+        nextCursor: string | null;
+        pageSize: number;
+    }> {
         const liveSessions = this.listSessions();
         const storedSessions = await this.sessionStore.listMetadata();
         const merged = new Map<string, StoredSessionMetadata>();
@@ -191,9 +211,16 @@ export class SessionManager {
 
         const filteredSessions = Array.from(merged.values()).filter((session) => (
             options.cwd ? session.cwd === options.cwd : true
-        ));
+        )).sort((left, right) => compareSessionOrdering(left, right));
 
-        return Promise.all(filteredSessions.map(async (session) => {
+        const cursor = decodeSessionListCursor(options.cursor);
+        const pageSize = normalizePageSize(options.pageSize);
+        const pagedSessions = cursor
+            ? filteredSessions.filter((session) => compareSessionOrdering(session, cursor) > 0)
+            : filteredSessions;
+        const page = pagedSessions.slice(0, pageSize);
+
+        const sessions = await Promise.all(page.map(async (session) => {
             const snapshots = await this.sessionStore.listSnapshots(session.sessionId);
             return {
                 ...session,
@@ -201,6 +228,15 @@ export class SessionManager {
                 ...(options.includeSnapshots ? { snapshots } : {}),
             };
         }));
+
+        const lastSession = page.at(-1);
+        return {
+            sessions,
+            nextCursor: pagedSessions.length > pageSize && lastSession
+                ? encodeSessionListCursor({ updatedAt: lastSession.updatedAt, sessionId: lastSession.sessionId })
+                : null,
+            pageSize,
+        };
     }
 
     async getSessionMetadata(sessionId: string, options: { includeSnapshots?: boolean } = {}): Promise<(StoredSessionMetadata & { snapshots?: Awaited<ReturnType<ACPSession["listSnapshots"]>> }) | null> {
@@ -225,4 +261,48 @@ export class SessionManager {
 
         return this.sessionStore.listSnapshots(sessionId);
     }
+
+    async pruneSessions(options: { dryRun?: boolean } = {}): Promise<import("./session-store").SessionPruneResult> {
+        return this.sessionStore.pruneSessions(options);
+    }
+}
+
+function normalizePageSize(pageSize: number | undefined): number {
+    if (typeof pageSize !== "number" || Number.isNaN(pageSize)) {
+        return DEFAULT_SESSION_LIST_PAGE_SIZE;
+    }
+
+    return Math.min(Math.max(Math.trunc(pageSize), 1), MAX_SESSION_LIST_PAGE_SIZE);
+}
+
+function encodeSessionListCursor(cursor: SessionListCursor): string {
+    return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeSessionListCursor(cursor: string | undefined): SessionListCursor | null {
+    if (!cursor) {
+        return null;
+    }
+
+    try {
+        const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as SessionListCursor;
+        if (typeof decoded.updatedAt !== "string" || typeof decoded.sessionId !== "string") {
+            return null;
+        }
+        return decoded;
+    } catch {
+        return null;
+    }
+}
+
+function compareSessionOrdering(
+    left: Pick<StoredSessionMetadata, "updatedAt" | "sessionId">,
+    right: Pick<StoredSessionMetadata, "updatedAt" | "sessionId">,
+): number {
+    const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
+    if (byUpdatedAt !== 0) {
+        return byUpdatedAt;
+    }
+
+    return left.sessionId.localeCompare(right.sessionId);
 }

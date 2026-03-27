@@ -104,6 +104,7 @@ export interface RestoreSessionParams {
 export interface ListSessionsParams {
     cwd?: string;
     cursor?: string;
+    pageSize?: number;
 }
 
 export interface DiogenesGetSessionParams {
@@ -117,6 +118,10 @@ export interface DiogenesDisposeSessionParams {
 
 export interface DiogenesDeleteSessionParams {
     sessionId: string;
+}
+
+export interface DiogenesPruneSessionsParams {
+    dryRun?: boolean;
 }
 
 export interface DiogenesRestoreSessionParams {

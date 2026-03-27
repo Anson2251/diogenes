@@ -12,6 +12,12 @@ const SNAPSHOTS_DIR_NAME = "snapshots";
 const SNAPSHOT_MANIFEST_FILE_NAME = "manifest.json";
 const LEGACY_SNAPSHOT_MANIFEST_FILE_NAME = "manifest.json";
 
+export interface SessionPruneResult {
+    deletedSessionIds: string[];
+    keptSessionIds: string[];
+    reasonsBySessionId: Record<string, string>;
+}
+
 export class SessionStore {
     constructor(private readonly sessionsRoot = resolveDiogenesAppPaths().sessionsDir) {}
 
@@ -125,12 +131,75 @@ export class SessionStore {
         await fs.rm(this.getSessionDir(sessionId), { recursive: true, force: true });
     }
 
+    async pruneSessions(options: { dryRun?: boolean } = {}): Promise<SessionPruneResult> {
+        await fs.mkdir(this.sessionsRoot, { recursive: true });
+        const entries = await fs.readdir(this.sessionsRoot, { withFileTypes: true });
+        const deletedSessionIds: string[] = [];
+        const keptSessionIds: string[] = [];
+        const reasonsBySessionId: Record<string, string> = {};
+
+        for (const entry of entries) {
+            if (!entry.isDirectory()) {
+                continue;
+            }
+
+            const sessionId = entry.name;
+            const metadata = await this.readMetadata(sessionId).catch(() => null);
+            const state = await this.readState(sessionId).catch(() => null);
+            const snapshotManifest = await this.readSnapshotManifest(sessionId).catch(() => null);
+            const reason = getPruneReason({ sessionId, metadata, state, snapshotManifest });
+
+            if (reason) {
+                deletedSessionIds.push(sessionId);
+                reasonsBySessionId[sessionId] = reason;
+                if (!options.dryRun) {
+                    await this.removeSession(sessionId);
+                }
+                continue;
+            }
+
+            keptSessionIds.push(sessionId);
+        }
+
+        deletedSessionIds.sort();
+        keptSessionIds.sort();
+        return { deletedSessionIds, keptSessionIds, reasonsBySessionId };
+    }
+
     private getSnapshotManifestCandidates(sessionId: string): string[] {
         return [
             path.join(this.getSnapshotsDir(sessionId), SNAPSHOT_MANIFEST_FILE_NAME),
             path.join(this.getSessionDir(sessionId), LEGACY_SNAPSHOT_MANIFEST_FILE_NAME),
         ];
     }
+}
+
+function getPruneReason(input: {
+    sessionId: string;
+    metadata: StoredSessionMetadata | null;
+    state: PersistedDiogenesState | null;
+    snapshotManifest: SessionSnapshotManifest | null;
+}): string | null {
+    if (!input.metadata && !input.state && input.snapshotManifest) {
+        return "orphaned_snapshot_artifacts";
+    }
+    if (!input.metadata) {
+        return "missing_metadata";
+    }
+    if (!input.state) {
+        return "missing_state";
+    }
+    if (input.metadata.sessionId !== input.sessionId) {
+        return "metadata_session_id_mismatch";
+    }
+    if (input.state.sessionId !== input.sessionId) {
+        return "state_session_id_mismatch";
+    }
+    if (input.snapshotManifest && input.snapshotManifest.sessionId !== input.sessionId) {
+        return "snapshot_manifest_session_id_mismatch";
+    }
+
+    return null;
 }
 
 function isNotFoundError(error: unknown): boolean {

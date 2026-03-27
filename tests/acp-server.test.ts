@@ -544,6 +544,107 @@ describe("ACPServer", () => {
         }
     });
 
+    it("paginates session/list results with cursor", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-pagination-"));
+        const originalHome = process.env.HOME;
+        const sessionsDir = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+        process.env.HOME = root;
+
+        try {
+            fs.mkdirSync(sessionsDir, { recursive: true });
+            for (let i = 0; i < 21; i++) {
+                const sessionId = `session-${String(i).padStart(2, "0")}`;
+                const sessionDir = path.join(sessionsDir, sessionId);
+                fs.mkdirSync(sessionDir, { recursive: true });
+                fs.writeFileSync(path.join(sessionDir, "metadata.json"), JSON.stringify({
+                    sessionId,
+                    cwd: "/tmp/workspace",
+                    createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
+                    updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
+                    title: `Session ${i}`,
+                    description: null,
+                    state: "active",
+                    hasActiveRun: false,
+                    availableCommands: [],
+                    snapshotEnabled: false,
+                }, null, 2));
+                fs.writeFileSync(path.join(sessionDir, "state.json"), JSON.stringify({
+                    version: 1,
+                    kind: "diogenes_state",
+                    sessionId,
+                    cwd: "/tmp/workspace",
+                    createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
+                    updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
+                    metadata: { title: `Session ${i}`, description: null },
+                    messageHistory: [],
+                    workspace: { loadedDirectories: [], loadedFiles: [], todo: [], notepad: [] },
+                }, null, 2));
+            }
+
+            const server = new ACPServer({ config: { llm: { apiKey: "test-key", model: "gpt-4" } } });
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+
+            const firstPage = await server.handleMessage({ jsonrpc: "2.0", id: 2, method: "session/list", params: { pageSize: 5 } });
+            const nextCursor = firstPage && "result" in firstPage ? firstPage.result.nextCursor as string | null : null;
+            const secondPage = await server.handleMessage({ jsonrpc: "2.0", id: 3, method: "session/list", params: { cursor: nextCursor, pageSize: 5 } });
+
+            expect(firstPage && "result" in firstPage ? firstPage.result.sessions : []).toHaveLength(5);
+            expect(nextCursor).toEqual(expect.any(String));
+            expect(firstPage && "result" in firstPage ? firstPage.result._meta?.diogenes : null).toEqual({
+                pageSize: 5,
+                supportsCursorPagination: true,
+            });
+            expect(secondPage && "result" in secondPage ? secondPage.result.sessions : []).toHaveLength(5);
+            expect(secondPage && "result" in secondPage ? secondPage.result.nextCursor : null).toEqual(expect.any(String));
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("prunes broken persisted sessions through ACP", async () => {
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-prune-"));
+            const originalHome = process.env.HOME;
+            const sessionsDir = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+            process.env.HOME = root;
+
+        try {
+            fs.mkdirSync(path.join(sessionsDir, "broken-session"), { recursive: true });
+            fs.writeFileSync(path.join(sessionsDir, "broken-session", "metadata.json"), JSON.stringify({ sessionId: "broken-session" }, null, 2));
+            fs.mkdirSync(path.join(sessionsDir, "snapshot-only", "snapshots"), { recursive: true });
+            fs.writeFileSync(path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"), JSON.stringify({
+                sessionId: "snapshot-only",
+                cwd: "/tmp/workspace",
+                createdAt: "2026-03-27T00:00:00.000Z",
+                snapshots: [],
+            }, null, 2));
+
+            const server = new ACPServer({ config: { llm: { apiKey: "test-key", model: "gpt-4" } } });
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+
+            const dryRun = await server.handleMessage({ jsonrpc: "2.0", id: 2, method: "_diogenes/session/prune", params: { dryRun: true } });
+            const applied = await server.handleMessage({ jsonrpc: "2.0", id: 3, method: "_diogenes/session/prune", params: {} });
+
+            expect(dryRun && "result" in dryRun ? dryRun.result : null).toEqual(expect.objectContaining({
+                dryRun: true,
+                deletedSessionIds: ["broken-session", "snapshot-only"],
+                reasonsBySessionId: {
+                    "broken-session": "missing_state",
+                    "snapshot-only": "orphaned_snapshot_artifacts",
+                },
+            }));
+            expect(applied && "result" in applied ? applied.result : null).toEqual(expect.objectContaining({
+                dryRun: false,
+                deletedSessionIds: ["broken-session", "snapshot-only"],
+            }));
+            expect(fs.existsSync(path.join(sessionsDir, "broken-session"))).toBe(false);
+            expect(fs.existsSync(path.join(sessionsDir, "snapshot-only"))).toBe(false);
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it("streams session updates during prompt execution", async () => {
         const notifications: Array<{ method: string; params: any }> = [];
         const responses: any[] = [];

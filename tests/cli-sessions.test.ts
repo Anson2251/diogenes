@@ -38,6 +38,18 @@ describe("CLI session commands", () => {
         }
     });
 
+    it("parses session prune commands", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "sessions", "prune", "--dry-run"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "sessions.prune", dryRun: true });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
     it("prints stored session metadata for sessions get", async () => {
         const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-sessions-"));
         tempDirs.push(root);
@@ -112,5 +124,47 @@ describe("CLI session commands", () => {
                 },
             ],
         });
+    });
+
+    it("prunes broken session directories from CLI", async () => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-prune-"));
+        tempDirs.push(root);
+
+        const configDir = path.join(root, "config");
+        const dataDir = path.join(root, "data");
+        const sessionsDir = path.join(dataDir, "sessions");
+        await fs.mkdir(path.join(sessionsDir, "broken"), { recursive: true });
+        await fs.writeFile(path.join(sessionsDir, "broken", "metadata.json"), JSON.stringify({ sessionId: "broken" }), "utf8");
+        await fs.mkdir(path.join(sessionsDir, "snapshot-only", "snapshots"), { recursive: true });
+        await fs.writeFile(path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"), JSON.stringify({
+            sessionId: "snapshot-only",
+            cwd: "/tmp/workspace",
+            createdAt: "2026-03-27T00:00:00.000Z",
+            snapshots: [],
+        }), "utf8");
+
+        vi.spyOn(appPaths, "resolveDiogenesAppPaths").mockReturnValue({
+            homeDir: root,
+            configDir,
+            dataDir,
+            sessionsDir,
+            defaultConfigCandidates: [],
+        });
+
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        await handleSessionCommand({ kind: "sessions.prune", dryRun: false });
+
+        const output = JSON.parse(consoleSpy.mock.calls[0]?.[0] ?? "{}");
+        expect(output).toEqual(expect.objectContaining({
+            deletedSessionIds: ["broken", "snapshot-only"],
+            reasonsBySessionId: {
+                broken: "missing_state",
+                "snapshot-only": "orphaned_snapshot_artifacts",
+            },
+            dryRun: false,
+        }));
+        await expect(fs.access(path.join(sessionsDir, "broken"))).rejects.toThrow();
+        await expect(fs.access(path.join(sessionsDir, "snapshot-only"))).rejects.toThrow();
     });
 });

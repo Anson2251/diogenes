@@ -155,6 +155,17 @@ describe("SessionManager lifecycle", () => {
     it("closeSession removes the live session from the manager without deleting persisted state", async () => {
         const manager = new SessionManager({ llm: { apiKey: "test-key", model: "gpt-4" } }, 5, () => {});
         const session = await manager.createSession(process.cwd());
+        await session.restorePersistedState({
+            version: 1,
+            kind: "diogenes_state",
+            sessionId: session.sessionId,
+            cwd: process.cwd(),
+            createdAt: session.getCreatedAt(),
+            updatedAt: session.getUpdatedAt(),
+            metadata: { title: null, description: null },
+            messageHistory: [{ role: "user", content: "hello" }],
+            workspace: { loadedDirectories: [], loadedFiles: [], todo: [], notepad: [] },
+        });
 
         expect(manager.getSession(session.sessionId)).toBeDefined();
         await expect(manager.closeSession(session.sessionId)).resolves.toBe(true);
@@ -162,6 +173,15 @@ describe("SessionManager lifecycle", () => {
 
         const metadata = await (manager as any).sessionStore.readMetadata(session.sessionId);
         expect(metadata).not.toBeNull();
+    });
+
+    it("auto-deletes empty sessions when they are closed", async () => {
+        const manager = new SessionManager({ llm: { apiKey: "test-key", model: "gpt-4" } }, 5, () => {});
+        const session = await manager.createSession(process.cwd());
+
+        await expect(manager.closeSession(session.sessionId)).resolves.toBe(true);
+        const metadata = await (manager as any).sessionStore.readMetadata(session.sessionId);
+        expect(metadata).toBeNull();
     });
 
     it("deleteSession removes persisted session state", async () => {
@@ -198,6 +218,42 @@ describe("SessionManager lifecycle", () => {
             await expect(manager.createSession(process.cwd())).rejects.toThrow();
             const sessionsDir = path.join(root, "Library", "Application Support", "diogenes", "sessions");
             expect(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir) : []).toEqual([]);
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("prunes broken persisted session directories", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-manager-prune-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const manager = new SessionManager({ llm: { apiKey: "test-key", model: "gpt-4" } }, 5, () => {});
+            const sessionsDir = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+            fs.mkdirSync(path.join(sessionsDir, "broken-session"), { recursive: true });
+            fs.writeFileSync(path.join(sessionsDir, "broken-session", "metadata.json"), JSON.stringify({ sessionId: "broken-session" }, null, 2));
+            fs.mkdirSync(path.join(sessionsDir, "snapshot-only", "snapshots"), { recursive: true });
+            fs.writeFileSync(path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"), JSON.stringify({
+                sessionId: "snapshot-only",
+                cwd: "/tmp/workspace",
+                createdAt: "2026-03-27T00:00:00.000Z",
+                snapshots: [],
+            }, null, 2));
+
+            const valid = await manager.createSession(process.cwd());
+            const result = await manager.pruneSessions();
+
+            expect(result.deletedSessionIds).toContain("broken-session");
+            expect(result.deletedSessionIds).toContain("snapshot-only");
+            expect(result.reasonsBySessionId).toEqual(expect.objectContaining({
+                "broken-session": "missing_state",
+                "snapshot-only": "orphaned_snapshot_artifacts",
+            }));
+            expect(result.keptSessionIds).toContain(valid.sessionId);
+            expect(fs.existsSync(path.join(sessionsDir, "broken-session"))).toBe(false);
+            expect(fs.existsSync(path.join(sessionsDir, "snapshot-only"))).toBe(false);
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
@@ -281,6 +337,18 @@ describe("ACPServer disposal", () => {
             params: { cwd: process.cwd() },
         });
         const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+        const session = (server as any).sessionManager.getSession(sessionId);
+        await session.restorePersistedState({
+            version: 1,
+            kind: "diogenes_state",
+            sessionId,
+            cwd: process.cwd(),
+            createdAt: session.getCreatedAt(),
+            updatedAt: session.getUpdatedAt(),
+            metadata: { title: null, description: null },
+            messageHistory: [{ role: "user", content: "hello" }],
+            workspace: { loadedDirectories: [], loadedFiles: [], todo: [], notepad: [] },
+        });
 
         const listResponse = await server.handleMessage({
             jsonrpc: "2.0",
