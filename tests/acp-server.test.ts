@@ -355,13 +355,67 @@ describe("ACPServer", () => {
                             diogenes: expect.objectContaining({
                                 snapshotEnabled: true,
                                 snapshotCount: 2,
-                                availableCommands: [
+                                availableCommands: expect.arrayContaining([
+                                    {
+                                        name: "help",
+                                        description: "List available ACP slash commands",
+                                        input: { hint: "optional command name, for example snapshot" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "help",
+                                                invocations: ["/help", "/commands"],
+                                                example: "/help snapshot",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        name: "session",
+                                        description: "Show current session status and metadata",
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "session_status",
+                                                invocations: ["/session", "/status"],
+                                                example: "/session",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        name: "restore",
+                                        description: "Explain how the host can restore a session snapshot",
+                                        input: { hint: "snapshot id, for example snapshot-123" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "snapshot_restore_help",
+                                                invocations: ["/restore"],
+                                                example: "/restore snapshot-123",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        name: "snapshots",
+                                        description: "List recent session snapshots",
+                                        input: { hint: "optional limit, for example 5" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "snapshot_list",
+                                                invocations: ["/snapshots"],
+                                                example: "/snapshots 5",
+                                            },
+                                        },
+                                    },
                                     {
                                         name: "snapshot",
                                         description: "Create a defensive session snapshot",
                                         input: { hint: "optional label for the snapshot" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "session_snapshot",
+                                                invocations: ["/snapshot"],
+                                                example: "/snapshot before-risky-edit",
+                                            },
+                                        },
                                     },
-                                ],
+                                ]),
                             }),
                         }),
                     }),
@@ -375,13 +429,67 @@ describe("ACPServer", () => {
                             diogenes: expect.objectContaining({
                                 liveSession: true,
                                 snapshotEnabled: true,
-                                availableCommands: [
+                                availableCommands: expect.arrayContaining([
+                                    {
+                                        name: "help",
+                                        description: "List available ACP slash commands",
+                                        input: { hint: "optional command name, for example snapshot" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "help",
+                                                invocations: ["/help", "/commands"],
+                                                example: "/help snapshot",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        name: "session",
+                                        description: "Show current session status and metadata",
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "session_status",
+                                                invocations: ["/session", "/status"],
+                                                example: "/session",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        name: "restore",
+                                        description: "Explain how the host can restore a session snapshot",
+                                        input: { hint: "snapshot id, for example snapshot-123" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "snapshot_restore_help",
+                                                invocations: ["/restore"],
+                                                example: "/restore snapshot-123",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        name: "snapshots",
+                                        description: "List recent session snapshots",
+                                        input: { hint: "optional limit, for example 5" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "snapshot_list",
+                                                invocations: ["/snapshots"],
+                                                example: "/snapshots 5",
+                                            },
+                                        },
+                                    },
                                     {
                                         name: "snapshot",
                                         description: "Create a defensive session snapshot",
                                         input: { hint: "optional label for the snapshot" },
+                                        _meta: {
+                                            diogenes: {
+                                                kind: "session_snapshot",
+                                                invocations: ["/snapshot"],
+                                                example: "/snapshot before-risky-edit",
+                                            },
+                                        },
                                     },
-                                ],
+                                ]),
                             }),
                         }),
                     }),
@@ -1721,6 +1829,475 @@ describe("ACPServer", () => {
         }
     });
 
+    it("handles unknown ACP slash commands without invoking the LLM", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-slash-unknown-"));
+        const originalHome = process.env.HOME;
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const notifications: Array<{ method: string; params: any }> = [];
+
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.HOME = root;
+
+        const llmSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream");
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            const response = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/unknown-command please help" }],
+                },
+            });
+
+            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+            expect(llmSpy).not.toHaveBeenCalled();
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining('Unknown ACP slash command "/unknown-command please help"'),
+                            }),
+                        }),
+                    }),
+                }),
+            ]));
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("/help"),
+                            }),
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("handles /help locally and advertises it without snapshot support", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const llmSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream");
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+        });
+
+        await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+        await waitFor(() => notifications.find(
+            (item) => item.params?.update?.sessionUpdate === "available_commands_update"
+                && item.params?.update?.availableCommands?.some((command: any) => command.name === "help"),
+        ));
+
+        const response = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "/help" }],
+            },
+        });
+
+        expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+        expect(llmSpy).not.toHaveBeenCalled();
+        expect(notifications).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                method: "session/update",
+                params: expect.objectContaining({
+                    sessionId,
+                    update: expect.objectContaining({
+                        sessionUpdate: "available_commands_update",
+                        availableCommands: expect.arrayContaining([
+                            expect.objectContaining({ name: "help" }),
+                            expect.objectContaining({ name: "session" }),
+                        ]),
+                    }),
+                }),
+            }),
+        ]));
+        expect(notifications).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                method: "session/update",
+                params: expect.objectContaining({
+                    sessionId,
+                    update: expect.objectContaining({
+                        sessionUpdate: "agent_message_chunk",
+                        content: expect.objectContaining({
+                            type: "text",
+                            text: expect.stringContaining("Available ACP slash commands:"),
+                        }),
+                    }),
+                }),
+            }),
+        ]));
+    });
+
+    it("handles /help <command> aliases locally", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-help-alias-"));
+        const originalHome = process.env.HOME;
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const notifications: Array<{ method: string; params: any }> = [];
+
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.HOME = root;
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            const response = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/commands snapshot" }],
+                },
+            });
+
+            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("/snapshot: Create a defensive session snapshot"),
+                            }),
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("handles /session locally", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const llmSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream");
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+        });
+
+        await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+        const response = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "/session" }],
+            },
+        });
+
+        expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+        expect(llmSpy).not.toHaveBeenCalled();
+        expect(notifications).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                method: "session/update",
+                params: expect.objectContaining({
+                    sessionId,
+                    update: expect.objectContaining({
+                        sessionUpdate: "agent_message_chunk",
+                        content: expect.objectContaining({
+                            type: "text",
+                            text: expect.stringContaining(`Session ${sessionId}`),
+                        }),
+                    }),
+                }),
+            }),
+        ]));
+    });
+
+    it("handles /snapshots locally", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-snapshots-command-"));
+        const originalHome = process.env.HOME;
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const notifications: Array<{ method: string; params: any }> = [];
+
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.HOME = root;
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/snapshot manual-list-test" }],
+                },
+            });
+
+            const response = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/snapshots 2" }],
+                },
+            });
+
+            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("Recent session snapshots"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("manual-list-test"),
+                            }),
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("handles /restore locally without invoking host restore", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-restore-command-"));
+        const originalHome = process.env.HOME;
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const notifications: Array<{ method: string; params: any }> = [];
+
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.HOME = root;
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/snapshot restore-target" }],
+                },
+            });
+
+            const restoreMessage = notifications.find(
+                (item) => item.params?.update?.sessionUpdate === "agent_message_chunk"
+                    && typeof item.params?.update?.content?.text === "string"
+                    && item.params.update.content.text.includes("Created snapshot"),
+            );
+            const snapshotIdMatch = restoreMessage?.params?.update?.content?.text?.match(/Created snapshot ([^\s]+)/);
+            const snapshotId = snapshotIdMatch?.[1];
+
+            const response = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: `/restore ${snapshotId}` }],
+                },
+            });
+
+            expect(snapshotId).toBeTypeOf("string");
+            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("host-controlled"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("session/restore"),
+                            }),
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it("supports cancellation for an active prompt turn", async () => {
         const notifications: Array<{ method: string; params: any }> = [];
         const responses: any[] = [];
@@ -1785,7 +2362,9 @@ describe("ACPServer", () => {
         expect(cancelResponse).toBeNull();
         expect(promptResponse && "result" in promptResponse && promptResponse.result.stopReason).toBe("cancelled");
         expect(cancelled).toBe(true);
-        expect(notifications).toEqual([]);
+        expect(notifications.every(
+            (item) => item.params?.update?.sessionUpdate === "available_commands_update",
+        )).toBe(true);
     });
 
     it("restores a snapshot through the host-controlled ACP method", async () => {

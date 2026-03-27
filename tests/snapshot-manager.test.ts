@@ -415,7 +415,10 @@ describe("SessionSnapshotManager", () => {
             expect(
                 notifications.some(
                     (item) => item.params?.update?.sessionUpdate === "available_commands_update"
-                        && item.params.update.availableCommands.some((command: any) => command.name === "snapshot"),
+                        && item.params.update.availableCommands.some(
+                            (command: any) => command.name === "snapshot"
+                                && command._meta?.diogenes?.example === "/snapshot before-risky-edit",
+                        ),
                 ),
             ).toBe(true);
 
@@ -465,6 +468,7 @@ describe("SessionSnapshotManager", () => {
 
             const slashState = JSON.parse(await fs.readFile(manifest.snapshots[1].diogenesStatePath, "utf8"));
             expect(slashState.messageHistory.some((message: any) => String(message.content).includes("/snapshot manual-checkpoint"))).toBe(true);
+            expect(slashState.messageHistory.some((message: any) => String(message.content).includes("file:///tmp/example.txt"))).toBe(true);
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }

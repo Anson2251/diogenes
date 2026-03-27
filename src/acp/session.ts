@@ -29,6 +29,19 @@ interface RestorePersistedStateOptions {
     preserveTimestamps?: boolean;
 }
 
+interface ParsedSlashCommand {
+    name: string;
+    argumentsText: string;
+    commandText: string;
+    promptText: string;
+}
+
+interface SlashCommandDefinition {
+    command: AvailableCommand;
+    aliases?: string[];
+    execute: (parsed: ParsedSlashCommand, turn: number) => Promise<TaskRunResult>;
+}
+
 class SessionResourceRegistry {
     private readonly resources: SessionOwnedResource[] = [];
 
@@ -807,19 +820,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     }
 
     getAvailableCommands(): AvailableCommand[] {
-        if (!this.snapshotManager) {
-            return [];
-        }
-
-        return [
-            {
-                name: "snapshot",
-                description: "Create a defensive session snapshot",
-                input: {
-                    hint: "optional label for the snapshot",
-                },
-            },
-        ];
+        return this.getSlashCommandDefinitions().map((definition) => definition.command);
     }
 
     emitAvailableCommandsUpdate(): void {
@@ -1001,42 +1002,194 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     }
 
     private async tryHandleSlashCommand(prompt: PromptBlock[], turn: number): Promise<TaskRunResult | null> {
+        const parsed = this.parseSlashCommand(prompt);
+        if (!parsed) {
+            return null;
+        }
+
+        for (const definition of this.getSlashCommandDefinitions()) {
+            if (definition.command.name === parsed.name || definition.aliases?.includes(parsed.name)) {
+                return definition.execute(parsed, turn);
+            }
+        }
+
+        return this.handleUnknownSlashCommand(parsed);
+    }
+
+    private parseSlashCommand(prompt: PromptBlock[]): ParsedSlashCommand | null {
         const commandBlock = prompt.find((block) => block.type === "text" && block.text.trim().startsWith("/"));
         if (!commandBlock || commandBlock.type !== "text") {
             return null;
         }
 
-        const text = commandBlock.text.trim();
-        if (!text.startsWith("/")) {
+        const trimmedText = commandBlock.text.trim();
+        if (!trimmedText.startsWith("/")) {
             return null;
         }
 
-        if (text === "/snapshot" || text.startsWith("/snapshot ")) {
-            return this.handleSnapshotSlashCommand(text, turn);
+        const [firstLine] = trimmedText.split(/\r?\n/, 1);
+        const match = firstLine.match(/^\/([^\s]+)(?:\s+(.*))?$/);
+        if (!match) {
+            return null;
         }
 
-        return null;
+        const promptText = promptBlocksToText(prompt);
+        return {
+            name: match[1].toLowerCase(),
+            argumentsText: (match[2] || "").trim(),
+            commandText: firstLine.trim(),
+            promptText: promptText || firstLine.trim(),
+        };
     }
 
-    private async handleSnapshotSlashCommand(commandText: string, turn: number): Promise<TaskRunResult> {
+    private getSlashCommandDefinitions(): SlashCommandDefinition[] {
+        const definitions: SlashCommandDefinition[] = [
+            {
+                command: {
+                    name: "help",
+                    description: "List available ACP slash commands",
+                    input: {
+                        hint: "optional command name, for example snapshot",
+                    },
+                    _meta: {
+                        diogenes: {
+                            kind: "help",
+                            invocations: ["/help", "/commands"],
+                            example: "/help snapshot",
+                        },
+                    },
+                },
+                aliases: ["commands"],
+                execute: (parsed) => this.handleHelpSlashCommand(parsed),
+            },
+            {
+                command: {
+                    name: "session",
+                    description: "Show current session status and metadata",
+                    _meta: {
+                        diogenes: {
+                            kind: "session_status",
+                            invocations: ["/session", "/status"],
+                            example: "/session",
+                        },
+                    },
+                },
+                aliases: ["status"],
+                execute: (parsed) => this.handleSessionSlashCommand(parsed),
+            },
+        ];
+
+        if (this.snapshotManager) {
+            definitions.push({
+                command: {
+                    name: "restore",
+                    description: "Explain how the host can restore a session snapshot",
+                    input: {
+                        hint: "snapshot id, for example snapshot-123",
+                    },
+                    _meta: {
+                        diogenes: {
+                            kind: "snapshot_restore_help",
+                            invocations: ["/restore"],
+                            example: "/restore snapshot-123",
+                        },
+                    },
+                },
+                execute: (parsed) => this.handleRestoreSlashCommand(parsed),
+            });
+            definitions.push({
+                command: {
+                    name: "snapshots",
+                    description: "List recent session snapshots",
+                    input: {
+                        hint: "optional limit, for example 5",
+                    },
+                    _meta: {
+                        diogenes: {
+                            kind: "snapshot_list",
+                            invocations: ["/snapshots"],
+                            example: "/snapshots 5",
+                        },
+                    },
+                },
+                execute: (parsed) => this.handleSnapshotsSlashCommand(parsed),
+            });
+            definitions.push({
+                command: {
+                    name: "snapshot",
+                    description: "Create a defensive session snapshot",
+                    input: {
+                        hint: "optional label for the snapshot",
+                    },
+                    _meta: {
+                        diogenes: {
+                            kind: "session_snapshot",
+                            invocations: ["/snapshot"],
+                            example: "/snapshot before-risky-edit",
+                        },
+                    },
+                },
+                execute: (parsed, turn) => this.handleSnapshotSlashCommand(parsed, turn),
+            });
+        }
+
+        return definitions;
+    }
+
+    private async handleHelpSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
+        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
+            const definitions = this.getSlashCommandDefinitions();
+            const requestedName = parsed.argumentsText.replace(/^\//, "").trim().toLowerCase();
+            const matchedDefinition = requestedName.length > 0
+                ? definitions.find(
+                    (definition) => definition.command.name === requestedName || definition.aliases?.includes(requestedName),
+                )
+                : undefined;
+
+            const summary = matchedDefinition
+                ? this.formatHelpForCommand(matchedDefinition)
+                : this.formatHelpSummary(definitions);
+
+            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
+        });
+    }
+
+    private async handleSessionSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
+        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
+            const metadata = this.getMetadata();
+            const hydratedState = this.getHydratedStateMeta();
+            const loadedDirectories = Array.isArray(hydratedState.loadedDirectories) ? hydratedState.loadedDirectories.length : 0;
+            const loadedFiles = Array.isArray(hydratedState.loadedFiles) ? hydratedState.loadedFiles.length : 0;
+            const notepadLines = Array.isArray(hydratedState.notepad) ? hydratedState.notepad.length : 0;
+            const todoItems = this.diogenes.getWorkspaceManager().getTodoWorkspace().items.length;
+            const summary = [
+                `Session ${metadata.sessionId}`,
+                `State: ${metadata.state}${metadata.hasActiveRun ? " (busy)" : ""}`,
+                `Workspace: ${metadata.cwd}`,
+                `Title: ${metadata.title || "(none)"}`,
+                `Description: ${metadata.description || "(none)"}`,
+                `Loaded directories: ${loadedDirectories}`,
+                `Loaded files: ${loadedFiles}`,
+                `Todo items: ${todoItems}`,
+                `Notepad lines: ${notepadLines}`,
+                `Snapshots: ${this.snapshotManager ? "enabled" : "disabled"}`,
+                `Updated at: ${metadata.updatedAt}`,
+            ].join("\n");
+
+            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
+        });
+    }
+
+    private async handleSnapshotSlashCommand(parsed: ParsedSlashCommand, turn: number): Promise<TaskRunResult> {
         if (!this.snapshotManager) {
             throw new Error("Session snapshots are not enabled");
         }
+        const snapshotManager = this.snapshotManager;
 
-        this.lifecycleState = "running";
-        this.updatedAt = new Date().toISOString();
-        await this.persistMetadata();
+        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
+            const label = parsed.argumentsText || undefined;
 
-        try {
-            const label = commandText.slice("/snapshot".length).trim() || undefined;
-            const historyBeforeCommand = this.messageHistory.map((message) => ({ ...message }));
-            const userMessage: ConversationMessage = {
-                role: "user",
-                content: `========= ${historyBeforeCommand.length > 0 ? "NEW TASK" : "TASK"}\n${commandText}\n=========`,
-            };
-            this.currentMessageHistory = [...historyBeforeCommand, userMessage];
-
-            const result = await this.snapshotManager.createSnapshot({
+            const result = await snapshotManager.createSnapshot({
                 trigger: "system_manual",
                 turn,
                 label,
@@ -1045,29 +1198,89 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             const summary = label
                 ? `Created snapshot ${result.snapshotId} with label "${label}".`
                 : `Created snapshot ${result.snapshotId}.`;
-            const assistantMessage: ConversationMessage = {
-                role: "assistant",
-                content: summary,
-            };
-            this.messageHistory = [...historyBeforeCommand, userMessage, assistantMessage];
-            this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
+            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
+        });
+    }
 
-            this.notify("session/update", {
-                sessionId: this.sessionId,
-                update: {
-                    sessionUpdate: "agent_message_chunk",
-                    content: createTextContent(summary),
-                },
-            });
+    private async handleRestoreSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
+        if (!this.snapshotManager) {
+            throw new Error("Session snapshots are not enabled");
+        }
+        const snapshotManager = this.snapshotManager;
 
-            return {
-                success: true,
-                result: summary,
-                iterations: 0,
-                taskEnded: true,
-                stopReason: "end_turn",
-                messageHistory: this.messageHistory.map((message) => ({ ...message })),
-            };
+        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
+            const snapshotId = parsed.argumentsText || undefined;
+            const snapshots = await snapshotManager.listSnapshots();
+            const hasSnapshot = snapshotId
+                ? snapshots.some((snapshot) => snapshot.snapshotId === snapshotId)
+                : false;
+            const recentSnapshotIds = snapshots.slice(0, 5).map((snapshot) => snapshot.snapshotId);
+
+            const lines = [
+                "Snapshot restore is host-controlled and cannot be run from an ACP slash command.",
+                (
+                    snapshotId
+                    ? hasSnapshot
+                        ? `Ask the host to call \`session/restore\` or \`_diogenes/session/restore\` with sessionId \`${this.sessionId}\` and snapshotId \`${snapshotId}\`.`
+                        : `No snapshot with id \`${snapshotId}\` was found for this session.`
+                    : `Ask the host to call \`session/restore\` or \`_diogenes/session/restore\` with sessionId \`${this.sessionId}\` and the desired snapshotId.`
+                ),
+            ];
+
+            if (recentSnapshotIds.length > 0) {
+                lines.push(`Recent snapshot ids: ${recentSnapshotIds.join(", ")}`);
+            } else {
+                lines.push("No session snapshots are available yet.");
+            }
+
+            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, lines.join("\n"), hasSnapshot || !snapshotId);
+        });
+    }
+
+    private async handleSnapshotsSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
+        if (!this.snapshotManager) {
+            throw new Error("Session snapshots are not enabled");
+        }
+        const snapshotManager = this.snapshotManager;
+
+        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
+            const requestedLimit = Number.parseInt(parsed.argumentsText, 10);
+            const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 5;
+            const snapshots = await snapshotManager.listSnapshots();
+            const recentSnapshots = snapshots.slice(0, limit);
+            const summary = recentSnapshots.length === 0
+                ? "No session snapshots have been created yet."
+                : [
+                    `Recent session snapshots (${recentSnapshots.length} of ${snapshots.length}):`,
+                    ...recentSnapshots.map((snapshot) => `- ${snapshot.snapshotId} | ${snapshot.trigger} | ${snapshot.label || "(no label)"} | ${snapshot.createdAt}`),
+                ].join("\n");
+
+            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
+        });
+    }
+
+    private async handleUnknownSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
+        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
+            const availableCommands = this.getAvailableCommands().map((command) => `/${command.name}`);
+            const summary = availableCommands.length > 0
+                ? `Unknown ACP slash command "${parsed.commandText}". Available commands: ${availableCommands.join(", ")}. Use /help for details.`
+                : `Unknown ACP slash command "${parsed.commandText}". No ACP slash commands are currently available.`;
+
+            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, false);
+        });
+    }
+
+    private async runLocalSlashCommand(
+        parsed: ParsedSlashCommand,
+        action: (historyBeforeCommand: ConversationMessage[], userMessage: ConversationMessage) => Promise<TaskRunResult>,
+    ): Promise<TaskRunResult> {
+        this.lifecycleState = "running";
+        this.updatedAt = new Date().toISOString();
+        await this.persistMetadata();
+
+        try {
+            const { historyBeforeCommand, userMessage } = this.appendLocalSlashUserMessage(parsed.promptText);
+            return await action(historyBeforeCommand, userMessage);
         } finally {
             if (this.lifecycleState === "running") {
                 this.lifecycleState = "active";
@@ -1075,6 +1288,78 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             this.updatedAt = new Date().toISOString();
             await this.persistMetadata();
         }
+    }
+
+    private appendLocalSlashUserMessage(promptText: string): { historyBeforeCommand: ConversationMessage[]; userMessage: ConversationMessage } {
+        const historyBeforeCommand = this.messageHistory.map((message) => ({ ...message }));
+        const userMessage: ConversationMessage = {
+            role: "user",
+            content: `========= ${historyBeforeCommand.length > 0 ? "NEW TASK" : "TASK"}\n${promptText}\n=========`,
+        };
+        this.currentMessageHistory = [...historyBeforeCommand, userMessage];
+
+        return { historyBeforeCommand, userMessage };
+    }
+
+    private completeLocalSlashCommand(
+        historyBeforeCommand: ConversationMessage[],
+        userMessage: ConversationMessage,
+        summary: string,
+        success: boolean,
+    ): TaskRunResult {
+        const assistantMessage: ConversationMessage = {
+            role: "assistant",
+            content: summary,
+        };
+        this.messageHistory = [...historyBeforeCommand, userMessage, assistantMessage];
+        this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
+
+        this.notify("session/update", {
+            sessionId: this.sessionId,
+            update: {
+                sessionUpdate: "agent_message_chunk",
+                content: createTextContent(summary),
+            },
+        });
+
+        return {
+            success,
+            result: summary,
+            iterations: 0,
+            taskEnded: true,
+            stopReason: "end_turn",
+            messageHistory: this.messageHistory.map((message) => ({ ...message })),
+        };
+    }
+
+    private formatHelpSummary(definitions: SlashCommandDefinition[]): string {
+        const lines = ["Available ACP slash commands:"];
+
+        for (const definition of definitions) {
+            const example = definition.command._meta?.diogenes?.example;
+            lines.push(`- /${definition.command.name}: ${definition.command.description}${example ? ` (example: ${example})` : ""}`);
+        }
+
+        lines.push("Use /help <command> for command-specific details.");
+        return lines.join("\n");
+    }
+
+    private formatHelpForCommand(definition: SlashCommandDefinition): string {
+        const invocations = definition.command._meta?.diogenes?.invocations ?? [`/${definition.command.name}`];
+        const example = definition.command._meta?.diogenes?.example;
+        const lines = [
+            `/${definition.command.name}: ${definition.command.description}`,
+            `Invocations: ${invocations.join(", ")}`,
+        ];
+
+        if (definition.command.input?.hint) {
+            lines.push(`Input: ${definition.command.input.hint}`);
+        }
+        if (example) {
+            lines.push(`Example: ${example}`);
+        }
+
+        return lines.join("\n");
     }
 
     private extractLocations(params: Record<string, any> | undefined): Array<{ path: string }> | undefined {

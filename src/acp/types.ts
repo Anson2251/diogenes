@@ -142,6 +142,13 @@ export interface AvailableCommand {
     name: string;
     description: string;
     input?: AvailableCommandInput;
+    _meta?: {
+        diogenes?: {
+            kind?: string;
+            invocations?: string[];
+            example?: string;
+        };
+    };
 }
 
 export type SessionLifecycleState =
