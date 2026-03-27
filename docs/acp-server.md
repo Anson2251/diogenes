@@ -186,6 +186,7 @@ Notes:
 - `/status` is an alias for `/session`
 - these commands are handled locally inside the ACP session layer and do not require an LLM round-trip
 - command-specific metadata lives in `availableCommands[*]._meta.diogenes`
+- commands are registered through a dedicated modular registry under `src/acp/slash-commands/`
 
 Example metadata shape:
 
@@ -206,19 +207,22 @@ Example metadata shape:
 
 ## Snapshot Restore Semantics
 
-Snapshot restore remains host-controlled.
+Snapshot restore remains user-driven, but ACP hosts and ACP-local slash commands can both initiate it.
 
 That means:
 
 - the ACP host may call `session/restore` or `_diogenes/session/restore`
-- the LLM cannot invoke restore directly
-- the `/restore` slash command only explains the correct host call and helps the client/operator find snapshot ids
+- ACP clients may also invoke `/restore <snapshot-id>` as a normal user command inside the session
+- every restore automatically creates a safety snapshot before applying the target snapshot
+- restore completion surfaces the `safetySnapshotId` under `_meta.diogenes`
 
 Restore lifecycle notifications are emitted through `session/update` using:
 
 - `snapshot_restore_started`
 - `snapshot_restore_completed`
 - `snapshot_restore_failed`
+
+After a successful restore, Diogenes also emits a user-visible assistant message summarizing the restored snapshot and the safety snapshot created for undo.
 
 ## Tool Behavior In ACP Sessions
 

@@ -15,7 +15,7 @@ Current implemented ACP shape includes:
 - stdio JSON-RPC transport
 - `initialize`, `session/new`, `session/load`, `session/list`, `session/prompt`, `session/cancel`, and `session/restore`
 - managed persisted sessions with replayable ACP-visible history
-- session-scoped snapshots and host-controlled restore
+- session-scoped snapshots and ACP-visible restore flows with safety snapshots
 - Diogenes-specific ACP extension methods under `_diogenes/session/*`
 - discoverable ACP-local slash commands exposed through `available_commands_update`
 
@@ -414,12 +414,26 @@ These commands are advertised through `available_commands_update` notifications 
 
 ### Restore Model
 
-Restore is intentionally split across two layers:
+Restore is available through both ACP methods and ACP-local slash commands:
 
-- the ACP host performs actual restore by calling `session/restore` or `_diogenes/session/restore`
-- the ACP session layer may explain restore through `/restore`, but cannot perform it directly
+- the ACP host may call `session/restore` or `_diogenes/session/restore`
+- ACP users may run `/restore <snapshot-id>` directly inside the session
+- every restore first creates a safety snapshot so the restore itself can be undone
 
-This keeps restore host-controlled while still making the workflow discoverable inside an ACP client.
+This keeps restore aligned with normal ACP user intent while still exposing explicit host APIs for editor integrations.
+
+### Slash Command Architecture
+
+ACP-local slash commands are now implemented as modular command definitions under `src/acp/slash-commands/`.
+
+The current shape is:
+
+- a shared registry for registration and lookup
+- one module per built-in command
+- a shared execution context built from `ACPSession`
+- unknown-command fallback retained in `ACPSession`
+
+This keeps command metadata, dispatch, and lifecycle behavior aligned across `session/new`, `session/load`, and snapshot-enabled session attachment.
 
 ## Suggested Implementation Order
 
