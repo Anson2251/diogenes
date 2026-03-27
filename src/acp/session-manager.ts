@@ -50,7 +50,6 @@ export class SessionManager {
         }
 
         this.sessions.set(sessionId, session);
-        session.emitAvailableCommandsUpdate();
         return session;
     }
 

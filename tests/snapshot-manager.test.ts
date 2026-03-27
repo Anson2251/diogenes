@@ -355,6 +355,8 @@ describe("SessionSnapshotManager", () => {
 
             const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
 
+            await new Promise((resolve) => setTimeout(resolve, 20));
+
             expect(
                 notifications.some(
                     (item) => item.params?.update?.sessionUpdate === "available_commands_update"
@@ -368,7 +370,14 @@ describe("SessionSnapshotManager", () => {
                 method: "session/prompt",
                 params: {
                     sessionId,
-                    prompt: [{ type: "text", text: "/snapshot manual-checkpoint" }],
+                    prompt: [
+                        { type: "text", text: "/snapshot manual-checkpoint" },
+                        {
+                            type: "resource_link",
+                            uri: "file:///tmp/example.txt",
+                            name: "example.txt",
+                        },
+                    ],
                 },
             });
 

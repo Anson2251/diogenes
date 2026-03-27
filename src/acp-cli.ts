@@ -8,7 +8,8 @@ import { PassThrough, Writable } from "stream";
 import * as yaml from "yaml";
 import { startACPServer } from "./index";
 import type { DiogenesConfig } from "./types";
-import { ensureDiogenesAppDirsSync, findDefaultConfigFileSync } from "./utils/app-paths";
+import { resolveDiogenesAppPaths } from "./utils/app-paths";
+import { ensureDefaultConfigFileSync } from "./utils/config-bootstrap";
 
 interface ACPCLIOptions {
     apiKey?: string;
@@ -146,8 +147,8 @@ function mergeConfig(
 }
 
 function createConfig(options: ACPCLIOptions): DiogenesConfig {
-    const appPaths = ensureDiogenesAppDirsSync();
-    const configPath = findDefaultConfigFileSync() || undefined;
+    const appPaths = resolveDiogenesAppPaths();
+    const configPath = ensureDefaultConfigFileSync();
     const fileConfig = configPath ? loadConfig(configPath) : {};
 
     const envConfig: Partial<DiogenesConfig> = {};

@@ -806,11 +806,12 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     }
 
     private async tryHandleSlashCommand(prompt: PromptBlock[], turn: number): Promise<TaskRunResult | null> {
-        if (prompt.length !== 1 || prompt[0]?.type !== "text") {
+        const commandBlock = prompt.find((block) => block.type === "text" && block.text.trim().startsWith("/"));
+        if (!commandBlock || commandBlock.type !== "text") {
             return null;
         }
 
-        const text = prompt[0].text.trim();
+        const text = commandBlock.text.trim();
         if (!text.startsWith("/")) {
             return null;
         }

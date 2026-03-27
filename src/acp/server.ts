@@ -48,10 +48,21 @@ export class ACPServer {
                     );
                 case "session/new":
                     this.ensureInitialized(message.id ?? null);
-                    return this.success(
-                        message.id ?? null,
-                        await this.handleNewSession(message.params as NewSessionParams),
-                    );
+                    {
+                        const session = await this.handleNewSession(message.params as NewSessionParams);
+                        const response = this.success(
+                            message.id ?? null,
+                            {
+                                sessionId: session.sessionId,
+                                metadata: session.getMetadata(),
+                                availableCommands: session.getAvailableCommands(),
+                            },
+                        );
+                        setTimeout(() => {
+                            session.emitAvailableCommandsUpdate();
+                        }, 0);
+                        return response;
+                    }
                 case "session/prompt":
                     this.ensureInitialized(message.id ?? null);
                     if (this.options.respond) {
@@ -127,11 +138,7 @@ export class ACPServer {
             throw new ACPServerError(-32602, "session/new requires an absolute cwd");
         }
 
-        const session = await this.sessionManager.createSession(params.cwd);
-        return {
-            sessionId: session.sessionId,
-            metadata: session.getMetadata(),
-        };
+        return this.sessionManager.createSession(params.cwd);
     }
 
     private async handlePrompt(params: PromptSessionParams | undefined) {

@@ -63,6 +63,10 @@ export {
     findDefaultConfigFileSync,
     getDefaultSessionsStorageRoot as getDefaultSessionsStorageRootFromAppPaths,
 } from "./utils/app-paths";
+export {
+    ensureDefaultConfigFileSync,
+    getManagedDefaultConfigPathSync,
+} from "./utils/config-bootstrap";
 export type {
     ResticClientOptions,
     ResticCommandOptions,

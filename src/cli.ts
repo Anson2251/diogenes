@@ -15,7 +15,8 @@ import * as path from "path";
 import * as yaml from "yaml"
 import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
 import { parseSocraticToolInput } from "./utils/socratic-parser";
-import { ensureDiogenesAppDirsSync, findDefaultConfigFileSync, resolveDiogenesAppPaths } from "./utils/app-paths";
+import { resolveDiogenesAppPaths } from "./utils/app-paths";
+import { ensureDefaultConfigFileSync } from "./utils/config-bootstrap";
 
 // ANSI color codes for terminal output
 const colors = {
@@ -304,8 +305,8 @@ function getApiKey(options: CLIOptions): string | undefined {
  * Create Diogenes configuration from CLI options
  */
 function createConfig(options: CLIOptions): DiogenesConfig {
-    const appPaths = ensureDiogenesAppDirsSync();
-    const configPath = findDefaultConfigFileSync() || undefined;
+    const appPaths = resolveDiogenesAppPaths();
+    const configPath = ensureDefaultConfigFileSync();
     const fileConfig = configPath ? loadConfig(configPath) : {};
 
     const envConfig: Partial<DiogenesConfig> = {};

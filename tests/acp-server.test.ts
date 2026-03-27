@@ -71,7 +71,60 @@ describe("ACPServer", () => {
 
         expect(initialize && "result" in initialize && initialize.result.protocolVersion).toBe(1);
         expect(sessionNew && "result" in sessionNew && sessionNew.result.sessionId).toBeTypeOf("string");
+        expect(sessionNew && "result" in sessionNew ? sessionNew.result.availableCommands : null).toEqual([]);
         expect(notifications).toHaveLength(0);
+    });
+
+    it("returns availableCommands in session/new when snapshot commands are enabled", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-new-commands-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [path.join(process.cwd(), "tests/fixtures/fake-restic.cjs")],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+            });
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+
+            expect(sessionNew && "result" in sessionNew ? sessionNew.result.availableCommands : null).toEqual([
+                {
+                    name: "snapshot",
+                    description: "Create a defensive session snapshot",
+                    input: { hint: "optional label for the snapshot" },
+                },
+            ]);
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     it("streams session updates during prompt execution", async () => {
@@ -1101,6 +1154,55 @@ describe("ACPServer", () => {
         expect(promptResponse?.result?.stopReason).toBe("end_turn");
         expect(finalReply).toBeDefined();
         expect(toolCallChunk).toBeUndefined();
+    });
+
+    it("advertises available slash commands after session/new returns", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-slash-order-"));
+        const originalHome = process.env.HOME;
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const notifications: Array<{ method: string; params: any }> = [];
+
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.HOME = root;
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+
+            expect(sessionNew && "result" in sessionNew ? sessionNew.result.sessionId : null).toBeTypeOf("string");
+            expect(notifications).toEqual([]);
+
+            await waitFor(() => notifications.find(
+                (item) => item.params?.update?.sessionUpdate === "available_commands_update",
+            ));
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     it("supports cancellation for an active prompt turn", async () => {
