@@ -529,4 +529,73 @@ describe("SessionSnapshotManager", () => {
             delete process.env.FAKE_RESTIC_LOG;
         }
     });
+
+    it("preserves gitignored files and directories during snapshot restore", async () => {
+        const fixture = await createFixture();
+        const diogenes = createDiogenes({
+            security: {
+                workspaceRoot: fixture.workspaceDir,
+            },
+        });
+        const workspace = diogenes.getWorkspaceManager();
+        const manager = new SessionSnapshotManager({
+            sessionId: "session-gitignore-preserve",
+            cwd: fixture.workspaceDir,
+            config: {
+                enabled: true,
+                includeDiogenesState: false,
+                autoBeforePrompt: true,
+                storageRoot: fixture.storageRoot,
+                resticBinary: process.execPath,
+                resticBinaryArgs: [fixture.fixturePath],
+                timeoutMs: 5_000,
+            },
+            stateProvider: {
+                getWorkspaceManager: () => workspace,
+                getMessageHistory: () => [],
+                getCreatedAt: () => "2026-03-26T00:00:00.000Z",
+                getUpdatedAt: () => "2026-03-26T00:01:00.000Z",
+            },
+        });
+
+        // Create additional gitignored files that should be preserved
+        await fs.writeFile(path.join(fixture.workspaceDir, "secret.txt"), "original-secret\n", "utf8");
+        await fs.mkdir(path.join(fixture.workspaceDir, "ignored-dir"), { recursive: true });
+        await fs.writeFile(path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"), "original-hidden\n", "utf8");
+
+        process.env.FAKE_RESTIC_LOG = fixture.logPath;
+        process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(fixture.workspaceDir);
+        process.env.FAKE_RESTIC_RESTORE_HELLO = "restored from snapshot\n";
+        try {
+            await manager.initialize();
+            const snapshot = await manager.createSnapshot({
+                trigger: "system_manual",
+                turn: 1,
+                label: "gitignore-test",
+            });
+
+            // Mutate non-gitignored file
+            await fs.writeFile(path.join(fixture.workspaceDir, "hello.txt"), "mutated\n", "utf8");
+
+            // Mutate gitignored file (should be preserved during restore)
+            await fs.writeFile(path.join(fixture.workspaceDir, "secret.txt"), "modified-secret\n", "utf8");
+            await fs.writeFile(path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"), "modified-hidden\n", "utf8");
+
+            await manager.restoreSnapshot({ snapshotId: snapshot.snapshotId });
+
+            // Non-gitignored file should be restored
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe("restored from snapshot\n");
+
+            // Gitignored files should be preserved (not restored, not deleted)
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "secret.txt"), "utf8")).toBe("modified-secret\n");
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"), "utf8")).toBe("modified-hidden\n");
+
+            // Gitignored directory should still exist
+            await expect(fs.access(path.join(fixture.workspaceDir, "ignored-dir"))).resolves.toBeUndefined();
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;
+            delete process.env.FAKE_RESTIC_RESTORE_HELLO;
+        }
+    });
 });

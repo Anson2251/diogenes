@@ -369,14 +369,30 @@ export class SessionSnapshotManager implements SnapshotManager {
         await fs.mkdir(rollbackDir, { recursive: true });
 
         const currentEntries = await fs.readdir(this.options.cwd);
+
+        // Identify gitignored entries to preserve them during restore
+        const gitignoredEntries = new Set<string>();
+        for (const entry of currentEntries) {
+            const entryPath = path.join(this.options.cwd, entry);
+            if (await this.isGitIgnored(entryPath)) {
+                gitignoredEntries.add(entry);
+            }
+        }
+
+        // Filter out gitignored entries from deletion
+        const entriesToReplace = currentEntries.filter((entry) => !gitignoredEntries.has(entry));
+
         try {
-            await Promise.all(currentEntries.map((entry) => fs.cp(
+            // Only backup entries that will be replaced (non-gitignored)
+            await Promise.all(entriesToReplace.map((entry) => fs.cp(
                 path.join(this.options.cwd, entry),
                 path.join(rollbackDir, entry),
                 { recursive: true, force: true },
             )));
 
-            await Promise.all(currentEntries.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+            // Only delete entries that will be replaced (non-gitignored)
+            // Gitignored entries are preserved
+            await Promise.all(entriesToReplace.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
 
             const restoredEntries = await fs.readdir(restoredRoot);
             await Promise.all(restoredEntries.map((entry) => fs.cp(
@@ -387,8 +403,10 @@ export class SessionSnapshotManager implements SnapshotManager {
 
             await afterWorkspaceRestore?.();
         } catch (error) {
+            // During rollback, also preserve gitignored entries
             const currentWorkspaceEntries = await fs.readdir(this.options.cwd).catch(() => []);
-            await Promise.all(currentWorkspaceEntries.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+            const entriesToClean = currentWorkspaceEntries.filter((entry) => !gitignoredEntries.has(entry));
+            await Promise.all(entriesToClean.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
 
             const rollbackEntries = await fs.readdir(rollbackDir).catch(() => []);
             await Promise.all(rollbackEntries.map((entry) => fs.cp(
