@@ -7,6 +7,7 @@ import type { SnapshotManager } from "../snapshot/manager";
 import type { SnapshotStateProvider, SnapshotStateRestorer } from "../snapshot/state-serializer";
 import type { PersistedDiogenesState } from "../snapshot/types";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
+import { createBaseSlashCommandRegistry, createSnapshotSlashCommands, type MarkdownSection, type ParsedSlashCommand, type SlashCommandContext } from "./slash-commands";
 import type { PromptBlock } from "./types";
 import type { AvailableCommand, SessionLifecycleState, SessionMetadata, StoredSessionMetadata } from "./types";
 
@@ -27,48 +28,6 @@ interface RestorePersistedStateOptions {
     persist?: boolean;
     emitPlanUpdate?: boolean;
     preserveTimestamps?: boolean;
-}
-
-interface ParsedSlashCommand {
-    name: string;
-    argumentsText: string;
-    commandText: string;
-    promptText: string;
-}
-
-interface SlashCommandDefinition {
-    command: AvailableCommand;
-    aliases?: string[];
-    skipAutoBeforePromptSnapshot?: boolean;
-    execute: (parsed: ParsedSlashCommand, turn: number) => Promise<TaskRunResult>;
-}
-
-interface MarkdownSection {
-    title: string;
-    paragraphs?: string[];
-    bullets?: string[];
-}
-
-class SlashCommandRegistry {
-    private readonly definitions = new Map<string, SlashCommandDefinition>();
-    private readonly aliases = new Map<string, string>();
-
-    register(definition: SlashCommandDefinition): void {
-        this.definitions.set(definition.command.name, definition);
-
-        for (const alias of definition.aliases ?? []) {
-            this.aliases.set(alias, definition.command.name);
-        }
-    }
-
-    list(): SlashCommandDefinition[] {
-        return Array.from(this.definitions.values());
-    }
-
-    find(name: string): SlashCommandDefinition | undefined {
-        const canonicalName = this.aliases.get(name) ?? name;
-        return this.definitions.get(canonicalName);
-    }
 }
 
 class SessionResourceRegistry {
@@ -568,7 +527,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     private readonly diogenes: ReturnType<typeof createDiogenes>;
     private readonly maxIterations: number | undefined;
     private readonly resources = new SessionResourceRegistry();
-    private readonly slashCommands = new SlashCommandRegistry();
+    private readonly slashCommands = createBaseSlashCommandRegistry();
     private messageHistory: ConversationMessage[] = [];
     private currentMessageHistory: ConversationMessage[] = [];
     private lifecycleState: SessionLifecycleState = "active";
@@ -619,7 +578,6 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 interaction: { enabled: false },
             },
         });
-        this.registerBaseSlashCommands();
     }
 
     getUpdatedAt(): string {
@@ -736,7 +694,11 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return updates;
     }
 
-    getHydratedStateMeta(): Record<string, unknown> {
+    getHydratedStateMeta(): {
+        loadedDirectories: string[];
+        loadedFiles: Array<{ path: string; ranges: Array<{ start: number; end: number }> }>;
+        notepad: string[];
+    } {
         const workspace = this.diogenes.getWorkspaceManager();
         const fileWorkspace = workspace.getFileWorkspace();
 
@@ -825,7 +787,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.registerResource({
             dispose: () => undefined,
         });
-        this.registerSnapshotSlashCommands();
+        this.slashCommands.registerAll(createSnapshotSlashCommands());
         this.scheduleMetadataPersist();
     }
 
@@ -1124,7 +1086,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
         const definition = this.slashCommands.find(parsed.name);
         if (definition) {
-            return definition.execute(parsed, turn);
+            return definition.execute(this.createSlashCommandContext(), parsed, turn);
         }
 
         return this.handleUnknownSlashCommand(parsed);
@@ -1166,199 +1128,6 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return definition?.skipAutoBeforePromptSnapshot ?? true;
     }
 
-    private async handleHelpSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
-        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
-            const definitions = this.slashCommands.list();
-            const requestedName = parsed.argumentsText.replace(/^\//, "").trim().toLowerCase();
-            const matchedDefinition = requestedName.length > 0
-                ? this.slashCommands.find(requestedName)
-                : undefined;
-
-            const summary = matchedDefinition
-                ? this.formatHelpForCommand(matchedDefinition)
-                : this.formatHelpSummary(definitions);
-
-            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
-        });
-    }
-
-    private async handleSessionSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
-        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
-            const metadata = this.getMetadata();
-            const hydratedState = this.getHydratedStateMeta();
-            const loadedDirectories = Array.isArray(hydratedState.loadedDirectories) ? hydratedState.loadedDirectories.length : 0;
-            const loadedFiles = Array.isArray(hydratedState.loadedFiles) ? hydratedState.loadedFiles.length : 0;
-            const notepadLines = Array.isArray(hydratedState.notepad) ? hydratedState.notepad.length : 0;
-            const todoItems = this.diogenes.getWorkspaceManager().getTodoWorkspace().items.length;
-            const summary = this.renderMarkdownSections([
-                {
-                    title: "Session",
-                    bullets: [
-                        `**Session ID:** \`${metadata.sessionId}\``,
-                        `**State:** ${metadata.state}${metadata.hasActiveRun ? " (busy)" : ""}`,
-                        `**Workspace:** \`${metadata.cwd}\``,
-                        `**Title:** ${metadata.title || "(none)"}`,
-                        `**Description:** ${metadata.description || "(none)"}`,
-                        `**Snapshots:** ${this.snapshotManager ? "enabled" : "disabled"}`,
-                        `**Updated At:** ${metadata.updatedAt}`,
-                    ],
-                },
-                {
-                    title: "Workspace State",
-                    bullets: [
-                        `**Loaded Directories:** ${loadedDirectories}`,
-                        `**Loaded Files:** ${loadedFiles}`,
-                        `**Todo Items:** ${todoItems}`,
-                        `**Notepad Lines:** ${notepadLines}`,
-                    ],
-                },
-            ]);
-
-            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
-        });
-    }
-
-    private async handleSnapshotSlashCommand(parsed: ParsedSlashCommand, turn: number): Promise<TaskRunResult> {
-        if (!this.snapshotManager) {
-            throw new Error("Session snapshots are not enabled");
-        }
-        const snapshotManager = this.snapshotManager;
-
-        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
-            const label = parsed.argumentsText || undefined;
-
-            const result = await snapshotManager.createSnapshot({
-                trigger: "system_manual",
-                turn,
-                label,
-                reason: "Created via ACP slash command",
-            });
-            const summary = this.renderMarkdownSections([
-                {
-                    title: "Snapshot Created",
-                    bullets: [
-                        `**Snapshot ID:** \`${result.snapshotId}\``,
-                        `**Label:** ${label ? `\`${label}\`` : "(none)"}`,
-                        `**Trigger:** ${result.trigger}`,
-                        `**Created At:** ${result.createdAt}`,
-                    ],
-                },
-            ]);
-            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
-        });
-    }
-
-    private async handleRestoreSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
-        if (!this.snapshotManager) {
-            throw new Error("Session snapshots are not enabled");
-        }
-        const snapshotManager = this.snapshotManager;
-
-        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
-            const snapshotId = parsed.argumentsText || undefined;
-            const snapshots = await snapshotManager.listSnapshots();
-            const hasSnapshot = snapshotId
-                ? snapshots.some((snapshot) => snapshot.snapshotId === snapshotId)
-                : false;
-            const recentSnapshotIds = snapshots.slice(0, 5).map((snapshot) => snapshot.snapshotId);
-
-            if (!snapshotId) {
-                const summary = this.renderMarkdownSections([
-                    {
-                        title: "Restore",
-                        paragraphs: ["Choose a snapshot id, then run `/restore <snapshot-id>`."],
-                        bullets: [
-                            `Current session: \`${this.sessionId}\``,
-                            recentSnapshotIds.length > 0
-                                ? `Available snapshot ids: ${recentSnapshotIds.map((id) => `\`${id}\``).join(", ")}`
-                                : "No session snapshots are available yet.",
-                        ],
-                    },
-                ]);
-                return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, false);
-            }
-
-            if (!hasSnapshot) {
-                const summary = this.renderMarkdownSections([
-                    {
-                        title: "Restore",
-                        bullets: [
-                            `No snapshot with id \`${snapshotId}\` was found for this session.`,
-                            recentSnapshotIds.length > 0
-                                ? `Recent snapshot ids: ${recentSnapshotIds.map((id) => `\`${id}\``).join(", ")}`
-                                : "No session snapshots are available yet.",
-                        ],
-                    },
-                ]);
-                return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, false);
-            }
-
-            const restoreResult = await this.restoreSnapshotWithNotifications(snapshotId, { emitAgentMessage: false });
-
-            const summary = this.renderMarkdownSections([
-                {
-                    title: "Restore",
-                    paragraphs: ["Snapshot restore completed."],
-                    bullets: [
-                        `**Session ID:** \`${this.sessionId}\``,
-                        `**Snapshot ID:** \`${snapshotId}\``,
-                        restoreResult.safetySnapshotId
-                            ? `**Safety Snapshot:** \`${restoreResult.safetySnapshotId}\``
-                            : "**Safety Snapshot:** (not available)",
-                    ],
-                },
-                recentSnapshotIds.length > 0
-                    ? {
-                        title: "Recent Snapshot IDs",
-                        bullets: recentSnapshotIds.map((id) => `\`${id}\``),
-                    }
-                    : {
-                        title: "Recent Snapshot IDs",
-                        bullets: ["No session snapshots are available yet."],
-                    },
-            ]);
-
-            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
-        });
-    }
-
-    private async handleSnapshotsSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
-        if (!this.snapshotManager) {
-            throw new Error("Session snapshots are not enabled");
-        }
-        const snapshotManager = this.snapshotManager;
-
-        return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
-            const requestedLimit = Number.parseInt(parsed.argumentsText, 10);
-            const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 5;
-            const snapshots = await snapshotManager.listSnapshots();
-            const recentSnapshots = snapshots.slice(0, limit);
-            const summary = recentSnapshots.length === 0
-                ? this.renderMarkdownSections([
-                    {
-                        title: "Snapshots",
-                        bullets: ["No session snapshots have been created yet."],
-                    },
-                ])
-                : [
-                    this.renderMarkdownSections([
-                        {
-                            title: "Snapshots",
-                            paragraphs: [`Showing ${recentSnapshots.length} of ${snapshots.length} snapshot(s).`],
-                        },
-                    ]),
-                    "",
-                    "| Snapshot ID | Trigger | Label | Created At |",
-                    "| --- | --- | --- | --- |",
-                    ...recentSnapshots.map(
-                        (snapshot) => `| \`${snapshot.snapshotId}\` | ${snapshot.trigger} | ${snapshot.label || "(no label)"} | ${snapshot.createdAt} |`,
-                    ),
-                ].join("\n");
-
-            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, true);
-        });
-    }
-
     private async handleUnknownSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
         return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
             const availableCommands = this.getAvailableCommands().map((command) => `/${command.name}`);
@@ -1385,6 +1154,33 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
             return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, false);
         });
+    }
+
+    private createSlashCommandContext(): SlashCommandContext {
+        return {
+            sessionId: this.sessionId,
+            snapshotEnabled: this.snapshotManager !== null,
+            getAvailableCommands: () => this.getAvailableCommands(),
+            getMetadata: () => this.getMetadata(),
+            getHydratedStateMeta: () => this.getHydratedStateMeta(),
+            getTodoItemCount: () => this.diogenes.getWorkspaceManager().getTodoWorkspace().items.length,
+            listSnapshots: async () => this.listSnapshots(),
+            createSnapshot: async ({ turn, label, reason }) => {
+                if (!this.snapshotManager) {
+                    throw new Error("Session snapshots are not enabled");
+                }
+                return this.snapshotManager.createSnapshot({
+                    trigger: "system_manual",
+                    turn,
+                    label,
+                    reason,
+                });
+            },
+            restoreSnapshotWithNotifications: async (snapshotId) => this.restoreSnapshotWithNotifications(snapshotId, { emitAgentMessage: false }),
+            runLocalCommand: async (parsed, action) => this.runLocalSlashCommand(parsed, action),
+            completeLocalCommand: (historyBeforeCommand, userMessage, summary, success) => this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, success),
+            renderMarkdownSections: (sections) => this.renderMarkdownSections(sections),
+        };
     }
 
     private async runLocalSlashCommand(
@@ -1464,142 +1260,6 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 sessionUpdate: "agent_message_chunk",
                 content: createTextContent(content),
             },
-        });
-    }
-
-    private formatHelpSummary(definitions: SlashCommandDefinition[]): string {
-        return this.renderMarkdownSections([
-            {
-                title: "ACP Slash Commands",
-                paragraphs: ["Available local ACP slash commands:"],
-                bullets: definitions.map((definition) => {
-                    const example = definition.command._meta?.diogenes?.example;
-                    return `\`/${definition.command.name}\` - ${definition.command.description}${example ? ` (example: \`${example}\`)` : ""}`;
-                }),
-            },
-            {
-                title: "Usage",
-                bullets: ["Use `/help <command>` for command-specific details."],
-            },
-        ]);
-    }
-
-    private formatHelpForCommand(definition: SlashCommandDefinition): string {
-        const invocations = definition.command._meta?.diogenes?.invocations ?? [`/${definition.command.name}`];
-        const example = definition.command._meta?.diogenes?.example;
-        const bullets = [`**Invocations:** ${invocations.map((invocation) => `\`${invocation}\``).join(", ")}`];
-
-        if (definition.command.input?.hint) {
-            bullets.push(`**Input:** ${definition.command.input.hint}`);
-        }
-        if (example) {
-            bullets.push(`**Example:** \`${example}\``);
-        }
-
-        return this.renderMarkdownSections([
-            {
-                title: `\`/${definition.command.name}\``,
-                paragraphs: [definition.command.description],
-                bullets,
-            },
-        ]);
-    }
-
-    private registerBaseSlashCommands(): void {
-        this.slashCommands.register({
-            command: {
-                name: "help",
-                description: "List available ACP slash commands",
-                input: {
-                    hint: "optional command name, for example snapshot",
-                },
-                _meta: {
-                    diogenes: {
-                        kind: "help",
-                        invocations: ["/help", "/commands"],
-                        example: "/help snapshot",
-                    },
-                },
-            },
-            aliases: ["commands"],
-            skipAutoBeforePromptSnapshot: true,
-            execute: (parsed) => this.handleHelpSlashCommand(parsed),
-        });
-
-        this.slashCommands.register({
-            command: {
-                name: "session",
-                description: "Show current session status and metadata",
-                _meta: {
-                    diogenes: {
-                        kind: "session_status",
-                        invocations: ["/session", "/status"],
-                        example: "/session",
-                    },
-                },
-            },
-            aliases: ["status"],
-            skipAutoBeforePromptSnapshot: true,
-            execute: (parsed) => this.handleSessionSlashCommand(parsed),
-        });
-    }
-
-    private registerSnapshotSlashCommands(): void {
-        this.slashCommands.register({
-            command: {
-                name: "restore",
-                description: "Restore a session snapshot",
-                input: {
-                    hint: "snapshot id, for example snapshot-123",
-                },
-                _meta: {
-                    diogenes: {
-                        kind: "snapshot_restore",
-                        invocations: ["/restore"],
-                        example: "/restore snapshot-123",
-                    },
-                },
-            },
-            skipAutoBeforePromptSnapshot: true,
-            execute: (parsed) => this.handleRestoreSlashCommand(parsed),
-        });
-
-        this.slashCommands.register({
-            command: {
-                name: "snapshots",
-                description: "List recent session snapshots",
-                input: {
-                    hint: "optional limit, for example 5",
-                },
-                _meta: {
-                    diogenes: {
-                        kind: "snapshot_list",
-                        invocations: ["/snapshots"],
-                        example: "/snapshots 5",
-                    },
-                },
-            },
-            skipAutoBeforePromptSnapshot: true,
-            execute: (parsed) => this.handleSnapshotsSlashCommand(parsed),
-        });
-
-        this.slashCommands.register({
-            command: {
-                name: "snapshot",
-                description: "Create a defensive session snapshot",
-                input: {
-                    hint: "optional label for the snapshot",
-                },
-                _meta: {
-                    diogenes: {
-                        kind: "session_snapshot",
-                        invocations: ["/snapshot"],
-                        example: "/snapshot before-risky-edit",
-                    },
-                },
-            },
-            skipAutoBeforePromptSnapshot: true,
-            execute: (parsed, turn) => this.handleSnapshotSlashCommand(parsed, turn),
         });
     }
 
