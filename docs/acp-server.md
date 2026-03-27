@@ -4,23 +4,29 @@ This document explains how to run Diogenes as an ACP server.
 
 ## Status
 
-The current ACP server is an MVP.
+The current ACP server is functional and session-aware, but still evolving.
 
 Supported:
 
 - stdio transport
 - `initialize`
 - `session/new`
+- `session/load`
+- `session/list`
 - `session/prompt`
 - `session/cancel`
-- in-memory sessions
+- persisted managed sessions
 - streamed `session/update` notifications
+- session-scoped snapshots
+- host-controlled `session/restore`
+- Diogenes ACP session extension methods
+- discoverable ACP-local slash commands
 
 Not yet supported:
 
-- durable session restore
-- `session/load`
 - protocol-native user elicitation
+- non-stdio transports
+- richer ACP-facing docs for all extension payloads
 
 ## Recommended Entry Point
 
@@ -128,14 +134,91 @@ That means:
 - workspace state is isolated per session
 - loaded files and directories persist across prompts within the same session
 - todos and notepad state persist across prompts within the same session
+- snapshots belong to the session, not to a global snapshot registry
 
-Sessions are currently in-memory only.
+Sessions are persisted under the managed Diogenes local data directory.
+
+That persistence stores session metadata and lightweight session state so a later ACP server process can load the session again.
 
 If the ACP server process exits:
 
-- sessions are lost
-- session IDs are no longer valid
-- the client must create a new session
+- live in-memory sessions end
+- persisted sessions can be listed and loaded again through ACP
+- empty sessions with no messages are deleted when they are disposed
+
+## Session Management Surface
+
+The ACP server currently supports these standard session methods:
+
+- `session/new`
+- `session/load`
+- `session/list`
+- `session/prompt`
+- `session/cancel`
+- `session/restore`
+
+Diogenes also exposes session management extensions for richer host tooling:
+
+- `_diogenes/session/get`
+- `_diogenes/session/snapshots`
+- `_diogenes/session/dispose`
+- `_diogenes/session/delete`
+- `_diogenes/session/prune`
+- `_diogenes/session/restore`
+
+Custom capability metadata is advertised under `_meta.diogenes` during `initialize`.
+
+## Slash Commands
+
+ACP sessions expose a small set of local slash commands through `available_commands_update` and persisted `availableCommands` metadata.
+
+Current built-ins:
+
+- `/help`
+- `/session`
+- `/restore`
+- `/snapshots`
+- `/snapshot`
+
+Notes:
+
+- `/commands` is an alias for `/help`
+- `/status` is an alias for `/session`
+- these commands are handled locally inside the ACP session layer and do not require an LLM round-trip
+- command-specific metadata lives in `availableCommands[*]._meta.diogenes`
+
+Example metadata shape:
+
+```json
+{
+  "name": "snapshot",
+  "description": "Create a defensive session snapshot",
+  "input": { "hint": "optional label for the snapshot" },
+  "_meta": {
+    "diogenes": {
+      "kind": "session_snapshot",
+      "invocations": ["/snapshot"],
+      "example": "/snapshot before-risky-edit"
+    }
+  }
+}
+```
+
+## Snapshot Restore Semantics
+
+Snapshot restore remains host-controlled.
+
+That means:
+
+- the ACP host may call `session/restore` or `_diogenes/session/restore`
+- the LLM cannot invoke restore directly
+- the `/restore` slash command only explains the correct host call and helps the client/operator find snapshot ids
+
+Restore lifecycle notifications are emitted through `session/update` using:
+
+- `snapshot_restore_started`
+- `snapshot_restore_completed`
+- `snapshot_restore_failed`
 
 ## Tool Behavior In ACP Sessions
 

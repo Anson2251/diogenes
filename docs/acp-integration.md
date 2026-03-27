@@ -8,6 +8,19 @@ Date: 2026-03-26
 
 Diogenes is a good candidate for ACP integration.
 
+Much of the original integration plan is now implemented in `src/acp/`.
+
+Current implemented ACP shape includes:
+
+- stdio JSON-RPC transport
+- `initialize`, `session/new`, `session/load`, `session/list`, `session/prompt`, `session/cancel`, and `session/restore`
+- managed persisted sessions with replayable ACP-visible history
+- session-scoped snapshots and host-controlled restore
+- Diogenes-specific ACP extension methods under `_diogenes/session/*`
+- discoverable ACP-local slash commands exposed through `available_commands_update`
+
+This document is still useful as architectural background, but `docs/acp-server.md` is the better reference for current behavior.
+
 The project already has most of the runtime pieces needed for an ACP agent:
 
 - a task execution loop
@@ -333,17 +346,23 @@ The session should survive a bad turn when possible.
 
 The first ACP implementation should be intentionally narrow.
 
+Most of this MVP has now been exceeded.
+
 ### In Scope
 
 - stdio transport
 - JSON-RPC handling
 - initialize flow
 - session creation
+- session loading and listing
 - session prompt execution
 - session updates for progress and completion
 - cancellation
 - existing non-interactive tools
 - OpenAI-compatible LLM backend using the current client
+- session-scoped snapshots
+- host-controlled snapshot restore
+- persisted managed session state
 
 ### Out Of Scope
 
@@ -352,6 +371,55 @@ The first ACP implementation should be intentionally narrow.
 - multi-agent orchestration
 - rich client-side workspace mirroring
 - protocol support for every possible future Diogenes runtime event
+
+## Current ACP-Specific Behaviors
+
+### Session Persistence
+
+ACP sessions are no longer in-memory only.
+
+The current model is:
+
+- session metadata is persisted under managed local storage
+- lightweight state is persisted separately from snapshots
+- `session/load` reconstructs a live session and replays ACP-visible history through `session/update`
+- empty sessions with no messages are deleted on close instead of being kept as empty persisted records
+
+### Session Extensions
+
+In addition to standard ACP methods, Diogenes exposes host-oriented extensions:
+
+- `_diogenes/session/get`
+- `_diogenes/session/snapshots`
+- `_diogenes/session/dispose`
+- `_diogenes/session/delete`
+- `_diogenes/session/prune`
+- `_diogenes/session/restore`
+
+Custom capability advertisement and custom payload fields live under `_meta.diogenes`.
+
+### Local Slash Commands
+
+ACP sessions also expose local slash commands for host/session features that should not depend on an LLM turn.
+
+Current commands:
+
+- `/help` and `/commands`
+- `/session` and `/status`
+- `/restore`
+- `/snapshots`
+- `/snapshot`
+
+These commands are advertised through `available_commands_update` notifications and persisted `availableCommands` metadata.
+
+### Restore Model
+
+Restore is intentionally split across two layers:
+
+- the ACP host performs actual restore by calling `session/restore` or `_diogenes/session/restore`
+- the ACP session layer may explain restore through `/restore`, but cannot perform it directly
+
+This keeps restore host-controlled while still making the workflow discoverable inside an ACP client.
 
 ## Suggested Implementation Order
 

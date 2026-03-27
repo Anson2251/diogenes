@@ -2,6 +2,47 @@
 
 Date: 2026-03-26
 
+## Implementation Status
+
+This document started as a design note. Most of the core model described here is now implemented.
+
+Implemented since this draft:
+
+- explicit session lifecycle states in `ACPSession`
+- `SessionManager` ownership of live sessions
+- explicit close/dispose vs persisted delete semantics
+- managed on-disk session persistence with `metadata.json` and `state.json`
+- `session/load` replay of ACP-visible conversation history
+- `session/list` with cursor pagination
+- session-owned snapshot infrastructure and host-controlled restore
+- pruning of broken or orphaned persisted sessions
+- ACP-local slash command discovery via `availableCommands`
+
+Important behavior updates relative to the original draft:
+
+- sessions are no longer in-memory only
+- snapshots are session-scoped child data, not first-class persisted objects
+- restore exists, but remains host-controlled
+- empty sessions with no messages are deleted when closed
+
+Use this document as architecture background, but treat `src/acp/` and `docs/acp-server.md` as the source of truth for current ACP behavior.
+
+## Current Local Slash Commands
+
+The ACP session layer now exposes a small local slash command surface for commands that should not require normal LLM execution.
+
+Current commands:
+
+- `/help` and `/commands`
+- `/session` and `/status`
+- `/restore`
+- `/snapshots`
+- `/snapshot`
+
+These commands are session-local features that are advertised through `available_commands_update` notifications and persisted in stored session metadata as `availableCommands`.
+
+Custom command metadata is carried under `_meta.diogenes` so ACP clients can render richer UX without relying on undocumented top-level fields.
+
 ## Goal
 
 Strengthen ACP session lifecycle management so session-scoped features such as snapshots, temporary resources, and future restore flows have a correct owner and cleanup boundary.
