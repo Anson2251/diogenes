@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
+import { formatToolResults } from "../src/utils/tool-parser";
 
 function createStreamingResponse(chunks: string[]): Response {
     const encoder = new TextEncoder();
@@ -310,6 +311,151 @@ describe("ACPServer", () => {
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("replays ACP tool updates when loading a stored session", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-tools-"));
+        const originalHome = process.env.HOME;
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-tools-workspace-"));
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+
+            const toolResultText = formatToolResults(
+                [
+                    {
+                        tool: "file.edit",
+                        params: {
+                            path: "sample.ts",
+                            edits: [],
+                        },
+                    },
+                ],
+                [
+                    {
+                        success: true,
+                        data: {
+                            applied: [{ mode: "replace", matchedRange: [1, 1], newRange: [1, 1] }],
+                            errors: [],
+                            file_state: { total_lines: 2 },
+                        },
+                    },
+                ],
+                () => [
+                    "Updated sample.ts: 1 edit applied, 2 total lines",
+                    "replace lines 1-1 -> 1-1",
+                ].join("\n"),
+            );
+
+            const session = (firstServer as any).sessionManager.getSession(sessionId);
+            await session.restorePersistedState({
+                version: 1,
+                kind: "diogenes_state",
+                sessionId,
+                cwd: workspaceDir,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                messageHistory: [
+                    { role: "user", content: "update the greeting" },
+                    {
+                        role: "assistant",
+                        content: [
+                            "I will edit the file.",
+                            "```tool-call",
+                            "[{\"tool\":\"file.edit\",\"params\":{\"path\":\"sample.ts\",\"edits\":[{\"mode\":\"replace\",\"anchor\":{\"start\":{\"line\":1,\"text\":\"const greeting = 'hello';\"}},\"content\":[\"const greeting = 'hello there';\"]}]}}]",
+                            "```",
+                        ].join("\n"),
+                    },
+                    { role: "user", content: toolResultText },
+                ],
+                workspace: {
+                    loadedDirectories: [],
+                    loadedFiles: [],
+                    todo: [],
+                    notepad: [],
+                },
+            });
+
+            const notifications: Array<{ method: string; params: any }> = [];
+            const secondServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: workspaceDir, mcpServers: [] },
+            });
+
+            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "tool_call",
+                            title: "Editing file sample.ts",
+                            kind: "edit",
+                            status: "completed",
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "tool_call_update",
+                            status: "completed",
+                            content: expect.arrayContaining([
+                                expect.objectContaining({
+                                    type: "content",
+                                    content: expect.objectContaining({
+                                        type: "text",
+                                        text: [
+                                            "Updated sample.ts: 1 edit applied, 2 total lines",
+                                            "replace lines 1-1 -> 1-1",
+                                        ].join("\n"),
+                                    }),
+                                }),
+                            ]),
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
         }
     });
 

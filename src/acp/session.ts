@@ -1,12 +1,13 @@
 import * as path from "path";
 import { createDiogenes } from "../create-diogenes";
-import type { TodoItem, ToolResult } from "../types";
+import type { TodoItem, ToolCall, ToolResult } from "../types";
 import type { DiogenesConfig } from "../types";
 import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "../runtime/task-runner";
 import type { SnapshotManager } from "../snapshot/manager";
 import type { SnapshotStateProvider, SnapshotStateRestorer } from "../snapshot/state-serializer";
 import type { PersistedDiogenesState } from "../snapshot/types";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
+import { parseToolCalls } from "../utils/tool-parser";
 import { createBaseSlashCommandRegistry, createSnapshotSlashCommands, type MarkdownSection, type ParsedSlashCommand, type SlashCommandContext } from "./slash-commands";
 import type { PromptBlock } from "./types";
 import type { AvailableCommand, SessionLifecycleState, SessionMetadata, StoredSessionMetadata } from "./types";
@@ -221,6 +222,7 @@ function extractPromptText(content: string): string | null {
 function isInternalUserMessage(content: string): boolean {
     return content.startsWith("[SYSTEM]\n")
         || content.startsWith("[CONTEXT WARNING]\n")
+        || content.startsWith("===== TOOL RESULTS")
         || content.startsWith("Results from tools:")
         || content.startsWith("Tool results:")
         || content.startsWith("Tool execution results:")
@@ -264,6 +266,91 @@ function promptBlocksToText(prompt: PromptBlock[]): string {
     }
 
     return parts.join("\n\n").trim();
+}
+
+interface ReplayToolResultSection {
+    toolName: string;
+    status: "completed" | "failed";
+    text: string;
+}
+
+interface ReplayToolResultBundle {
+    sections: ReplayToolResultSection[];
+    fallbackText: string | null;
+}
+
+function parseReplayToolResultSections(content: string): ReplayToolResultSection[] {
+    const normalized = content.replace(/\r\n/g, "\n").trim();
+    if (!normalized.startsWith("===== TOOL RESULTS")) {
+        return [];
+    }
+
+    const body = normalized.slice("===== TOOL RESULTS".length).trim();
+    if (body.length === 0) {
+        return [];
+    }
+
+    const sections = body.split(/\n\n(?=\[(?:OK|FAIL)\]\s+)/g);
+    const parsed: ReplayToolResultSection[] = [];
+
+    for (const section of sections) {
+        const trimmed = section.trim();
+        const match = trimmed.match(/^\[(OK|FAIL)\]\s+([^\n]+)$/m);
+        if (!match) {
+            continue;
+        }
+
+        parsed.push({
+            toolName: match[2].trim(),
+            status: match[1] === "OK" ? "completed" : "failed",
+            text: trimmed,
+        });
+    }
+
+    return parsed;
+}
+
+function parseReplayToolResultBundle(content: string | null | undefined): ReplayToolResultBundle {
+    if (!content || !content.startsWith("===== TOOL RESULTS")) {
+        return { sections: [], fallbackText: null };
+    }
+
+    return {
+        sections: parseReplayToolResultSections(content),
+        fallbackText: content.replace(/^===== TOOL RESULTS\s*/, "").trim(),
+    };
+}
+
+function createACPToolCallUpdate(
+    toolCallId: string,
+    toolCall: ToolCall,
+    status: "pending" | "completed" | "failed" | "in_progress",
+    locations: Array<{ path: string }> | undefined,
+) {
+    return {
+        sessionUpdate: "tool_call",
+        toolCallId,
+        title: createToolCallTitle(toolCall.tool, toolCall.params),
+        kind: mapToolKind(toolCall.tool),
+        status,
+        rawInput: toolCall.params,
+        locations,
+    };
+}
+
+function createACPToolCallResultUpdate(
+    toolCallId: string,
+    status: "completed" | "failed" | "in_progress",
+    content?: any,
+    rawOutput?: ToolResult,
+) {
+    return {
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        status,
+        ...(content ? { content } : {}),
+        ...(rawOutput ? { rawOutput } : {}),
+    };
 }
 
 function mapToolKind(toolName: string): string {
@@ -665,7 +752,8 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     getReplayUpdates(): Array<Record<string, unknown>> {
         const updates: Array<Record<string, unknown>> = [];
 
-        for (const message of this.messageHistory) {
+        for (let index = 0; index < this.messageHistory.length; index += 1) {
+            const message = this.messageHistory[index];
             if (message.role === "user") {
                 const promptText = extractPromptText(message.content);
                 const visibleText = promptText ?? message.content;
@@ -681,13 +769,52 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             }
 
             const visibleText = getVisibleAssistantText(message.content).trim();
-            if (visibleText.length === 0) {
+            if (visibleText.length > 0) {
+                updates.push({
+                    sessionUpdate: "agent_message_chunk",
+                    content: createTextContent(visibleText),
+                });
+            }
+
+            const parsedToolCalls = parseToolCalls(message.content);
+            if (!parsedToolCalls.success || !parsedToolCalls.toolCalls || parsedToolCalls.toolCalls.length === 0) {
                 continue;
             }
 
-            updates.push({
-                sessionUpdate: "agent_message_chunk",
-                content: createTextContent(visibleText),
+            const replayedToolCalls = parsedToolCalls.toolCalls;
+            const nextUserMessage = index + 1 < this.messageHistory.length && this.messageHistory[index + 1]?.role === "user"
+                ? this.messageHistory[index + 1].content
+                : null;
+            const replayResultBundle = parseReplayToolResultBundle(nextUserMessage);
+
+            replayedToolCalls.forEach((toolCall, toolIndex) => {
+                const replayToolCallId = `replay-${index}-${toolIndex}`;
+                updates.push(createACPToolCallUpdate(
+                    replayToolCallId,
+                    toolCall,
+                    "completed",
+                    this.extractLocations(toolCall.params),
+                ));
+
+                const matchingSection = replayResultBundle.sections[toolIndex]
+                    ?? (
+                        replayedToolCalls.length === 1 && replayResultBundle.fallbackText
+                            ? {
+                                toolName: toolCall.tool,
+                                status: "completed" as const,
+                                text: replayResultBundle.fallbackText,
+                            }
+                            : undefined
+                    );
+                if (!matchingSection) {
+                    return;
+                }
+
+                updates.push(createACPToolCallResultUpdate(
+                    replayToolCallId,
+                    matchingSection.status,
+                    createToolResultContent(matchingSection.text),
+                ));
             });
         }
 
@@ -1430,15 +1557,12 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             event.toolCalls.forEach((toolCall, index) => {
                 this.notify("session/update", {
                     sessionId: this.sessionId,
-                    update: {
-                        sessionUpdate: "tool_call",
-                        toolCallId: this.registerToolCallId(event.iteration, index),
-                        title: createToolCallTitle(toolCall.tool, toolCall.params),
-                        kind: mapToolKind(toolCall.tool),
-                        status: "pending",
-                        rawInput: toolCall.params,
-                        locations: this.extractLocations(toolCall.params),
-                    },
+                    update: createACPToolCallUpdate(
+                        this.registerToolCallId(event.iteration, index),
+                        toolCall,
+                        "pending",
+                        this.extractLocations(toolCall.params),
+                    ),
                 });
             });
             return;
@@ -1447,11 +1571,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         if (event.type === "tool.execution.started") {
             this.notify("session/update", {
                 sessionId: this.sessionId,
-                update: {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: this.getToolCallId(event.iteration, event.index),
-                    status: "in_progress",
-                },
+                update: createACPToolCallResultUpdate(
+                    this.getToolCallId(event.iteration, event.index),
+                    "in_progress",
+                ),
             });
             return;
         }
@@ -1464,18 +1587,17 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
             this.notify("session/update", {
                 sessionId: this.sessionId,
-                update: {
-                    sessionUpdate: "tool_call_update",
-                    toolCallId: this.getToolCallId(event.iteration, event.index),
-                    status: event.result.success ? "completed" : "failed",
-                    content: createACPToolResultContent(
+                update: createACPToolCallResultUpdate(
+                    this.getToolCallId(event.iteration, event.index),
+                    event.result.success ? "completed" : "failed",
+                    createACPToolResultContent(
                         event.toolCall.tool,
                         event.toolCall.params,
                         event.result,
                         formattedACPText,
                     ),
-                    rawOutput: event.result,
-                },
+                    event.result,
+                ),
             });
 
             if (
@@ -1514,15 +1636,14 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 const skippedResult = createSkippedToolResult(event.warning);
                 this.notify("session/update", {
                     sessionId: this.sessionId,
-                    update: {
-                        sessionUpdate: "tool_call_update",
-                        toolCallId: this.getToolCallId(event.iteration, index),
-                        status: "failed",
-                        content: createToolResultContent(
+                    update: createACPToolCallResultUpdate(
+                        this.getToolCallId(event.iteration, index),
+                        "failed",
+                        createToolResultContent(
                             formatToolResultFallback("tool", skippedResult),
                         ),
-                        rawOutput: skippedResult,
-                    },
+                        skippedResult,
+                    ),
                 });
             }
 
