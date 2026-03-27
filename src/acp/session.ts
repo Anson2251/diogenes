@@ -32,6 +32,7 @@ interface RestorePersistedStateOptions {
 
 interface EmitSessionUpdateOptions {
     record?: boolean;
+    notify?: boolean;
 }
 
 class SessionResourceRegistry {
@@ -886,15 +887,24 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             this.acpReplayLog.push(cloneACPUpdate(update));
         }
 
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update,
-        });
+        if (options.notify ?? true) {
+            this.notify("session/update", {
+                sessionId: this.sessionId,
+                update,
+            });
+        }
     }
 
     private async recordSessionUpdateAndPersist(update: Record<string, unknown>): Promise<void> {
         this.emitSessionUpdate(update);
         await this.persistMetadata();
+    }
+
+    private recordUserPromptForReplay(promptText: string): void {
+        this.emitSessionUpdate({
+            sessionUpdate: "user_message_chunk",
+            content: createTextContent(promptText),
+        }, { notify: false });
     }
 
     emitAvailableCommandsUpdate(options: EmitSessionUpdateOptions = {}): void {
@@ -944,8 +954,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.ensurePromptAllowed();
         const turn = ++this.promptTurn;
         const parsedSlashCommand = this.parseSlashCommand(prompt);
+        const promptText = promptBlocksToText(prompt);
 
         this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
+        this.recordUserPromptForReplay(promptText);
 
         if (
             this.snapshotManager
@@ -963,7 +975,6 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             return slashCommandResult;
         }
 
-        const promptText = promptBlocksToText(prompt);
         const runId = `${this.sessionId}:run:${Date.now()}`;
         this.activeRun = {
             id: runId,

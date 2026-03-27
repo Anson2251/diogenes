@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../src/acp/session-manager";
 import { ACPSession } from "../src/acp/session";
 import { OpenAIClient } from "../src/llm/openai-client";
@@ -20,8 +20,22 @@ function createSession(): ACPSession {
 }
 
 describe("ACP session lifecycle", () => {
+    const sandboxHomes: string[] = [];
+    let originalHome: string | undefined;
+
+    beforeEach(() => {
+        originalHome = process.env.HOME;
+        const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "session-manager-home-"));
+        sandboxHomes.push(sandboxHome);
+        process.env.HOME = sandboxHome;
+    });
+
     afterEach(() => {
         vi.restoreAllMocks();
+        process.env.HOME = originalHome;
+        for (const sandboxHome of sandboxHomes.splice(0, sandboxHomes.length)) {
+            fs.rmSync(sandboxHome, { recursive: true, force: true });
+        }
     });
 
     it("starts active and exposes metadata", () => {

@@ -68,8 +68,22 @@ export class ACPServer {
                     }
                 case "session/load":
                     this.ensureInitialized(message.id ?? null);
-                    await this.handleLoadSession(message.params as LoadSessionParams | undefined);
-                    return this.success(message.id ?? null, null);
+                    {
+                        const session = await this.handleLoadSession(message.params as LoadSessionParams | undefined);
+                        const response = this.success(message.id ?? null, null);
+                        setTimeout(() => {
+                            for (const update of session.getReplayUpdates()) {
+                                this.options.notify?.("session/update", {
+                                    sessionId: session.sessionId,
+                                    update,
+                                });
+                            }
+
+                            session.emitHydratedStateUpdates({ record: false });
+                            session.emitAvailableCommandsUpdate({ record: false });
+                        }, 0);
+                        return response;
+                    }
                 case "session/prompt":
                     this.ensureInitialized(message.id ?? null);
                     if (this.options.respond) {
@@ -213,7 +227,7 @@ export class ACPServer {
         return this.sessionManager.createSession(params.cwd);
     }
 
-    private async handleLoadSession(params: LoadSessionParams | undefined): Promise<void> {
+    private async handleLoadSession(params: LoadSessionParams | undefined) {
         if (!params?.sessionId) {
             throw new ACPServerError(-32602, "session/load requires sessionId");
         }
@@ -221,15 +235,7 @@ export class ACPServer {
             throw new ACPServerError(-32602, "session/load requires an absolute cwd");
         }
 
-        const session = await this.sessionManager.loadSession(params);
-        for (const update of session.getReplayUpdates()) {
-            this.options.notify?.("session/update", {
-                sessionId: session.sessionId,
-                update,
-            });
-        }
-
-        session.emitHydratedStateUpdates({ record: false });
+        return this.sessionManager.loadSession(params);
     }
 
     private async handlePrompt(params: PromptSessionParams | undefined) {

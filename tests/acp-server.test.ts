@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { PassThrough } from "stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
@@ -44,8 +44,22 @@ async function waitFor<T>(getValue: () => T | undefined, timeoutMs = 200): Promi
 }
 
 describe("ACPServer", () => {
+    const sandboxHomes: string[] = [];
+    let originalHome: string | undefined;
+
+    beforeEach(() => {
+        originalHome = process.env.HOME;
+        const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "acp-server-home-"));
+        sandboxHomes.push(sandboxHome);
+        process.env.HOME = sandboxHome;
+    });
+
     afterEach(() => {
         vi.restoreAllMocks();
+        process.env.HOME = originalHome;
+        for (const sandboxHome of sandboxHomes.splice(0, sandboxHomes.length)) {
+            fs.rmSync(sandboxHome, { recursive: true, force: true });
+        }
     });
 
     it("handles initialize and session/new", async () => {
@@ -230,6 +244,9 @@ describe("ACPServer", () => {
                 method: "session/load",
                 params: { sessionId, cwd: process.cwd(), mcpServers: [] },
             });
+            await waitFor(() => notifications.find(
+                (item) => item.params?.update?.sessionUpdate === "available_commands_update",
+            ));
             const slashPrompt = await secondServer.handleMessage({
                 jsonrpc: "2.0",
                 id: 5,
@@ -318,6 +335,88 @@ describe("ACPServer", () => {
                     }),
                 }),
             ]));
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("returns session/load response before replay notifications", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-order-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+
+            const session = (firstServer as any).sessionManager.getSession(sessionId);
+            await session.restorePersistedState({
+                version: 1,
+                kind: "diogenes_state",
+                sessionId,
+                cwd: process.cwd(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                acpReplayLog: [
+                    {
+                        sessionUpdate: "user_message_chunk",
+                        content: { type: "text", text: "hello" },
+                    },
+                ],
+                messageHistory: [{ role: "user", content: "hello" }],
+                workspace: {
+                    loadedDirectories: [],
+                    loadedFiles: [],
+                    todo: [],
+                    notepad: [],
+                },
+            });
+
+            const events: string[] = [];
+            const secondServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+                notify: () => {
+                    events.push("notify");
+                },
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: process.cwd(), mcpServers: [] },
+            });
+            events.push("response");
+
+            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(events).toEqual(["response"]);
+
+            await waitFor(() => events.includes("notify"));
+            expect(events[0]).toBe("response");
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
@@ -482,6 +581,9 @@ describe("ACPServer", () => {
             });
 
             expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            await waitFor(() => notifications.find(
+                (item) => item.params?.update?.sessionUpdate === "tool_call",
+            ));
             expect(notifications).toEqual(expect.arrayContaining([
                 expect.objectContaining({
                     method: "session/update",
@@ -525,6 +627,200 @@ describe("ACPServer", () => {
                 }),
             ]));
         } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
+
+    it("replays the original user prompt after loading a persisted session", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-user-prompt-"));
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-user-prompt-workspace-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
+            content: "```tool-call\n[{\"tool\":\"task.end\",\"params\":{\"title\":\"Done\",\"description\":\"Finished\",\"reason\":\"done\",\"summary\":\"Finished\"}}]\n```",
+            reasoning: "",
+        });
+
+        try {
+            const firstServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Please inspect hello.txt" }],
+                },
+            });
+
+            const notifications: Array<{ method: string; params: any }> = [];
+            const secondServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 5,
+                method: "session/load",
+                params: { sessionId, cwd: workspaceDir, mcpServers: [] },
+            });
+
+            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            await waitFor(() => notifications.find(
+                (item) => item.params?.update?.sessionUpdate === "user_message_chunk",
+            ));
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "user_message_chunk",
+                            content: { type: "text", text: "Please inspect hello.txt" },
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
+
+    it("re-announces snapshot slash commands after loading a snapshot-enabled session", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-load-snapshot-commands-"));
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-load-snapshot-workspace-"));
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const originalHome = process.env.HOME;
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+            });
+
+            await firstServer.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+
+            const notifications: Array<{ method: string; params: any }> = [];
+            const secondServer = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await secondServer.handleMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: 1 } });
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: workspaceDir, mcpServers: [] },
+            });
+            const promptResponse = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 5,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/snapshot after-load" }],
+                },
+            });
+
+            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(promptResponse && "result" in promptResponse ? promptResponse.result.stopReason : null).toBe("end_turn");
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "available_commands_update",
+                            availableCommands: expect.arrayContaining([
+                                expect.objectContaining({ name: "snapshot" }),
+                                expect.objectContaining({ name: "snapshots" }),
+                                expect.objectContaining({ name: "restore" }),
+                            ]),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("## Snapshot Created"),
+                            }),
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
             fs.rmSync(workspaceDir, { recursive: true, force: true });
