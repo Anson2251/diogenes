@@ -1,0 +1,116 @@
+import * as fs from "fs/promises";
+import * as os from "os";
+import * as path from "path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { handleSessionCommand, parseArgs } from "../src/cli";
+import * as appPaths from "../src/utils/app-paths";
+
+describe("CLI session commands", () => {
+    const tempDirs: string[] = [];
+
+    afterEach(async () => {
+        vi.restoreAllMocks();
+        await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
+        tempDirs.length = 0;
+    });
+
+    it("parses session list commands", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "sessions", "list"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "sessions.list" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses session delete commands", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "sessions", "delete", "session-123"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "sessions.delete", sessionId: "session-123" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("prints stored session metadata for sessions get", async () => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-sessions-"));
+        tempDirs.push(root);
+
+        const configDir = path.join(root, "config");
+        const dataDir = path.join(root, "data");
+        const sessionsDir = path.join(dataDir, "sessions");
+        const sessionId = "session-123";
+        const sessionDir = path.join(sessionsDir, sessionId);
+
+        await fs.mkdir(sessionDir, { recursive: true });
+        await fs.mkdir(path.join(sessionDir, "snapshots"), { recursive: true });
+        await fs.writeFile(
+            path.join(sessionDir, "metadata.json"),
+            JSON.stringify({
+                sessionId,
+                cwd: "/tmp/workspace",
+                createdAt: "2026-03-27T00:00:00.000Z",
+                updatedAt: "2026-03-27T00:00:01.000Z",
+                title: "Session title",
+                description: "Session description",
+                state: "active",
+                hasActiveRun: false,
+                availableCommands: [],
+                snapshotEnabled: true,
+            }, null, 2),
+            "utf8",
+        );
+        await fs.writeFile(
+            path.join(sessionDir, "snapshots", "manifest.json"),
+            JSON.stringify({
+                sessionId,
+                cwd: "/tmp/workspace",
+                createdAt: "2026-03-27T00:00:00.000Z",
+                snapshots: [
+                    {
+                        snapshotId: "snapshot-1",
+                        createdAt: "2026-03-27T00:00:02.000Z",
+                        trigger: "system_manual",
+                        turn: 1,
+                        label: "before risky change",
+                        resticSnapshotId: "restic-1",
+                    },
+                ],
+            }, null, 2),
+            "utf8",
+        );
+
+        vi.spyOn(appPaths, "resolveDiogenesAppPaths").mockReturnValue({
+            homeDir: root,
+            configDir,
+            dataDir,
+            sessionsDir,
+            defaultConfigCandidates: [],
+        });
+
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        await handleSessionCommand({ kind: "sessions.get", sessionId });
+
+        const output = JSON.parse(consoleSpy.mock.calls[0]?.[0] ?? "{}");
+
+        expect(output).toEqual({
+            metadata: expect.objectContaining({ sessionId, title: "Session title" }),
+            snapshots: [
+                {
+                    snapshotId: "snapshot-1",
+                    createdAt: "2026-03-27T00:00:02.000Z",
+                    trigger: "system_manual",
+                    turn: 1,
+                    label: "before risky change",
+                },
+            ],
+        });
+    });
+});

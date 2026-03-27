@@ -17,6 +17,7 @@ import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
 import { parseSocraticToolInput } from "./utils/socratic-parser";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
 import { ensureDefaultConfigFileSync } from "./utils/config-bootstrap";
+import { SessionStore } from "./acp/session-store";
 
 // ANSI color codes for terminal output
 const colors = {
@@ -44,16 +45,60 @@ interface CLIOptions {
     clearAppData?: boolean;
 }
 
+type CLICommand =
+    | { kind: "run" }
+    | { kind: "sessions.list" }
+    | { kind: "sessions.get"; sessionId: string }
+    | { kind: "sessions.snapshots"; sessionId: string }
+    | { kind: "sessions.delete"; sessionId: string };
+
 type QuestionFn = (prompt: string) => Promise<string>;
 const CLEAR_APP_DATA_PASSPHRASE = "delete diogenes data";
 
 /**
  * Parse command-line arguments
  */
-function parseArgs(): { task?: string; options: CLIOptions } {
+function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand } {
     const args = process.argv.slice(2);
     const options: CLIOptions = {};
     let task: string | undefined;
+    let command: CLICommand = { kind: "run" };
+
+    if (args[0] === "sessions") {
+        const subcommand = args[1];
+        const sessionId = args[2];
+
+        switch (subcommand) {
+            case "list":
+                return { options, command: { kind: "sessions.list" } };
+            case "get":
+                if (!sessionId) {
+                    console.error(`${colors.red}Error: sessions get requires <sessionId>${colors.reset}`);
+                    showHelp();
+                    process.exit(1);
+                }
+                return { options, command: { kind: "sessions.get", sessionId } };
+            case "snapshots":
+                if (!sessionId) {
+                    console.error(`${colors.red}Error: sessions snapshots requires <sessionId>${colors.reset}`);
+                    showHelp();
+                    process.exit(1);
+                }
+                return { options, command: { kind: "sessions.snapshots", sessionId } };
+            case "delete":
+            case "remove":
+                if (!sessionId) {
+                    console.error(`${colors.red}Error: sessions ${subcommand} requires <sessionId>${colors.reset}`);
+                    showHelp();
+                    process.exit(1);
+                }
+                return { options, command: { kind: "sessions.delete", sessionId } };
+            default:
+                console.error(`${colors.red}Error: Unknown sessions command ${subcommand || ""}${colors.reset}`);
+                showHelp();
+                process.exit(1);
+        }
+    }
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -101,7 +146,7 @@ function parseArgs(): { task?: string; options: CLIOptions } {
         }
     }
 
-    return { task, options };
+    return { task, options, command };
 }
 
 /**
@@ -115,6 +160,10 @@ ${colors.bright}Usage:${colors.reset}
   diogenes [options] <task>
   diogenes [options] --interactive
   diogenes [options] --acp
+  diogenes sessions list
+  diogenes sessions get <sessionId>
+  diogenes sessions snapshots <sessionId>
+  diogenes sessions delete <sessionId>
   diogenes --help
 
 ${colors.bright}Options:${colors.reset}
@@ -140,6 +189,9 @@ ${colors.bright}Examples:${colors.reset}
   diogenes --socratic "Debug my code"
   diogenes --acp                Start ACP stdio server
   diogenes --clear-app-data     Delete Diogenes config and local storage
+  diogenes sessions list        List managed session metadata
+  diogenes sessions get <id>    Show one managed session and its snapshots
+  diogenes sessions delete <id> Delete managed session artifacts
 
 ${colors.bright}Environment Variables:${colors.reset}
   OPENAI_API_KEY                OpenAI API key (alternative to --api-key)
@@ -815,7 +867,7 @@ ${colors.bright}Multiline:${colors.reset}
  * Main CLI entry point
  */
 async function main(): Promise<void> {
-    const { task, options } = parseArgs();
+    const { task, options, command } = parseArgs();
 
     if (options.clearAppData) {
         const rl = readline.createInterface({
@@ -842,6 +894,11 @@ async function main(): Promise<void> {
             output: process.stdout,
             error: process.stderr,
         });
+        return;
+    }
+
+    if (command.kind !== "run") {
+        await handleSessionCommand(command);
         return;
     }
 
@@ -914,6 +971,41 @@ async function main(): Promise<void> {
     }
 }
 
+async function handleSessionCommand(command: Exclude<CLICommand, { kind: "run" }>): Promise<void> {
+    const sessionStore = new SessionStore();
+
+    switch (command.kind) {
+        case "sessions.list": {
+            const sessions = await sessionStore.listMetadata();
+            console.log(JSON.stringify({ sessions }, null, 2));
+            return;
+        }
+        case "sessions.get": {
+            const metadata = await sessionStore.readMetadata(command.sessionId);
+            if (!metadata) {
+                throw new Error(`Unknown managed session: ${command.sessionId}`);
+            }
+            const snapshots = await sessionStore.listSnapshots(command.sessionId);
+            console.log(JSON.stringify({ metadata, snapshots }, null, 2));
+            return;
+        }
+        case "sessions.snapshots": {
+            const metadata = await sessionStore.readMetadata(command.sessionId);
+            if (!metadata) {
+                throw new Error(`Unknown managed session: ${command.sessionId}`);
+            }
+            const snapshots = await sessionStore.listSnapshots(command.sessionId);
+            console.log(JSON.stringify({ sessionId: command.sessionId, snapshots }, null, 2));
+            return;
+        }
+        case "sessions.delete": {
+            await sessionStore.removeSession(command.sessionId);
+            console.log(JSON.stringify({ deleted: true, sessionId: command.sessionId }, null, 2));
+            return;
+        }
+    }
+}
+
 // Run the CLI
 if (require.main === module) {
     main().catch((error) => {
@@ -922,4 +1014,4 @@ if (require.main === module) {
     });
 }
 
-export { main, parseArgs, clearDiogenesAppData, CLEAR_APP_DATA_PASSPHRASE }; // For testing
+export { main, parseArgs, clearDiogenesAppData, handleSessionCommand, CLEAR_APP_DATA_PASSPHRASE }; // For testing

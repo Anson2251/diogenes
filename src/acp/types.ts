@@ -53,6 +53,10 @@ export interface NewSessionParams {
     mcpServers?: any[];
 }
 
+export interface LoadSessionParams extends NewSessionParams {
+    sessionId: string;
+}
+
 export interface PromptTextBlock {
     type: "text";
     text: string;
@@ -97,6 +101,29 @@ export interface RestoreSessionParams {
     snapshotId: string;
 }
 
+export interface ListSessionsParams {
+    cwd?: string;
+    cursor?: string;
+}
+
+export interface DiogenesGetSessionParams {
+    sessionId: string;
+    includeSnapshots?: boolean;
+}
+
+export interface DiogenesDisposeSessionParams {
+    sessionId: string;
+}
+
+export interface DiogenesDeleteSessionParams {
+    sessionId: string;
+}
+
+export interface DiogenesRestoreSessionParams {
+    sessionId: string;
+    snapshotId: string;
+}
+
 export interface SessionUpdateNotification {
     sessionId: string;
     update: any;
@@ -110,6 +137,28 @@ export interface AvailableCommand {
     name: string;
     description: string;
     input?: AvailableCommandInput;
+}
+
+export type SessionLifecycleState =
+    | "active"
+    | "running"
+    | "disposing"
+    | "disposed";
+
+export interface SessionMetadata {
+    sessionId: string;
+    cwd: string;
+    createdAt: string;
+    updatedAt: string;
+    title: string | null;
+    description: string | null;
+    state: SessionLifecycleState;
+    hasActiveRun: boolean;
+}
+
+export interface StoredSessionMetadata extends SessionMetadata {
+    availableCommands: AvailableCommand[];
+    snapshotEnabled: boolean;
 }
 
 export interface ACPPromptResult {

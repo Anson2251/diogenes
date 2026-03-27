@@ -1,3 +1,6 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "../src/acp/session-manager";
 import { ACPSession } from "../src/acp/session";
@@ -87,7 +90,7 @@ describe("ACP session lifecycle", () => {
             title: "Implement restore flow",
             description: "Adds session restore support and rehydrates snapshot state.",
         }));
-        expect(notifications.some((item) => item.params?.update?.sessionUpdate === "session_metadata_update")).toBe(true);
+        expect(notifications.some((item) => item.params?.update?.sessionUpdate === "session_info_update")).toBe(true);
     });
 
     it("disposes idle sessions and clears registered resources", async () => {
@@ -149,13 +152,56 @@ describe("SessionManager lifecycle", () => {
         vi.restoreAllMocks();
     });
 
-    it("disposeSession removes the session from the manager", async () => {
+    it("closeSession removes the live session from the manager without deleting persisted state", async () => {
         const manager = new SessionManager({ llm: { apiKey: "test-key", model: "gpt-4" } }, 5, () => {});
         const session = await manager.createSession(process.cwd());
 
         expect(manager.getSession(session.sessionId)).toBeDefined();
-        await expect(manager.disposeSession(session.sessionId)).resolves.toBe(true);
+        await expect(manager.closeSession(session.sessionId)).resolves.toBe(true);
         expect(manager.getSession(session.sessionId)).toBeUndefined();
+
+        const metadata = await (manager as any).sessionStore.readMetadata(session.sessionId);
+        expect(metadata).not.toBeNull();
+    });
+
+    it("deleteSession removes persisted session state", async () => {
+        const manager = new SessionManager({ llm: { apiKey: "test-key", model: "gpt-4" } }, 5, () => {});
+        const session = await manager.createSession(process.cwd());
+
+        await expect(manager.deleteSession(session.sessionId)).resolves.toBe(true);
+        expect(manager.getSession(session.sessionId)).toBeUndefined();
+        const metadata = await (manager as any).sessionStore.readMetadata(session.sessionId);
+        expect(metadata).toBeNull();
+    });
+
+    it("cleans up persisted session artifacts if snapshot initialization fails", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-manager-failure-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const manager = new SessionManager({
+                llm: { apiKey: "test-key", model: "gpt-4" },
+                security: {
+                    snapshot: {
+                        enabled: true,
+                        includeDiogenesState: true,
+                        autoBeforePrompt: true,
+                        storageRoot: path.join(root, "bad-storage"),
+                        resticBinary: path.join(root, "missing-restic"),
+                        resticBinaryArgs: [],
+                        timeoutMs: 100,
+                    },
+                },
+            }, 5, () => {});
+
+            await expect(manager.createSession(process.cwd())).rejects.toThrow();
+            const sessionsDir = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+            expect(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir) : []).toEqual([]);
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     it("disposeAllSessions cleans every session", async () => {
@@ -209,5 +255,118 @@ describe("ACPServer disposal", () => {
         });
 
         expect(response && "error" in response ? response.error.code : null).toBe(-32001);
+    });
+
+    it("lists and closes live sessions through ACP management methods", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-manager-acp-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+        const server = new ACPServer({
+            config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+        });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+        const listResponse = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/list",
+            params: {},
+        });
+        const getResponse = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 4,
+            method: "_diogenes/session/get",
+            params: { sessionId },
+        });
+        const disposeResponse = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 5,
+            method: "_diogenes/session/dispose",
+            params: { sessionId },
+        });
+
+        expect(listResponse && "result" in listResponse ? listResponse.result.sessions : []).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    sessionId,
+                    cwd: process.cwd(),
+                    _meta: expect.objectContaining({
+                        diogenes: expect.objectContaining({
+                            snapshotEnabled: false,
+                            liveSession: true,
+                        }),
+                    }),
+                }),
+            ]),
+        );
+        expect(getResponse && "result" in getResponse ? getResponse.result : null).toEqual(
+            expect.objectContaining({
+                session: expect.objectContaining({
+                    sessionId,
+                    cwd: process.cwd(),
+                    _meta: expect.objectContaining({
+                        diogenes: expect.objectContaining({
+                            liveSession: true,
+                            snapshotEnabled: false,
+                            availableCommands: [],
+                        }),
+                    }),
+                }),
+            }),
+        );
+        expect(disposeResponse && "result" in disposeResponse ? disposeResponse.result : null).toEqual({
+            disposed: true,
+            sessionId,
+        });
+        expect(fs.existsSync(path.join(root, "Library", "Application Support", "diogenes", "sessions", sessionId, "metadata.json"))).toBe(true);
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("deletes persisted sessions through ACP management methods", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-manager-acp-delete-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const server = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: process.cwd() } });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            const response = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "_diogenes/session/delete",
+                params: { sessionId },
+            });
+
+            expect(response && "result" in response ? response.result : null).toEqual({ deleted: true, sessionId });
+            expect(fs.existsSync(path.join(root, "Library", "Application Support", "diogenes", "sessions", sessionId))).toBe(false);
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 });

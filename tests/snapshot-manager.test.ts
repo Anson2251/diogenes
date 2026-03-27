@@ -105,7 +105,7 @@ describe("SessionSnapshotManager", () => {
             ]);
 
             const manifest = JSON.parse(
-                await fs.readFile(path.join(fixture.storageRoot, "session-1", "manifest.json"), "utf8"),
+                await fs.readFile(path.join(fixture.storageRoot, "session-1", "snapshots", "manifest.json"), "utf8"),
             );
             expect(manifest.snapshots).toHaveLength(1);
             expect(manifest.snapshots[0].diogenesStatePath).toContain(path.join("state", `${snapshot.snapshotId}.json`));
@@ -128,7 +128,7 @@ describe("SessionSnapshotManager", () => {
             expect(entries[1].args).toContain("workspace");
 
             await manager.cleanup();
-            await expect(fs.access(path.join(fixture.storageRoot, "session-1"))).rejects.toThrow();
+            await expect(fs.access(path.join(fixture.storageRoot, "session-1", "snapshots"))).rejects.toThrow();
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }
@@ -146,6 +146,11 @@ describe("SessionSnapshotManager", () => {
         await workspace.loadFile("hello.txt", 1, 1);
         workspace.setTodoItems([{ text: "before restore", state: "active" }]);
         workspace.setNotepadLines(["keep me"]);
+
+        const sessionState = {
+            title: "Before restore",
+            description: "Snapshot metadata",
+        };
 
         let restoredState: any = null;
         const manager = new SessionSnapshotManager({
@@ -165,6 +170,7 @@ describe("SessionSnapshotManager", () => {
                 getMessageHistory: () => [{ role: "assistant", content: "captured before restore" }],
                 getCreatedAt: () => "2026-03-26T00:00:00.000Z",
                 getUpdatedAt: () => "2026-03-26T00:01:00.000Z",
+                getSnapshotMetadata: () => sessionState,
             },
             stateRestorer: {
                 restorePersistedState: async (state) => {
@@ -190,6 +196,7 @@ describe("SessionSnapshotManager", () => {
             expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe("restored from snapshot\n");
             expect(restoredState).toEqual(expect.objectContaining({
                 kind: "diogenes_state",
+                metadata: sessionState,
                 messageHistory: [{ role: "assistant", content: "captured before restore" }],
             }));
             expect(restoredState.workspace.todo).toEqual([{ text: "before restore", state: "active" }]);
@@ -201,7 +208,55 @@ describe("SessionSnapshotManager", () => {
         }
     });
 
-    it("creates automatic snapshots before prompts and removes them on session disposal", async () => {
+    it("rolls back workspace changes if state restore fails", async () => {
+        const fixture = await createFixture();
+        const manager = new SessionSnapshotManager({
+            sessionId: "session-rollback",
+            cwd: fixture.workspaceDir,
+            config: {
+                enabled: true,
+                includeDiogenesState: true,
+                autoBeforePrompt: true,
+                storageRoot: fixture.storageRoot,
+                resticBinary: process.execPath,
+                resticBinaryArgs: [fixture.fixturePath],
+                timeoutMs: 5_000,
+            },
+            stateProvider: {
+                getWorkspaceManager: () => createDiogenes({ security: { workspaceRoot: fixture.workspaceDir } }).getWorkspaceManager(),
+                getMessageHistory: () => [],
+                getCreatedAt: () => "2026-03-26T00:00:00.000Z",
+                getUpdatedAt: () => "2026-03-26T00:01:00.000Z",
+            },
+            stateRestorer: {
+                restorePersistedState: async () => {
+                    throw new Error("rehydrate failed");
+                },
+            },
+        });
+
+        process.env.FAKE_RESTIC_LOG = fixture.logPath;
+        process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(fixture.workspaceDir);
+        process.env.FAKE_RESTIC_RESTORE_HELLO = "restored from snapshot\n";
+        try {
+            await manager.initialize();
+            const snapshot = await manager.createSnapshot({
+                trigger: "system_manual",
+                turn: 1,
+                label: "rollback-point",
+            });
+
+            await fs.writeFile(path.join(fixture.workspaceDir, "hello.txt"), "local mutation\n", "utf8");
+            await expect(manager.restoreSnapshot({ snapshotId: snapshot.snapshotId })).rejects.toThrow("rehydrate failed");
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe("local mutation\n");
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;
+            delete process.env.FAKE_RESTIC_RESTORE_HELLO;
+        }
+    });
+
+    it("creates automatic snapshots before prompts and keeps session snapshots after closing the live session", async () => {
         const fixture = await createFixture();
         const maliciousStorageRoot = path.join(fixture.rootDir, "Desktop");
         vi.spyOn(appPaths, "getDefaultSessionsStorageRoot").mockReturnValue(fixture.storageRoot);
@@ -235,7 +290,7 @@ describe("SessionSnapshotManager", () => {
             expect(session.sessionId).toMatch(/^[0-9a-f-]{36}$/i);
             await session.prompt([{ type: "text", text: "Take a snapshot first" }]);
 
-            const manifestPath = path.join(fixture.storageRoot, session.sessionId, "manifest.json");
+            const manifestPath = path.join(fixture.storageRoot, session.sessionId, "snapshots", "manifest.json");
             const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
             expect(manifest.snapshots).toHaveLength(1);
             expect(manifest.snapshots[0]).toEqual(
@@ -250,8 +305,8 @@ describe("SessionSnapshotManager", () => {
             expect(entries.map((entry) => entry.args[0])).toEqual(["init", "backup"]);
             await expect(fs.access(path.join(maliciousStorageRoot, session.sessionId))).rejects.toThrow();
 
-            await manager.disposeSession(session.sessionId);
-            await expect(fs.access(path.join(fixture.storageRoot, session.sessionId))).rejects.toThrow();
+            await manager.closeSession(session.sessionId);
+            await expect(fs.access(path.join(fixture.storageRoot, session.sessionId, "snapshots", "manifest.json"))).resolves.toBeUndefined();
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }
@@ -290,7 +345,7 @@ describe("SessionSnapshotManager", () => {
             expect((session as any).diogenes.getTool("snapshot.create")).toBeDefined();
             await session.prompt([{ type: "text", text: "Create a checkpoint" }]);
 
-            const manifestPath = path.join(fixture.storageRoot, session.sessionId, "manifest.json");
+            const manifestPath = path.join(fixture.storageRoot, session.sessionId, "snapshots", "manifest.json");
             const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
             expect(manifest.snapshots).toHaveLength(2);
             expect(manifest.snapshots[0].trigger).toBe("before_prompt");
@@ -391,7 +446,7 @@ describe("SessionSnapshotManager", () => {
             ).toBe(true);
 
             const manifest = JSON.parse(
-                await fs.readFile(path.join(fixture.storageRoot, sessionId, "manifest.json"), "utf8"),
+                await fs.readFile(path.join(fixture.storageRoot, sessionId, "snapshots", "manifest.json"), "utf8"),
             );
             expect(manifest.snapshots).toHaveLength(2);
             expect(manifest.snapshots[0]).toEqual(

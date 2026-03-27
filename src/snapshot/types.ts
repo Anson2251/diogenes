@@ -72,6 +72,10 @@ export interface PersistedDiogenesState {
     cwd: string;
     createdAt: string;
     updatedAt: string;
+    metadata?: {
+        title: string | null;
+        description: string | null;
+    };
     messageHistory: PersistedDiogenesMessage[];
     workspace: {
         loadedDirectories: string[];

@@ -8,31 +8,25 @@ import type { SnapshotStateProvider, SnapshotStateRestorer } from "../snapshot/s
 import type { PersistedDiogenesState } from "../snapshot/types";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
 import type { PromptBlock } from "./types";
-import type { AvailableCommand } from "./types";
+import type { AvailableCommand, SessionLifecycleState, SessionMetadata, StoredSessionMetadata } from "./types";
 
 export interface ACPNotificationSink {
     (method: string, params: any): void;
 }
 
-export type SessionLifecycleState =
-    | "active"
-    | "running"
-    | "disposing"
-    | "disposed";
-
-export interface SessionMetadata {
-    sessionId: string;
-    cwd: string;
-    createdAt: string;
-    updatedAt: string;
-    title: string | null;
-    description: string | null;
-    state: SessionLifecycleState;
-    hasActiveRun: boolean;
-}
-
 interface SessionOwnedResource {
     dispose(): Promise<void> | void;
+}
+
+export interface SessionPersistence {
+    writeMetadata(metadata: StoredSessionMetadata): Promise<void>;
+    writeState(sessionId: string, state: PersistedDiogenesState): Promise<void>;
+}
+
+interface RestorePersistedStateOptions {
+    persist?: boolean;
+    emitPlanUpdate?: boolean;
+    preserveTimestamps?: boolean;
 }
 
 class SessionResourceRegistry {
@@ -207,6 +201,30 @@ function getVisibleAssistantText(content: string): string {
     }
 
     return visibleText;
+}
+
+function extractPromptText(content: string): string | null {
+    const prefixes = ["========= TASK\n", "========= NEW TASK\n"];
+
+    for (const prefix of prefixes) {
+        if (!content.startsWith(prefix) || !content.endsWith("\n=========")) {
+            continue;
+        }
+
+        return content.slice(prefix.length, -"\n=========".length);
+    }
+
+    return null;
+}
+
+function isInternalUserMessage(content: string): boolean {
+    return content.startsWith("[SYSTEM]\n")
+        || content.startsWith("[CONTEXT WARNING]\n")
+        || content.startsWith("Results from tools:")
+        || content.startsWith("Tool results:")
+        || content.startsWith("Tool execution results:")
+        || content.includes("task.end")
+        || content.includes("No tool calls received");
 }
 
 function promptBlocksToText(prompt: PromptBlock[]): string {
@@ -517,6 +535,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     private description: string | null = null;
     private updatedAt: string;
     private disposePromise: Promise<void> | null = null;
+    private metadataWriteChain: Promise<void> = Promise.resolve();
     private activeRun: {
         id: string;
         cancelled: boolean;
@@ -533,13 +552,22 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         config: DiogenesConfig,
         maxIterations: number | undefined,
         notify: ACPNotificationSink,
+        private readonly persistence?: SessionPersistence,
+        options?: {
+            createdAt?: string;
+            updatedAt?: string;
+            title?: string | null;
+            description?: string | null;
+        },
     ) {
         this.sessionId = sessionId;
         this.cwd = path.resolve(cwd);
-        this.createdAt = new Date().toISOString();
-        this.updatedAt = this.createdAt;
+        this.createdAt = options?.createdAt ?? new Date().toISOString();
+        this.updatedAt = options?.updatedAt ?? this.createdAt;
         this.maxIterations = maxIterations;
         this.notify = notify;
+        this.title = options?.title ?? null;
+        this.description = options?.description ?? null;
         this.diogenes = createDiogenes({
             ...config,
             security: {
@@ -584,11 +612,135 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         };
     }
 
-    async restorePersistedState(state: PersistedDiogenesState): Promise<void> {
+    getStoredMetadata(): StoredSessionMetadata {
+        return {
+            ...this.getMetadata(),
+            availableCommands: this.getAvailableCommands(),
+            snapshotEnabled: this.snapshotManager !== null,
+        };
+    }
+
+    getPersistedState(): PersistedDiogenesState {
+        const workspace = this.diogenes.getWorkspaceManager();
+        const directoryWorkspace = workspace.getDirectoryWorkspace();
+        const fileWorkspace = workspace.getFileWorkspace();
+        const todoWorkspace = workspace.getTodoWorkspace();
+        const notepadWorkspace = workspace.getNotepadWorkspace();
+
+        return {
+            version: 1,
+            kind: "diogenes_state",
+            sessionId: this.sessionId,
+            cwd: this.cwd,
+            createdAt: this.createdAt,
+            updatedAt: this.updatedAt,
+            metadata: {
+                title: this.title,
+                description: this.description,
+            },
+            messageHistory: this.getMessageHistory().map((message) => ({
+                role: message.role,
+                content: message.content,
+            })),
+            workspace: {
+                loadedDirectories: Object.keys(directoryWorkspace),
+                loadedFiles: Object.values(fileWorkspace).map((entry) => ({
+                    path: entry.path,
+                    ranges: entry.ranges.map((range) => ({
+                        start: range.start,
+                        end: range.end,
+                    })),
+                })),
+                todo: todoWorkspace.items.map((item) => ({
+                    text: item.text,
+                    state: item.state,
+                })),
+                notepad: [...notepadWorkspace.lines],
+            },
+        };
+    }
+
+    getReplayUpdates(): Array<Record<string, unknown>> {
+        const updates: Array<Record<string, unknown>> = [];
+
+        for (const message of this.messageHistory) {
+            if (message.role === "user") {
+                const promptText = extractPromptText(message.content);
+                const visibleText = promptText ?? message.content;
+                if (isInternalUserMessage(visibleText)) {
+                    continue;
+                }
+
+                updates.push({
+                    sessionUpdate: "user_message_chunk",
+                    content: createTextContent(visibleText),
+                });
+                continue;
+            }
+
+            const visibleText = getVisibleAssistantText(message.content).trim();
+            if (visibleText.length === 0) {
+                continue;
+            }
+
+            updates.push({
+                sessionUpdate: "agent_message_chunk",
+                content: createTextContent(visibleText),
+            });
+        }
+
+        return updates;
+    }
+
+    getHydratedStateMeta(): Record<string, unknown> {
+        const workspace = this.diogenes.getWorkspaceManager();
+        const fileWorkspace = workspace.getFileWorkspace();
+
+        return {
+            loadedDirectories: Object.keys(workspace.getDirectoryWorkspace()),
+            loadedFiles: Object.values(fileWorkspace).map((entry) => ({
+                path: entry.path,
+                ranges: entry.ranges.map((range) => ({ start: range.start, end: range.end })),
+            })),
+            notepad: [...workspace.getNotepadWorkspace().lines],
+        };
+    }
+
+    getSnapshotMetadata(): { title: string | null; description: string | null } {
+        return {
+            title: this.title,
+            description: this.description,
+        };
+    }
+
+    async persistClosedState(): Promise<void> {
+        if (!this.persistence) {
+            return;
+        }
+
+        const closedAt = new Date().toISOString();
+        const metadata = {
+            ...this.getStoredMetadata(),
+            updatedAt: closedAt,
+            state: "active" as const,
+            hasActiveRun: false,
+        };
+        const state = {
+            ...this.getPersistedState(),
+            updatedAt: closedAt,
+        };
+
+        await this.persistence.writeMetadata(metadata);
+        await this.persistence.writeState(this.sessionId, state);
+    }
+
+    async restorePersistedState(state: PersistedDiogenesState, options: RestorePersistedStateOptions = {}): Promise<void> {
         const workspace = this.diogenes.getWorkspaceManager();
         workspace.clearLoadedState();
         workspace.setTodoItems(state.workspace.todo.map((item) => ({ ...item })));
         workspace.setNotepadLines([...state.workspace.notepad]);
+        this.title = state.metadata?.title ?? this.title;
+        this.description = state.metadata?.description ?? this.description;
 
         for (const dirPath of state.workspace.loadedDirectories) {
             await workspace.loadDirectory(dirPath);
@@ -602,8 +754,15 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
         this.messageHistory = state.messageHistory.map((message) => ({ ...message }));
         this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
-        this.updatedAt = new Date().toISOString();
-        this.emitTodoPlanUpdate();
+        if (!options.preserveTimestamps) {
+            this.updatedAt = new Date().toISOString();
+        }
+        if (options.persist ?? true) {
+            await this.persistMetadata();
+        }
+        if (options.emitPlanUpdate ?? true) {
+            this.emitTodoPlanUpdate();
+        }
     }
 
     registerResource(resource: SessionOwnedResource): void {
@@ -620,8 +779,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             ),
         );
         this.registerResource({
-            dispose: () => snapshotManager.cleanup(),
+            dispose: () => undefined,
         });
+        this.scheduleMetadataPersist();
     }
 
     async restoreSnapshot(snapshotId: string): Promise<void> {
@@ -634,6 +794,16 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         }
 
         await this.snapshotManager.restoreSnapshot({ snapshotId });
+        this.updatedAt = new Date().toISOString();
+        await this.persistMetadata();
+    }
+
+    async listSnapshots(): Promise<import("../snapshot/types").SnapshotSummary[]> {
+        if (!this.snapshotManager) {
+            return [];
+        }
+
+        return this.snapshotManager.listSnapshots();
     }
 
     getAvailableCommands(): AvailableCommand[] {
@@ -665,6 +835,27 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 availableCommands,
             },
         });
+    }
+
+    emitHydratedStateUpdates(): void {
+        this.notify("session/update", {
+            sessionId: this.sessionId,
+            update: {
+                sessionUpdate: "session_info_update",
+                title: this.title,
+                updatedAt: this.updatedAt,
+                _meta: {
+                    diogenes: {
+                        description: this.description,
+                        state: this.lifecycleState,
+                        hasActiveRun: this.activeRun !== null,
+                        hydratedState: this.getHydratedStateMeta(),
+                    },
+                },
+            },
+        });
+        this.emitTodoPlanUpdate();
+        this.emitAvailableCommandsUpdate();
     }
 
     isBusy(): boolean {
@@ -710,6 +901,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         };
         this.lifecycleState = "running";
         this.updatedAt = new Date().toISOString();
+        await this.persistMetadata();
 
         const runPromise = this.runPrompt(promptText);
         this.activePromptPromise = runPromise;
@@ -723,6 +915,8 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             if (this.lifecycleState === "running") {
                 this.lifecycleState = "active";
             }
+            this.updatedAt = new Date().toISOString();
+            await this.persistMetadata();
         }
     }
 
@@ -782,6 +976,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.messageHistory = result.messageHistory;
         this.currentMessageHistory = result.messageHistory.map((message) => ({ ...message }));
         this.updatedAt = new Date().toISOString();
+        await this.persistMetadata();
         return result;
     }
 
@@ -830,6 +1025,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
         this.lifecycleState = "running";
         this.updatedAt = new Date().toISOString();
+        await this.persistMetadata();
 
         try {
             const label = commandText.slice("/snapshot".length).trim() || undefined;
@@ -877,6 +1073,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 this.lifecycleState = "active";
             }
             this.updatedAt = new Date().toISOString();
+            await this.persistMetadata();
         }
     }
 
@@ -942,13 +1139,49 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.notify("session/update", {
             sessionId: this.sessionId,
             update: {
-                sessionUpdate: "session_metadata_update",
-                metadata: {
-                    title: this.title,
-                    description: this.description,
+                sessionUpdate: "session_info_update",
+                title: this.title,
+                updatedAt: this.updatedAt,
+                _meta: {
+                    "diogenes": {
+                        description: this.description,
+                        state: this.lifecycleState,
+                        hasActiveRun: this.activeRun !== null,
+                    },
                 },
             },
         });
+    }
+
+    private async persistMetadata(): Promise<void> {
+        if (!this.persistence) {
+            return;
+        }
+        if (this.lifecycleState === "disposing" || this.lifecycleState === "disposed") {
+            return;
+        }
+
+        const metadata = this.getStoredMetadata();
+        const state = this.getPersistedState();
+        this.metadataWriteChain = this.metadataWriteChain
+            .catch(() => undefined)
+            .then(async () => {
+                try {
+                    await this.persistence?.writeMetadata(metadata);
+                    await this.persistence?.writeState(this.sessionId, state);
+                } catch (error) {
+                    if (isNotFoundError(error) && this.lifecycleState === "disposed") {
+                        return;
+                    }
+                    throw error;
+                }
+            });
+
+        await this.metadataWriteChain;
+    }
+
+    private scheduleMetadataPersist(): void {
+        void this.persistMetadata().catch(() => undefined);
     }
 
     private handleEvent(event: TaskRunEvent): void {
@@ -1058,6 +1291,8 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
                 this.title = title || reason || this.title;
                 this.description = description || summary || this.description;
+                this.updatedAt = new Date().toISOString();
+                this.scheduleMetadataPersist();
                 this.emitSessionMetadataUpdate();
             }
 
@@ -1111,4 +1346,11 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             });
         }
     }
+}
+
+function isNotFoundError(error: unknown): boolean {
+    return typeof error === "object"
+        && error !== null
+        && "code" in error
+        && (error as NodeJS.ErrnoException).code === "ENOENT";
 }

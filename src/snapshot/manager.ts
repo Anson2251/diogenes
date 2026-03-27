@@ -39,7 +39,7 @@ export class SessionSnapshotManager implements SnapshotManager {
     private cleanedUp = false;
 
     constructor(private readonly options: SnapshotManagerOptions) {
-        this.sessionDir = path.join(options.config.storageRoot, options.sessionId);
+        this.sessionDir = path.join(options.config.storageRoot, options.sessionId, "snapshots");
         this.repoDir = path.join(this.sessionDir, "repo");
         this.stateDir = path.join(this.sessionDir, "state");
         this.manifestPath = path.join(this.sessionDir, "manifest.json");
@@ -68,18 +68,28 @@ export class SessionSnapshotManager implements SnapshotManager {
             throw new Error("Snapshot manager has already been cleaned up");
         }
 
+        const manifestExists = await fs.stat(this.manifestPath).then(() => true).catch(() => false);
+        const passwordExists = await fs.stat(this.passwordFilePath).then(() => true).catch(() => false);
+
         await fs.mkdir(this.repoDir, { recursive: true });
         await fs.mkdir(this.stateDir, { recursive: true });
-        await fs.writeFile(this.passwordFilePath, `${randomBytes(32).toString("hex")}\n`, {
-            encoding: "utf8",
-            mode: 0o600,
-        });
-        await this.manifestStore.initialize({
-            sessionId: this.options.sessionId,
-            cwd: this.options.cwd,
-            createdAt: new Date().toISOString(),
-        });
-        await this.restic.initRepo();
+
+        if (!passwordExists) {
+            await fs.writeFile(this.passwordFilePath, `${randomBytes(32).toString("hex")}\n`, {
+                encoding: "utf8",
+                mode: 0o600,
+            });
+        }
+
+        if (!manifestExists) {
+            await this.manifestStore.initialize({
+                sessionId: this.options.sessionId,
+                cwd: this.options.cwd,
+                createdAt: new Date().toISOString(),
+            });
+            await this.restic.initRepo();
+        }
+
         this.initialized = true;
     }
 
@@ -153,6 +163,11 @@ export class SessionSnapshotManager implements SnapshotManager {
         const stagingDir = path.join(this.sessionDir, "restore-staging", randomUUID());
         await fs.mkdir(stagingDir, { recursive: true });
 
+        let state = null;
+        if (entry.diogenesStatePath && this.options.stateRestorer) {
+            state = await this.stateSerializer.deserialize(entry.diogenesStatePath);
+        }
+
         try {
             await this.restic.restore({
                 snapshotId: entry.resticSnapshotId,
@@ -160,12 +175,11 @@ export class SessionSnapshotManager implements SnapshotManager {
             });
 
             const restoredRoot = path.join(stagingDir, this.getRelativeWorkspacePath());
-            await this.replaceWorkspaceFromStaging(restoredRoot);
-
-            if (entry.diogenesStatePath && this.options.stateRestorer) {
-                const state = await this.stateSerializer.deserialize(entry.diogenesStatePath);
-                await this.options.stateRestorer.restorePersistedState(state);
-            }
+            await this.replaceWorkspaceFromStaging(restoredRoot, async () => {
+                if (state && this.options.stateRestorer) {
+                    await this.options.stateRestorer.restorePersistedState(state);
+                }
+            });
         } finally {
             await fs.rm(stagingDir, { recursive: true, force: true });
         }
@@ -197,21 +211,47 @@ export class SessionSnapshotManager implements SnapshotManager {
         return relativePath;
     }
 
-    private async replaceWorkspaceFromStaging(restoredRoot: string): Promise<void> {
+    private async replaceWorkspaceFromStaging(restoredRoot: string, afterWorkspaceRestore?: () => Promise<void>): Promise<void> {
         const restoredStat = await fs.stat(restoredRoot).catch(() => null);
         if (!restoredStat?.isDirectory()) {
             throw new Error(`Restored workspace root is missing: ${restoredRoot}`);
         }
 
-        const currentEntries = await fs.readdir(this.options.cwd);
-        await Promise.all(currentEntries.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+        const rollbackDir = path.join(this.sessionDir, "restore-staging", `rollback-${randomUUID()}`);
+        await fs.mkdir(rollbackDir, { recursive: true });
 
-        const restoredEntries = await fs.readdir(restoredRoot);
-        await Promise.all(restoredEntries.map((entry) => fs.cp(
-            path.join(restoredRoot, entry),
-            path.join(this.options.cwd, entry),
-            { recursive: true, force: true },
-        )));
+        const currentEntries = await fs.readdir(this.options.cwd);
+        try {
+            await Promise.all(currentEntries.map((entry) => fs.cp(
+                path.join(this.options.cwd, entry),
+                path.join(rollbackDir, entry),
+                { recursive: true, force: true },
+            )));
+
+            await Promise.all(currentEntries.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+
+            const restoredEntries = await fs.readdir(restoredRoot);
+            await Promise.all(restoredEntries.map((entry) => fs.cp(
+                path.join(restoredRoot, entry),
+                path.join(this.options.cwd, entry),
+                { recursive: true, force: true },
+            )));
+
+            await afterWorkspaceRestore?.();
+        } catch (error) {
+            const currentWorkspaceEntries = await fs.readdir(this.options.cwd).catch(() => []);
+            await Promise.all(currentWorkspaceEntries.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+
+            const rollbackEntries = await fs.readdir(rollbackDir).catch(() => []);
+            await Promise.all(rollbackEntries.map((entry) => fs.cp(
+                path.join(rollbackDir, entry),
+                path.join(this.options.cwd, entry),
+                { recursive: true, force: true },
+            )));
+            throw error;
+        } finally {
+            await fs.rm(rollbackDir, { recursive: true, force: true });
+        }
     }
 }
 

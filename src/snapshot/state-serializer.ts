@@ -9,6 +9,10 @@ export interface SnapshotStateProvider {
     getMessageHistory(): ConversationMessage[];
     getCreatedAt(): string;
     getUpdatedAt(): string;
+    getSnapshotMetadata?(): {
+        title: string | null;
+        description: string | null;
+    };
 }
 
 export interface SnapshotStateRestorer {
@@ -49,6 +53,7 @@ export class DiogenesStateSerializer implements SnapshotStateSerializer {
             cwd: params.cwd,
             createdAt: params.stateProvider.getCreatedAt(),
             updatedAt: params.stateProvider.getUpdatedAt(),
+            metadata: params.stateProvider.getSnapshotMetadata?.(),
             messageHistory: params.stateProvider.getMessageHistory().map((message) => ({
                 role: message.role,
                 content: message.content,

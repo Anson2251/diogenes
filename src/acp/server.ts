@@ -4,11 +4,17 @@ import { SessionManager } from "./session-manager";
 import type {
     ACPServerOptions,
     CancelSessionParams,
+    DiogenesDeleteSessionParams,
+    DiogenesDisposeSessionParams,
+    DiogenesGetSessionParams,
+    DiogenesRestoreSessionParams,
     InitializeParams,
     JsonRpcErrorResponse,
     JsonRpcRequest,
     JsonRpcResponse,
     JsonRpcSuccessResponse,
+    ListSessionsParams,
+    LoadSessionParams,
     NewSessionParams,
     PromptSessionParams,
     RestoreSessionParams,
@@ -52,17 +58,17 @@ export class ACPServer {
                         const session = await this.handleNewSession(message.params as NewSessionParams);
                         const response = this.success(
                             message.id ?? null,
-                            {
-                                sessionId: session.sessionId,
-                                metadata: session.getMetadata(),
-                                availableCommands: session.getAvailableCommands(),
-                            },
+                            { sessionId: session.sessionId },
                         );
                         setTimeout(() => {
                             session.emitAvailableCommandsUpdate();
                         }, 0);
                         return response;
                     }
+                case "session/load":
+                    this.ensureInitialized(message.id ?? null);
+                    await this.handleLoadSession(message.params as LoadSessionParams | undefined);
+                    return this.success(message.id ?? null, null);
                 case "session/prompt":
                     this.ensureInitialized(message.id ?? null);
                     if (this.options.respond) {
@@ -81,10 +87,44 @@ export class ACPServer {
                     this.handleCancel(message.params as CancelSessionParams);
                     return null;
                 case "session/restore":
+                case "_diogenes/session/restore":
                     this.ensureInitialized(message.id ?? null);
                     return this.success(
                         message.id ?? null,
-                        await this.handleRestore(message.params as RestoreSessionParams),
+                        await this.handleRestore(message.params as RestoreSessionParams | DiogenesRestoreSessionParams),
+                    );
+                case "session/list":
+                    this.ensureInitialized(message.id ?? null);
+                    return this.success(
+                        message.id ?? null,
+                        await this.handleListSessions(message.params as ListSessionsParams | undefined),
+                    );
+                case "session/get":
+                case "_diogenes/session/get":
+                    this.ensureInitialized(message.id ?? null);
+                    return this.success(
+                        message.id ?? null,
+                        await this.handleGetSession(message.params as DiogenesGetSessionParams | undefined),
+                    );
+                case "session/snapshots":
+                case "_diogenes/session/snapshots":
+                    this.ensureInitialized(message.id ?? null);
+                    return this.success(
+                        message.id ?? null,
+                        await this.handleSessionSnapshots(message.params as DiogenesGetSessionParams | undefined),
+                    );
+                case "session/dispose":
+                case "_diogenes/session/dispose":
+                    this.ensureInitialized(message.id ?? null);
+                    return this.success(
+                        message.id ?? null,
+                        await this.handleDisposeSession(message.params as DiogenesDisposeSessionParams | undefined),
+                    );
+                case "_diogenes/session/delete":
+                    this.ensureInitialized(message.id ?? null);
+                    return this.success(
+                        message.id ?? null,
+                        await this.handleDeleteSession(message.params as DiogenesDeleteSessionParams | undefined),
                     );
                 default:
                     return this.error(message.id ?? null, -32601, `Method not found: ${message.method}`);
@@ -112,7 +152,7 @@ export class ACPServer {
         return {
             protocolVersion: Math.min(requestedVersion, ACP_PROTOCOL_VERSION),
             agentCapabilities: {
-                loadSession: false,
+                loadSession: true,
                 promptCapabilities: {
                     audio: false,
                     embeddedContext: false,
@@ -122,7 +162,30 @@ export class ACPServer {
                     http: false,
                     sse: false,
                 },
-                sessionCapabilities: {},
+                sessionCapabilities: {
+                    list: {},
+                    _meta: {
+                        "diogenes": {
+                            getSession: true,
+                            disposeSession: true,
+                            deleteSession: true,
+                            listSnapshots: true,
+                            restoreSnapshot: true,
+                            sessionDetailsInMeta: true,
+                        },
+                    },
+                },
+                _meta: {
+                    "diogenes": {
+                        extensionMethods: {
+                            getSession: "_diogenes/session/get",
+                            listSnapshots: "_diogenes/session/snapshots",
+                            disposeSession: "_diogenes/session/dispose",
+                            deleteSession: "_diogenes/session/delete",
+                            restoreSnapshot: "_diogenes/session/restore",
+                        },
+                    },
+                },
             },
             agentInfo: {
                 name: "diogenes",
@@ -139,6 +202,25 @@ export class ACPServer {
         }
 
         return this.sessionManager.createSession(params.cwd);
+    }
+
+    private async handleLoadSession(params: LoadSessionParams | undefined): Promise<void> {
+        if (!params?.sessionId) {
+            throw new ACPServerError(-32602, "session/load requires sessionId");
+        }
+        if (!params.cwd || !path.isAbsolute(params.cwd)) {
+            throw new ACPServerError(-32602, "session/load requires an absolute cwd");
+        }
+
+        const session = await this.sessionManager.loadSession(params);
+        for (const update of session.getReplayUpdates()) {
+            this.options.notify?.("session/update", {
+                sessionId: session.sessionId,
+                update,
+            });
+        }
+
+        session.emitHydratedStateUpdates();
     }
 
     private async handlePrompt(params: PromptSessionParams | undefined) {
@@ -242,6 +324,153 @@ export class ACPServer {
         });
 
         return { restored: true, metadata: session.getMetadata() };
+    }
+
+    private async handleListSessions(params: ListSessionsParams | undefined) {
+        if (params?.cwd && !path.isAbsolute(params.cwd)) {
+            throw new ACPServerError(-32602, "session/list cwd must be an absolute path");
+        }
+
+        const sessions = await this.sessionManager.listSessionMetadata({
+            cwd: params?.cwd,
+        });
+
+        return { sessions: sessions.map((session) => this.createSessionSummary(session)) };
+    }
+
+    private async handleGetSession(params: DiogenesGetSessionParams | undefined) {
+        if (!params?.sessionId) {
+            throw new ACPServerError(-32602, "session/get requires sessionId");
+        }
+
+        const session = this.sessionManager.getSession(params.sessionId);
+        const storedSession = await this.sessionManager.getSessionMetadata(params.sessionId, {
+            includeSnapshots: params.includeSnapshots,
+        });
+        if (!storedSession) {
+            throw new ACPServerError(-32001, `Unknown session: ${params.sessionId}`);
+        }
+
+        return {
+            session: this.createSessionDetail(storedSession, session !== undefined),
+            ...(params.includeSnapshots ? { snapshots: storedSession.snapshots ?? [] } : {}),
+        };
+    }
+
+    private async handleSessionSnapshots(params: DiogenesGetSessionParams | undefined) {
+        if (!params?.sessionId) {
+            throw new ACPServerError(-32602, "session/snapshots requires sessionId");
+        }
+
+        const session = this.sessionManager.getSession(params.sessionId);
+        const snapshots = await this.sessionManager.listSnapshots(params.sessionId);
+        if (!session && snapshots === null) {
+            throw new ACPServerError(-32001, `Unknown session: ${params.sessionId}`);
+        }
+
+        return {
+            sessionId: params.sessionId,
+            snapshots: snapshots ?? [],
+            liveSession: session !== undefined,
+        };
+    }
+
+    private async handleDisposeSession(params: DiogenesDisposeSessionParams | undefined) {
+        if (!params?.sessionId) {
+            throw new ACPServerError(-32602, "session/dispose requires sessionId");
+        }
+
+        const disposed = await this.sessionManager.closeSession(params.sessionId);
+        if (!disposed) {
+            throw new ACPServerError(-32001, `Unknown live session: ${params.sessionId}`);
+        }
+
+        return {
+            disposed: true,
+            sessionId: params.sessionId,
+        };
+    }
+
+    private async handleDeleteSession(params: DiogenesDeleteSessionParams | undefined) {
+        if (!params?.sessionId) {
+            throw new ACPServerError(-32602, "session/delete requires sessionId");
+        }
+
+        const deleted = await this.sessionManager.deleteSession(params.sessionId);
+        if (!deleted) {
+            throw new ACPServerError(-32001, `Unknown session: ${params.sessionId}`);
+        }
+
+        return {
+            deleted: true,
+            sessionId: params.sessionId,
+        };
+    }
+
+    private createSessionSummary(session: {
+        sessionId: string;
+        cwd: string;
+        title: string | null;
+        description: string | null;
+        createdAt: string;
+        updatedAt: string;
+        state: string;
+        hasActiveRun: boolean;
+        snapshotEnabled: boolean;
+        snapshotCount: number;
+        availableCommands: unknown[];
+    }) {
+        return {
+            sessionId: session.sessionId,
+            cwd: session.cwd,
+            title: session.title,
+            updatedAt: session.updatedAt,
+            _meta: {
+                diogenes: {
+                    description: session.description,
+                    createdAt: session.createdAt,
+                    state: session.state,
+                    hasActiveRun: session.hasActiveRun,
+                    liveSession: this.sessionManager.getSession(session.sessionId) !== undefined,
+                    snapshotEnabled: session.snapshotEnabled,
+                    snapshotCount: session.snapshotCount,
+                    availableCommands: session.availableCommands,
+                },
+            },
+        };
+    }
+
+    private createSessionDetail(session: {
+        sessionId: string;
+        cwd: string;
+        title: string | null;
+        description: string | null;
+        createdAt: string;
+        updatedAt: string;
+        state: string;
+        hasActiveRun: boolean;
+        snapshotEnabled: boolean;
+        availableCommands: unknown[];
+        snapshotCount?: number;
+    }, liveSession: boolean) {
+        return {
+            ...this.createSessionSummary({
+                ...session,
+                snapshotCount: session.snapshotCount ?? 0,
+            }),
+            _meta: {
+                diogenes: {
+                    description: session.description,
+                    createdAt: session.createdAt,
+                    state: session.state,
+                    hasActiveRun: session.hasActiveRun,
+                    liveSession,
+                    snapshotEnabled: session.snapshotEnabled,
+                    availableCommands: session.availableCommands,
+                    snapshotCount: session.snapshotCount ?? 0,
+                },
+            },
+        };
     }
 
     private ensureInitialized(_id: string | number | null): void {

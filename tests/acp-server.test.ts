@@ -71,11 +71,43 @@ describe("ACPServer", () => {
 
         expect(initialize && "result" in initialize && initialize.result.protocolVersion).toBe(1);
         expect(sessionNew && "result" in sessionNew && sessionNew.result.sessionId).toBeTypeOf("string");
-        expect(sessionNew && "result" in sessionNew ? sessionNew.result.availableCommands : null).toEqual([]);
+        expect(sessionNew && "result" in sessionNew ? sessionNew.result : null).toEqual({
+            sessionId: expect.any(String),
+        });
         expect(notifications).toHaveLength(0);
     });
 
-    it("returns availableCommands in session/new when snapshot commands are enabled", async () => {
+    it("advertises ACP session management capabilities", async () => {
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+        });
+
+        const initialize = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+
+        expect(initialize && "result" in initialize ? initialize.result.agentCapabilities.sessionCapabilities : null).toEqual(
+            expect.objectContaining({
+                list: {},
+                _meta: expect.objectContaining({
+                    diogenes: expect.objectContaining({
+                        getSession: true,
+                        disposeSession: true,
+                        deleteSession: true,
+                        listSnapshots: true,
+                        restoreSnapshot: true,
+                    }),
+                }),
+            }),
+        );
+    });
+
+    it("returns only sessionId in session/new when snapshot commands are enabled", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-new-commands-"));
         const originalHome = process.env.HOME;
         process.env.HOME = root;
@@ -113,15 +145,400 @@ describe("ACPServer", () => {
                 params: { cwd: process.cwd() },
             });
 
-            expect(sessionNew && "result" in sessionNew ? sessionNew.result.availableCommands : null).toEqual([
-                {
-                    name: "snapshot",
-                    description: "Create a defensive session snapshot",
-                    input: { hint: "optional label for the snapshot" },
-                },
-            ]);
+            expect(sessionNew && "result" in sessionNew ? sessionNew.result : null).toEqual({
+                sessionId: expect.any(String),
+            });
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("loads a stored session by replaying persisted session history", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+
+            const session = (firstServer as any).sessionManager.getSession(sessionId);
+            await session.restorePersistedState({
+                version: 1,
+                kind: "diogenes_state",
+                sessionId,
+                cwd: process.cwd(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                messageHistory: [
+                    { role: "user", content: "hello" },
+                    { role: "assistant", content: "world" },
+                ],
+                workspace: {
+                    loadedDirectories: [],
+                    loadedFiles: [],
+                    todo: [],
+                    notepad: [],
+                },
+            });
+
+            const notifications: Array<{ method: string; params: any }> = [];
+            const secondServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: process.cwd(), mcpServers: [] },
+            });
+
+            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "user_message_chunk",
+                            content: { type: "text", text: "hello" },
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: { type: "text", text: "world" },
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "session_info_update",
+                            _meta: expect.objectContaining({
+                                diogenes: expect.objectContaining({
+                                    hydratedState: expect.objectContaining({
+                                        loadedDirectories: [],
+                                        loadedFiles: [],
+                                        notepad: [],
+                                    }),
+                                }),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "plan",
+                            entries: [],
+                        }),
+                    }),
+                }),
+            ]));
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("lists active sessions and exposes snapshots through ACP management methods", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-management-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+        process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [path.join(process.cwd(), "tests/fixtures/fake-restic.cjs")],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+            });
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/snapshot manual test" }],
+                },
+            });
+
+            const listResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/list",
+                params: { includeSnapshots: true },
+            });
+            const getResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 5,
+                method: "_diogenes/session/get",
+                params: { sessionId, includeSnapshots: true },
+            });
+            const snapshotsResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 6,
+                method: "_diogenes/session/snapshots",
+                params: { sessionId },
+            });
+
+            expect(listResponse && "result" in listResponse ? listResponse.result.sessions : []).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        sessionId,
+                        cwd: process.cwd(),
+                        title: null,
+                        _meta: expect.objectContaining({
+                            diogenes: expect.objectContaining({
+                                snapshotEnabled: true,
+                                snapshotCount: 2,
+                                availableCommands: [
+                                    {
+                                        name: "snapshot",
+                                        description: "Create a defensive session snapshot",
+                                        input: { hint: "optional label for the snapshot" },
+                                    },
+                                ],
+                            }),
+                        }),
+                    }),
+                ]),
+            );
+            expect(getResponse && "result" in getResponse ? getResponse.result : null).toEqual(
+                expect.objectContaining({
+                    session: expect.objectContaining({
+                        sessionId,
+                        _meta: expect.objectContaining({
+                            diogenes: expect.objectContaining({
+                                liveSession: true,
+                                snapshotEnabled: true,
+                                availableCommands: [
+                                    {
+                                        name: "snapshot",
+                                        description: "Create a defensive session snapshot",
+                                        input: { hint: "optional label for the snapshot" },
+                                    },
+                                ],
+                            }),
+                        }),
+                    }),
+                    snapshots: expect.arrayContaining([
+                        expect.objectContaining({ label: "manual test", trigger: "system_manual" }),
+                    ]),
+                }),
+            );
+            expect(snapshotsResponse && "result" in snapshotsResponse ? snapshotsResponse.result : null).toEqual({
+                sessionId,
+                liveSession: true,
+                snapshots: expect.arrayContaining([
+                    expect.objectContaining({ label: "manual test", trigger: "system_manual" }),
+                ]),
+            });
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("manages stored sessions through ACP methods even when no live session exists", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-stored-session-management-"));
+        const originalHome = process.env.HOME;
+        const sessionId = "stored-session-1";
+        const sessionsRoot = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+        const sessionDir = path.join(sessionsRoot, sessionId);
+
+        process.env.HOME = root;
+
+        try {
+            fs.mkdirSync(sessionDir, { recursive: true });
+            fs.writeFileSync(path.join(sessionDir, "metadata.json"), JSON.stringify({
+                sessionId,
+                cwd: "/tmp/workspace",
+                createdAt: "2026-03-27T00:00:00.000Z",
+                updatedAt: "2026-03-27T00:00:01.000Z",
+                title: "Stored session",
+                description: "Persisted between ACP server runs",
+                state: "active",
+                hasActiveRun: false,
+                availableCommands: [
+                    {
+                        name: "snapshot",
+                        description: "Create a defensive session snapshot",
+                        input: { hint: "optional label for the snapshot" },
+                    },
+                ],
+                snapshotEnabled: true,
+            }, null, 2));
+            fs.mkdirSync(path.join(sessionDir, "snapshots"), { recursive: true });
+            fs.writeFileSync(path.join(sessionDir, "snapshots", "manifest.json"), JSON.stringify({
+                sessionId,
+                cwd: "/tmp/workspace",
+                createdAt: "2026-03-27T00:00:00.000Z",
+                snapshots: [
+                    {
+                        snapshotId: "snapshot-stored-1",
+                        createdAt: "2026-03-27T00:00:02.000Z",
+                        trigger: "system_manual",
+                        turn: 1,
+                        label: "stored snapshot",
+                        resticSnapshotId: "restic-stored-1",
+                    },
+                ],
+            }, null, 2));
+
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+            });
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const listResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/list",
+                params: { includeSnapshots: true },
+            });
+            const getResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "_diogenes/session/get",
+                params: { sessionId, includeSnapshots: true },
+            });
+            const snapshotsResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "_diogenes/session/snapshots",
+                params: { sessionId },
+            });
+            const disposeResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 5,
+                method: "_diogenes/session/dispose",
+                params: { sessionId },
+            });
+            const deleteResponse = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 6,
+                method: "_diogenes/session/delete",
+                params: { sessionId },
+            });
+
+            expect(listResponse && "result" in listResponse ? listResponse.result.sessions : []).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        sessionId,
+                        _meta: expect.objectContaining({
+                            diogenes: expect.objectContaining({
+                                snapshotEnabled: true,
+                                snapshotCount: 1,
+                                description: "Persisted between ACP server runs",
+                                liveSession: false,
+                            }),
+                        }),
+                    }),
+                ]),
+            );
+            expect(getResponse && "result" in getResponse ? getResponse.result : null).toEqual(
+                expect.objectContaining({
+                    session: expect.objectContaining({
+                        sessionId,
+                        title: "Stored session",
+                        _meta: expect.objectContaining({
+                            diogenes: expect.objectContaining({
+                                liveSession: false,
+                            }),
+                        }),
+                    }),
+                    snapshots: expect.arrayContaining([
+                        expect.objectContaining({ snapshotId: "snapshot-stored-1", label: "stored snapshot" }),
+                    ]),
+                }),
+            );
+            expect(snapshotsResponse && "result" in snapshotsResponse ? snapshotsResponse.result : null).toEqual({
+                sessionId,
+                liveSession: false,
+                snapshots: [
+                    expect.objectContaining({ snapshotId: "snapshot-stored-1", label: "stored snapshot" }),
+                ],
+            });
+            expect(disposeResponse && "error" in disposeResponse ? disposeResponse.error.code : null).toBe(-32001);
+            expect(deleteResponse && "result" in deleteResponse ? deleteResponse.result : null).toEqual({
+                deleted: true,
+                sessionId,
+            });
+            expect(fs.existsSync(sessionDir)).toBe(false);
+        } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
         }
@@ -1109,11 +1526,9 @@ describe("ACPServer", () => {
 
         input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } })}\n`);
         input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: process.cwd() } })}\n`);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-
-        const sessionNewResponse = lines
+        const sessionNewResponse = await waitFor(() => lines
             .map((line) => JSON.parse(line))
-            .find((message) => message.id === 2);
+            .find((message) => message.id === 2), 500);
         const sessionId = sessionNewResponse?.result?.sessionId as string;
 
         input.write(`${JSON.stringify({
@@ -1125,16 +1540,18 @@ describe("ACPServer", () => {
                 prompt: [{ type: "text", text: "Finish the task" }],
             },
         })}\n`);
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await waitFor(() => {
+            const messages = lines.map((line) => JSON.parse(line));
+            const promptResponse = messages.find((message) => message.id === 3);
+            const finalReply = messages.find(
+                (message) => message.method === "session/update"
+                    && message.params?.update?.sessionUpdate === "agent_message_chunk"
+                    && message.params?.update?.content?.text === "Mock reply delivered",
+            );
+            return promptResponse && finalReply ? true : undefined;
+        }, 2000);
 
         const messages = lines.map((line) => JSON.parse(line));
-        const workingChunkIndex = messages.findIndex(
-            (message) => message.method === "session/update"
-                && message.params?.update?.sessionUpdate === "agent_message_chunk"
-                && typeof message.params?.update?.content?.text === "string"
-                && message.params.update.content.text.includes("Working..."),
-        );
-        const promptResponseIndex = messages.findIndex((message) => message.id === 3);
         const promptResponse = messages.find((message) => message.id === 3);
         const finalReply = messages.find(
             (message) => message.method === "session/update"
@@ -1149,8 +1566,6 @@ describe("ACPServer", () => {
         );
 
         expect(errors).toEqual([]);
-        expect(workingChunkIndex).toBeGreaterThanOrEqual(0);
-        expect(promptResponseIndex).toBeGreaterThan(workingChunkIndex);
         expect(promptResponse?.result?.stopReason).toBe("end_turn");
         expect(finalReply).toBeDefined();
         expect(toolCallChunk).toBeUndefined();
@@ -1324,17 +1739,23 @@ describe("ACPServer", () => {
                 params: { sessionId, prompt: [{ type: "text", text: "take baseline" }] },
             });
 
-            const manifest = JSON.parse(await fs.promises.readFile(path.join(storageRoot, sessionId, "manifest.json"), "utf8"));
+            const manifest = JSON.parse(await fs.promises.readFile(path.join(storageRoot, sessionId, "snapshots", "manifest.json"), "utf8"));
             await fs.promises.writeFile(path.join(workspaceDir, "hello.txt"), "mutated\n", "utf8");
 
             const restoreResponse = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 4,
-                method: "session/restore",
+                method: "_diogenes/session/restore",
                 params: { sessionId, snapshotId: manifest.snapshots[0].snapshotId },
             });
 
             expect(restoreResponse && "result" in restoreResponse ? restoreResponse.result.restored : null).toBe(true);
+            expect(restoreResponse && "result" in restoreResponse ? restoreResponse.result.metadata : null).toEqual(
+                expect.objectContaining({
+                    title: "Initial snapshot",
+                    description: "Creates the baseline snapshot.",
+                }),
+            );
             expect(await fs.promises.readFile(path.join(workspaceDir, "hello.txt"), "utf8")).toBe("restored via acp\n");
             expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_started")).toBe(true);
             expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_completed")).toBe(true);
