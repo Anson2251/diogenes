@@ -48,6 +48,19 @@ The workspace snapshot should cover the entire file tree, not just loaded files.
 
 Diogenes should not reimplement file-tree backup semantics itself.
 
+**Two-System Architecture**
+
+The snapshot system uses two complementary layers:
+
+1. **Restic (Repository Layer)**: Handles version control, encryption, deduplication, and cross-session persistence
+2. **Transactional File Operations (Application Layer)**: Handles atomic workspace replacement with rollback support
+
+Restic stores historical snapshots efficiently, but cannot provide atomic in-place replacement with gitignore preservation. The application layer implements transaction semantics using staging and rollback directories to ensure safe workspace replacement.
+
+This separation allows:
+- Restic to focus on what it does best (versioned, deduplicated storage)
+- Application code to handle safety semantics (atomicity, gitignore preservation, error recovery)
+
 ## Snapshot Object
 
 A session snapshot is a single logical object composed of two parts:
@@ -563,11 +576,33 @@ Reason:
 - staging makes validation easier
 - staging makes it easier to preserve or explicitly remove ignored transient files
 
-Suggested restore flow:
+**Transactional Replacement**
+
+The workspace replacement is implemented as a file-system level transaction to ensure atomicity:
+
+```
+1. Identify gitignored files/directories (to preserve them)
+2. Backup non-gitignored entries to `<session-temp>/restore-staging/rollback-<uuid>`
+3. Delete non-gitignored entries from workspace
+4. Copy staged restore entries to workspace
+5. Delete rollback directory on success
+
+On failure:
+  1. Clean workspace (non-gitignored entries only)
+  2. Restore from rollback directory
+  3. Gitignored files remain untouched throughout
+```
+
+This ensures:
+- **Atomicity**: Either fully restored or fully rolled back
+- **Gitignore preservation**: Files listed in `.gitignore` are never deleted during restore
+- **Safety**: Rollback provides a recovery path if anything fails
+
+**Suggested restore flow:**
 
 1. restore snapshot into `<session-temp>/restore-staging`
 2. validate that the restored root looks sane
-3. replace workspace contents with the staged restore
+3. **transactionally replace workspace contents** (with rollback support)
 4. rebuild `DiogenesContextManager`
 5. rehydrate session state
 
