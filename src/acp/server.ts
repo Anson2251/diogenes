@@ -230,6 +230,7 @@ export class ACPServer {
         }
 
         session.emitHydratedStateUpdates();
+        session.emitAvailableCommandsUpdate();
     }
 
     private async handlePrompt(params: PromptSessionParams | undefined) {
@@ -302,37 +303,17 @@ export class ACPServer {
             throw new ACPServerError(-32002, `Session is busy: ${params.sessionId}`);
         }
 
-        this.options.notify?.("session/update", {
-            sessionId: params.sessionId,
-            update: {
-                sessionUpdate: "snapshot_restore_started",
-                snapshotId: params.snapshotId,
-            },
-        });
+        const restoreResult = await session.restoreSnapshotWithNotifications(params.snapshotId);
 
-        try {
-            await session.restoreSnapshot(params.snapshotId);
-        } catch (error) {
-            this.options.notify?.("session/update", {
-                sessionId: params.sessionId,
-                update: {
-                    sessionUpdate: "snapshot_restore_failed",
-                    snapshotId: params.snapshotId,
-                    error: error instanceof Error ? error.message : String(error),
+        return {
+            restored: true,
+            metadata: session.getMetadata(),
+            _meta: {
+                diogenes: {
+                    safetySnapshotId: restoreResult.safetySnapshotId,
                 },
-            });
-            throw error;
-        }
-
-        this.options.notify?.("session/update", {
-            sessionId: params.sessionId,
-            update: {
-                sessionUpdate: "snapshot_restore_completed",
-                snapshotId: params.snapshotId,
             },
-        });
-
-        return { restored: true, metadata: session.getMetadata() };
+        };
     }
 
     private async handleListSessions(params: ListSessionsParams | undefined) {

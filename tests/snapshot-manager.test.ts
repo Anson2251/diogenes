@@ -41,6 +41,10 @@ describe("SessionSnapshotManager", () => {
 
         await fs.mkdir(workspaceDir, { recursive: true });
         await fs.writeFile(path.join(workspaceDir, "hello.txt"), "hello\n", "utf8");
+        await fs.writeFile(path.join(workspaceDir, ".gitignore"), "secret.txt\nignored-dir/\n", "utf8");
+        await fs.writeFile(path.join(workspaceDir, "secret.txt"), "hidden\n", "utf8");
+        await fs.mkdir(path.join(workspaceDir, "ignored-dir"), { recursive: true });
+        await fs.writeFile(path.join(workspaceDir, "ignored-dir", "hidden.txt"), "hidden\n", "utf8");
 
         return {
             rootDir,
@@ -126,6 +130,12 @@ describe("SessionSnapshotManager", () => {
             expect(entries[0].args).toEqual(["init"]);
             expect(entries[1].args).toContain("backup");
             expect(entries[1].args).toContain("workspace");
+            expect(entries[1].args).toEqual(expect.arrayContaining([
+                "--exclude",
+                "workspace/secret.txt",
+                "--exclude",
+                "workspace/ignored-dir",
+            ]));
 
             await manager.cleanup();
             await expect(fs.access(path.join(fixture.storageRoot, "session-1", "snapshots"))).rejects.toThrow();
@@ -451,14 +461,8 @@ describe("SessionSnapshotManager", () => {
             const manifest = JSON.parse(
                 await fs.readFile(path.join(fixture.storageRoot, sessionId, "snapshots", "manifest.json"), "utf8"),
             );
-            expect(manifest.snapshots).toHaveLength(2);
+            expect(manifest.snapshots).toHaveLength(1);
             expect(manifest.snapshots[0]).toEqual(
-                expect.objectContaining({
-                    trigger: "before_prompt",
-                    turn: 1,
-                }),
-            );
-            expect(manifest.snapshots[1]).toEqual(
                 expect.objectContaining({
                     trigger: "system_manual",
                     label: "manual-checkpoint",
@@ -466,9 +470,59 @@ describe("SessionSnapshotManager", () => {
                 }),
             );
 
-            const slashState = JSON.parse(await fs.readFile(manifest.snapshots[1].diogenesStatePath, "utf8"));
+            const slashState = JSON.parse(await fs.readFile(manifest.snapshots[0].diogenesStatePath, "utf8"));
             expect(slashState.messageHistory.some((message: any) => String(message.content).includes("/snapshot manual-checkpoint"))).toBe(true);
             expect(slashState.messageHistory.some((message: any) => String(message.content).includes("file:///tmp/example.txt"))).toBe(true);
+
+            const entries = await readInvocationLog(fixture.logPath);
+            expect(entries.filter((entry) => entry.args.includes("backup"))).toHaveLength(1);
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+        }
+    });
+
+    it("uses the previous snapshot as the restic parent for later snapshots", async () => {
+        const fixture = await createFixture();
+        const diogenes = createDiogenes({
+            security: {
+                workspaceRoot: fixture.workspaceDir,
+            },
+        });
+        const workspace = diogenes.getWorkspaceManager();
+        const manager = new SessionSnapshotManager({
+            sessionId: "session-parent",
+            cwd: fixture.workspaceDir,
+            config: {
+                enabled: true,
+                includeDiogenesState: false,
+                autoBeforePrompt: true,
+                storageRoot: fixture.storageRoot,
+                resticBinary: process.execPath,
+                resticBinaryArgs: [fixture.fixturePath],
+                timeoutMs: 5_000,
+            },
+            stateProvider: {
+                getWorkspaceManager: () => workspace,
+                getMessageHistory: () => [],
+                getCreatedAt: () => "2026-03-26T00:00:00.000Z",
+                getUpdatedAt: () => "2026-03-26T00:01:00.000Z",
+            },
+        });
+
+        process.env.FAKE_RESTIC_LOG = fixture.logPath;
+        try {
+            await manager.createSnapshot({ trigger: "before_prompt", turn: 1 });
+            await manager.createSnapshot({ trigger: "before_prompt", turn: 2 });
+
+            const entries = await readInvocationLog(fixture.logPath);
+            const backupEntries = entries.filter((entry) => entry.args.includes("backup"));
+            expect(backupEntries).toHaveLength(2);
+            expect(backupEntries[0].args).toContain("--skip-if-unchanged");
+            expect(backupEntries[1].args).toEqual(expect.arrayContaining([
+                "--parent",
+                "abc123def456",
+                "--skip-if-unchanged",
+            ]));
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }

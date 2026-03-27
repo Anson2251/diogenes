@@ -219,8 +219,18 @@ describe("ACPServer", () => {
                 method: "session/load",
                 params: { sessionId, cwd: process.cwd(), mcpServers: [] },
             });
+            const slashPrompt = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 5,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/help" }],
+                },
+            });
 
             expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(slashPrompt && "result" in slashPrompt ? slashPrompt.result.stopReason : null).toBe("end_turn");
             expect(notifications).toEqual(expect.arrayContaining([
                 expect.objectContaining({
                     method: "session/update",
@@ -265,8 +275,34 @@ describe("ACPServer", () => {
                     params: expect.objectContaining({
                         sessionId,
                         update: expect.objectContaining({
+                            sessionUpdate: "available_commands_update",
+                            availableCommands: expect.arrayContaining([
+                                expect.objectContaining({ name: "help" }),
+                                expect.objectContaining({ name: "session" }),
+                            ]),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
                             sessionUpdate: "plan",
                             entries: [],
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("## ACP Slash Commands"),
+                            }),
                         }),
                     }),
                 }),
@@ -354,7 +390,7 @@ describe("ACPServer", () => {
                         _meta: expect.objectContaining({
                             diogenes: expect.objectContaining({
                                 snapshotEnabled: true,
-                                snapshotCount: 2,
+                                snapshotCount: 1,
                                 availableCommands: expect.arrayContaining([
                                     {
                                         name: "help",
@@ -381,11 +417,11 @@ describe("ACPServer", () => {
                                     },
                                     {
                                         name: "restore",
-                                        description: "Explain how the host can restore a session snapshot",
+                                        description: "Restore a session snapshot",
                                         input: { hint: "snapshot id, for example snapshot-123" },
                                         _meta: {
                                             diogenes: {
-                                                kind: "snapshot_restore_help",
+                                                kind: "snapshot_restore",
                                                 invocations: ["/restore"],
                                                 example: "/restore snapshot-123",
                                             },
@@ -455,11 +491,11 @@ describe("ACPServer", () => {
                                     },
                                     {
                                         name: "restore",
-                                        description: "Explain how the host can restore a session snapshot",
+                                        description: "Restore a session snapshot",
                                         input: { hint: "snapshot id, for example snapshot-123" },
                                         _meta: {
                                             diogenes: {
-                                                kind: "snapshot_restore_help",
+                                                kind: "snapshot_restore",
                                                 invocations: ["/restore"],
                                                 example: "/restore snapshot-123",
                                             },
@@ -1787,6 +1823,8 @@ describe("ACPServer", () => {
         const notifications: Array<{ method: string; params: any }> = [];
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(process.cwd());
+        process.env.FAKE_RESTIC_RESTORE_HELLO = "restored via acp\n";
         process.env.HOME = root;
 
         try {
@@ -1889,7 +1927,7 @@ describe("ACPServer", () => {
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
                                 type: "text",
-                                text: expect.stringContaining('Unknown ACP slash command "/unknown-command please help"'),
+                                text: expect.stringContaining("## Unknown Command"),
                             }),
                         }),
                     }),
@@ -1973,16 +2011,73 @@ describe("ACPServer", () => {
                 method: "session/update",
                 params: expect.objectContaining({
                     sessionId,
-                    update: expect.objectContaining({
-                        sessionUpdate: "agent_message_chunk",
-                        content: expect.objectContaining({
-                            type: "text",
-                            text: expect.stringContaining("Available ACP slash commands:"),
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("## ACP Slash Commands"),
+                            }),
                         }),
                     }),
-                }),
             }),
         ]));
+    });
+
+    it("skips auto snapshots for local ACP slash commands", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-slash-skip-snapshot-"));
+        const originalHome = process.env.HOME;
+        const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
+        const logPath = path.join(root, "restic.log");
+
+        process.env.FAKE_RESTIC_LOG = logPath;
+        process.env.HOME = root;
+
+        try {
+            const server = new ACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                    security: {
+                        snapshot: {
+                            enabled: true,
+                            includeDiogenesState: false,
+                            autoBeforePrompt: true,
+                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            resticBinary: process.execPath,
+                            resticBinaryArgs: [fixturePath],
+                            timeoutMs: 5_000,
+                        },
+                    },
+                },
+            });
+
+            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "/help" }],
+                },
+            });
+
+            const lines = fs.existsSync(logPath)
+                ? fs.readFileSync(logPath, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
+                : [];
+            expect(lines.filter((entry) => entry.args.includes("backup"))).toHaveLength(0);
+        } finally {
+            delete process.env.FAKE_RESTIC_LOG;
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     it("handles /help <command> aliases locally", async () => {
@@ -2042,7 +2137,7 @@ describe("ACPServer", () => {
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
                                 type: "text",
-                                text: expect.stringContaining("/snapshot: Create a defensive session snapshot"),
+                                text: expect.stringContaining("## `/snapshot`"),
                             }),
                         }),
                     }),
@@ -2091,14 +2186,14 @@ describe("ACPServer", () => {
                 method: "session/update",
                 params: expect.objectContaining({
                     sessionId,
-                    update: expect.objectContaining({
-                        sessionUpdate: "agent_message_chunk",
-                        content: expect.objectContaining({
-                            type: "text",
-                            text: expect.stringContaining(`Session ${sessionId}`),
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("## Session"),
+                            }),
                         }),
                     }),
-                }),
             }),
         ]));
     });
@@ -2170,7 +2265,7 @@ describe("ACPServer", () => {
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
                                 type: "text",
-                                text: expect.stringContaining("Recent session snapshots"),
+                                text: expect.stringContaining("## Snapshots"),
                             }),
                         }),
                     }),
@@ -2183,7 +2278,7 @@ describe("ACPServer", () => {
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
                                 type: "text",
-                                text: expect.stringContaining("manual-list-test"),
+                                text: expect.stringContaining("| Snapshot ID | Trigger | Label | Created At |"),
                             }),
                         }),
                     }),
@@ -2196,16 +2291,22 @@ describe("ACPServer", () => {
         }
     });
 
-    it("handles /restore locally without invoking host restore", async () => {
+    it("handles /restore locally and performs snapshot restore", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-restore-command-"));
+        const workspaceDir = path.join(root, "workspace");
         const originalHome = process.env.HOME;
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const notifications: Array<{ method: string; params: any }> = [];
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
+        process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(workspaceDir);
+        process.env.FAKE_RESTIC_RESTORE_HELLO = "restored via acp\n";
         process.env.HOME = root;
 
         try {
+            fs.mkdirSync(workspaceDir, { recursive: true });
+            fs.writeFileSync(path.join(workspaceDir, "hello.txt"), "hello\n", "utf8");
+
             const server = new ACPServer({
                 config: {
                     llm: { apiKey: "test-key", model: "gpt-4" },
@@ -2229,7 +2330,7 @@ describe("ACPServer", () => {
                 jsonrpc: "2.0",
                 id: 2,
                 method: "session/new",
-                params: { cwd: process.cwd() },
+                params: { cwd: workspaceDir },
             });
             const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
 
@@ -2243,12 +2344,14 @@ describe("ACPServer", () => {
                 },
             });
 
+            await fs.promises.writeFile(path.join(workspaceDir, "hello.txt"), "mutated\n", "utf8");
+
             const restoreMessage = notifications.find(
                 (item) => item.params?.update?.sessionUpdate === "agent_message_chunk"
                     && typeof item.params?.update?.content?.text === "string"
-                    && item.params.update.content.text.includes("Created snapshot"),
+                    && item.params.update.content.text.includes("## Snapshot Created"),
             );
-            const snapshotIdMatch = restoreMessage?.params?.update?.content?.text?.match(/Created snapshot ([^\s]+)/);
+            const snapshotIdMatch = restoreMessage?.params?.update?.content?.text?.match(/Snapshot ID:\*\* `([^`]+)`/);
             const snapshotId = snapshotIdMatch?.[1];
 
             const response = await server.handleMessage({
@@ -2269,10 +2372,37 @@ describe("ACPServer", () => {
                     params: expect.objectContaining({
                         sessionId,
                         update: expect.objectContaining({
+                            sessionUpdate: "snapshot_restore_started",
+                            snapshotId,
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "snapshot_restore_completed",
+                            snapshotId,
+                            _meta: expect.objectContaining({
+                                diogenes: expect.objectContaining({
+                                    safetySnapshotId: expect.any(String),
+                                }),
+                            }),
+                        }),
+                    }),
+                }),
+            ]));
+            expect(notifications).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
                                 type: "text",
-                                text: expect.stringContaining("host-controlled"),
+                                text: expect.stringContaining("Snapshot restore completed."),
                             }),
                         }),
                     }),
@@ -2285,14 +2415,17 @@ describe("ACPServer", () => {
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
                                 type: "text",
-                                text: expect.stringContaining("session/restore"),
+                                text: expect.stringContaining("Safety Snapshot:"),
                             }),
                         }),
                     }),
                 }),
             ]));
+            expect(await fs.promises.readFile(path.join(root, "workspace", "hello.txt"), "utf8")).toBe("restored via acp\n");
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
+            delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;
+            delete process.env.FAKE_RESTIC_RESTORE_HELLO;
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
         }
@@ -2436,9 +2569,21 @@ describe("ACPServer", () => {
                     description: "Creates the baseline snapshot.",
                 }),
             );
+            expect(restoreResponse && "result" in restoreResponse ? restoreResponse.result._meta : null).toEqual(
+                expect.objectContaining({
+                    diogenes: expect.objectContaining({
+                        safetySnapshotId: expect.any(String),
+                    }),
+                }),
+            );
             expect(await fs.promises.readFile(path.join(workspaceDir, "hello.txt"), "utf8")).toBe("restored via acp\n");
             expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_started")).toBe(true);
             expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_completed")).toBe(true);
+            expect(notifications.some(
+                (item) => item.params?.update?.sessionUpdate === "agent_message_chunk"
+                    && typeof item.params?.update?.content?.text === "string"
+                    && item.params.update.content.text.includes("Safety Snapshot:"),
+            )).toBe(true);
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;

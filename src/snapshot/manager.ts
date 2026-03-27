@@ -35,6 +35,7 @@ export class SessionSnapshotManager implements SnapshotManager {
     private readonly restic: ResticClient;
     private readonly manifestStore: SnapshotManifestStore;
     private readonly stateSerializer: SnapshotStateSerializer;
+    private readonly gitIgnoreRulesCache = new Map<string, GitIgnoreRule[]>();
     private initialized = false;
     private cleanedUp = false;
 
@@ -99,11 +100,16 @@ export class SessionSnapshotManager implements SnapshotManager {
         const createdAt = new Date().toISOString();
         const snapshotId = `snapshot-${input.turn}-${randomUUID()}`;
         const relativeWorkspacePath = this.getRelativeWorkspacePath();
+        const existingEntries = await this.manifestStore.list();
+        const previousEntry = existingEntries.at(-1);
+        const excludes = await this.collectGitIgnoredExcludePaths(relativeWorkspacePath);
         const backup = await this.restic.backup({
             cwd: path.dirname(this.options.cwd),
             paths: [relativeWorkspacePath],
             tags: this.buildTags(input),
-            skipIfUnchanged: false,
+            excludes,
+            parent: previousEntry?.resticSnapshotId,
+            skipIfUnchanged: true,
         });
 
         let diogenesStatePath: string | null | undefined;
@@ -211,6 +217,148 @@ export class SessionSnapshotManager implements SnapshotManager {
         return relativePath;
     }
 
+    private async collectGitIgnoredExcludePaths(workspaceRootName: string): Promise<string[]> {
+        const excludes: string[] = [];
+        await this.walkForGitIgnoredPaths(this.options.cwd, workspaceRootName, excludes);
+        return excludes;
+    }
+
+    private async walkForGitIgnoredPaths(directory: string, workspaceRelativeDirectory: string, excludes: string[]): Promise<void> {
+        const entries = await fs.readdir(directory, { withFileTypes: true });
+
+        for (const entry of entries) {
+            const absolutePath = path.join(directory, entry.name);
+            const entryRelativePath = path.posix.join(workspaceRelativeDirectory, entry.name);
+
+            if (await this.isGitIgnored(absolutePath)) {
+                excludes.push(entryRelativePath);
+                continue;
+            }
+
+            if (entry.isDirectory()) {
+                await this.walkForGitIgnoredPaths(absolutePath, entryRelativePath, excludes);
+            }
+        }
+    }
+
+    private async isGitIgnored(absolutePath: string): Promise<boolean> {
+        const relativePath = this.toWorkspaceRelativePath(absolutePath);
+        const pathParts = path.dirname(relativePath) === "."
+            ? []
+            : path.dirname(relativePath).split(path.sep);
+        const ignoreDirs = [this.options.cwd];
+
+        let currentDir = this.options.cwd;
+        for (const part of pathParts) {
+            currentDir = path.join(currentDir, part);
+            ignoreDirs.push(currentDir);
+        }
+
+        let ignored = false;
+        for (const ignoreDir of ignoreDirs) {
+            const rules = await this.readGitIgnoreRules(ignoreDir);
+            if (rules.length === 0) {
+                continue;
+            }
+
+            const relativeToIgnoreDir = this.normalizeForGitIgnore(path.relative(ignoreDir, absolutePath));
+            for (const rule of rules) {
+                if (this.matchesGitIgnoreRule(relativeToIgnoreDir, rule.pattern)) {
+                    ignored = !rule.negated;
+                }
+            }
+        }
+
+        return ignored;
+    }
+
+    private async readGitIgnoreRules(directory: string): Promise<GitIgnoreRule[]> {
+        const cached = this.gitIgnoreRulesCache.get(directory);
+        if (cached) {
+            return cached;
+        }
+
+        const ignorePath = path.join(directory, ".gitignore");
+
+        try {
+            const content = await fs.readFile(ignorePath, "utf8");
+            const rules = content
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0 && !line.startsWith("#"))
+                .map((line) => ({
+                    negated: line.startsWith("!"),
+                    pattern: this.normalizeForGitIgnore(
+                        line.startsWith("!") ? line.slice(1) : line,
+                    ).replace(/\/+$/, (match) => (match ? "/" : match)),
+                }));
+            this.gitIgnoreRulesCache.set(directory, rules);
+            return rules;
+        } catch (error) {
+            if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+                this.gitIgnoreRulesCache.set(directory, []);
+                return [];
+            }
+            throw error;
+        }
+    }
+
+    private matchesGitIgnoreRule(relativePath: string, pattern: string): boolean {
+        if (!pattern) {
+            return false;
+        }
+
+        const directoryOnly = pattern.endsWith("/");
+        const normalizedPattern = directoryOnly ? pattern.slice(0, -1) : pattern;
+        const anchored = normalizedPattern.startsWith("/");
+        const body = anchored ? normalizedPattern.slice(1) : normalizedPattern;
+        const hasSlash = body.includes("/");
+        const regexBody = this.escapeGitIgnorePattern(body);
+
+        if (!regexBody) {
+            return false;
+        }
+
+        const prefix = anchored || hasSlash ? "^" : "(?:^|.*/)";
+        const suffix = directoryOnly ? "(?:/.*)?$" : "(?:$|/.*$)";
+        return new RegExp(`${prefix}${regexBody}${suffix}`).test(relativePath);
+    }
+
+    private escapeGitIgnorePattern(pattern: string): string {
+        let escaped = "";
+
+        for (let index = 0; index < pattern.length; index += 1) {
+            const char = pattern[index];
+            if (char === "*") {
+                const nextChar = pattern[index + 1];
+                if (nextChar === "*") {
+                    escaped += ".*";
+                    index += 1;
+                } else {
+                    escaped += "[^/]*";
+                }
+                continue;
+            }
+
+            if (char === "?") {
+                escaped += "[^/]";
+                continue;
+            }
+
+            escaped += char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+        }
+
+        return escaped;
+    }
+
+    private normalizeForGitIgnore(inputPath: string): string {
+        return inputPath.split(path.sep).join("/");
+    }
+
+    private toWorkspaceRelativePath(absolutePath: string): string {
+        return path.relative(this.options.cwd, absolutePath);
+    }
+
     private async replaceWorkspaceFromStaging(restoredRoot: string, afterWorkspaceRestore?: () => Promise<void>): Promise<void> {
         const restoredStat = await fs.stat(restoredRoot).catch(() => null);
         if (!restoredStat?.isDirectory()) {
@@ -253,6 +401,11 @@ export class SessionSnapshotManager implements SnapshotManager {
             await fs.rm(rollbackDir, { recursive: true, force: true });
         }
     }
+}
+
+interface GitIgnoreRule {
+    negated: boolean;
+    pattern: string;
 }
 
 export function getDefaultSessionsStorageRoot(): string {
