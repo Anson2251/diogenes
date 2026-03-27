@@ -6,7 +6,7 @@ export interface DiogenesAppPaths {
     homeDir: string;
     configDir: string;
     dataDir: string;
-    snapshotDir: string;
+    sessionsDir: string;
     defaultConfigCandidates: string[];
 }
 
@@ -25,13 +25,13 @@ export function resolveDiogenesAppPaths(options: ResolveOptions = {}): DiogenesA
 
     const configDir = resolveConfigDir(platform, env, homeDir);
     const dataDir = resolveDataDir(platform, env, homeDir);
-    const snapshotDir = path.join(dataDir, "session-snapshot");
+    const sessionsDir = path.join(dataDir, "sessions");
 
     return {
         homeDir,
         configDir,
         dataDir,
-        snapshotDir,
+        sessionsDir,
         defaultConfigCandidates: [
             path.join(configDir, "config.yaml"),
             path.join(configDir, "config.yml"),
@@ -44,7 +44,7 @@ export function ensureDiogenesAppDirsSync(options: ResolveOptions = {}): Diogene
     const paths = resolveDiogenesAppPaths(options);
     fs.mkdirSync(paths.configDir, { recursive: true });
     fs.mkdirSync(paths.dataDir, { recursive: true });
-    fs.mkdirSync(paths.snapshotDir, { recursive: true });
+    fs.mkdirSync(paths.sessionsDir, { recursive: true });
     return paths;
 }
 
@@ -52,7 +52,7 @@ export async function ensureDiogenesAppDirs(options: ResolveOptions = {}): Promi
     const paths = resolveDiogenesAppPaths(options);
     await fs.promises.mkdir(paths.configDir, { recursive: true });
     await fs.promises.mkdir(paths.dataDir, { recursive: true });
-    await fs.promises.mkdir(paths.snapshotDir, { recursive: true });
+    await fs.promises.mkdir(paths.sessionsDir, { recursive: true });
     return paths;
 }
 
@@ -66,8 +66,8 @@ export function findDefaultConfigFileSync(options: ResolveOptions = {}): string 
     return null;
 }
 
-export function getDefaultSnapshotStorageRoot(options: ResolveOptions = {}): string {
-    return resolveDiogenesAppPaths(options).snapshotDir;
+export function getDefaultSessionsStorageRoot(options: ResolveOptions = {}): string {
+    return resolveDiogenesAppPaths(options).sessionsDir;
 }
 
 function resolveHomeDir(env: NodeJS.ProcessEnv): string {

@@ -1,11 +1,11 @@
-import * as crypto from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 import type { SecurityConfig } from "../types";
 import { ResticClient } from "../utils/restic";
-import { getDefaultSnapshotStorageRoot as getDefaultSnapshotStorageRootFromAppPaths } from "../utils/app-paths";
+import { getDefaultSessionsStorageRoot as getDefaultSessionsStorageRootFromAppPaths } from "../utils/app-paths";
 import { SnapshotManifestStore } from "./manifest-store";
-import { PlaceholderStateSerializer, type SnapshotStateSerializer } from "./state-serializer";
+import { DiogenesStateSerializer, type SnapshotStateProvider, type SnapshotStateSerializer } from "./state-serializer";
 import type { SnapshotCreateInput, SnapshotCreateResult, SnapshotSummary } from "./types";
 
 export interface SnapshotManager {
@@ -20,6 +20,7 @@ export interface SnapshotManagerOptions {
     sessionId: string;
     cwd: string;
     config: SecurityConfig["snapshot"];
+    stateProvider: SnapshotStateProvider;
     stateSerializer?: SnapshotStateSerializer;
 }
 
@@ -49,7 +50,7 @@ export class SessionSnapshotManager implements SnapshotManager {
             timeoutMs: options.config.timeoutMs,
         });
         this.manifestStore = new SnapshotManifestStore(this.manifestPath);
-        this.stateSerializer = options.stateSerializer ?? new PlaceholderStateSerializer(this.stateDir);
+        this.stateSerializer = options.stateSerializer ?? new DiogenesStateSerializer(this.stateDir);
     }
 
     isAutoBeforePromptEnabled(): boolean {
@@ -67,7 +68,7 @@ export class SessionSnapshotManager implements SnapshotManager {
 
         await fs.mkdir(this.repoDir, { recursive: true });
         await fs.mkdir(this.stateDir, { recursive: true });
-        await fs.writeFile(this.passwordFilePath, `${crypto.randomBytes(32).toString("hex")}\n`, {
+        await fs.writeFile(this.passwordFilePath, `${randomBytes(32).toString("hex")}\n`, {
             encoding: "utf8",
             mode: 0o600,
         });
@@ -84,7 +85,7 @@ export class SessionSnapshotManager implements SnapshotManager {
         await this.initialize();
 
         const createdAt = new Date().toISOString();
-        const snapshotId = `snapshot-${input.turn}-${Date.now()}`;
+        const snapshotId = `snapshot-${input.turn}-${randomUUID()}`;
         const relativeWorkspacePath = this.getRelativeWorkspacePath();
         const backup = await this.restic.backup({
             cwd: path.dirname(this.options.cwd),
@@ -99,8 +100,7 @@ export class SessionSnapshotManager implements SnapshotManager {
                 snapshotId,
                 sessionId: this.options.sessionId,
                 cwd: this.options.cwd,
-                createdAt,
-                updatedAt: createdAt,
+                stateProvider: this.options.stateProvider,
             });
             diogenesStatePath = serialized.statePath;
         }
@@ -166,6 +166,6 @@ export class SessionSnapshotManager implements SnapshotManager {
     }
 }
 
-export function getDefaultSnapshotStorageRoot(): string {
-    return getDefaultSnapshotStorageRootFromAppPaths();
+export function getDefaultSessionsStorageRoot(): string {
+    return getDefaultSessionsStorageRootFromAppPaths();
 }

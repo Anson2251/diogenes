@@ -4,6 +4,7 @@ import type { TodoItem, ToolResult } from "../types";
 import type { DiogenesConfig } from "../types";
 import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "../runtime/task-runner";
 import type { SnapshotManager } from "../snapshot/manager";
+import type { SnapshotStateProvider } from "../snapshot/state-serializer";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
 import type { PromptBlock } from "./types";
 import type { AvailableCommand } from "./types";
@@ -495,7 +496,7 @@ function createSkippedToolResult(warning: string): ToolResult {
     };
 }
 
-export class ACPSession {
+export class ACPSession implements SnapshotStateProvider {
     readonly sessionId: string;
     readonly cwd: string;
     readonly createdAt: string;
@@ -505,6 +506,7 @@ export class ACPSession {
     private readonly maxIterations: number | undefined;
     private readonly resources = new SessionResourceRegistry();
     private messageHistory: ConversationMessage[] = [];
+    private currentMessageHistory: ConversationMessage[] = [];
     private lifecycleState: SessionLifecycleState = "active";
     private promptTurn = 0;
     private snapshotManager: SnapshotManager | null = null;
@@ -545,6 +547,19 @@ export class ACPSession {
 
     getUpdatedAt(): string {
         return this.updatedAt;
+    }
+
+    getCreatedAt(): string {
+        return this.createdAt;
+    }
+
+    getWorkspaceManager() {
+        return this.diogenes.getWorkspaceManager();
+    }
+
+    getMessageHistory(): ConversationMessage[] {
+        const source = this.currentMessageHistory.length > 0 ? this.currentMessageHistory : this.messageHistory;
+        return source.map((message) => ({ ...message }));
     }
 
     getLifecycleState(): SessionLifecycleState {
@@ -628,16 +643,18 @@ export class ACPSession {
         this.ensurePromptAllowed();
         const turn = ++this.promptTurn;
 
-        const slashCommandResult = await this.tryHandleSlashCommand(prompt, turn);
-        if (slashCommandResult) {
-            return slashCommandResult;
-        }
+        this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
 
         if (this.snapshotManager && this.snapshotManager.isAutoBeforePromptEnabled()) {
             await this.snapshotManager.createSnapshot({
                 trigger: "before_prompt",
                 turn,
             });
+        }
+
+        const slashCommandResult = await this.tryHandleSlashCommand(prompt, turn);
+        if (slashCommandResult) {
+            return slashCommandResult;
         }
 
         const promptText = promptBlocksToText(prompt);
@@ -704,6 +721,7 @@ export class ACPSession {
         await this.resources.disposeAll();
 
         this.messageHistory = [];
+        this.currentMessageHistory = [];
         this.activeRun = null;
         this.activePromptPromise = null;
         this.lifecycleState = "disposed";
@@ -716,8 +734,12 @@ export class ACPSession {
             messageHistory: this.messageHistory,
             shouldCancel: () => this.activeRun?.cancelled === true,
             onEvent: (event) => this.handleEvent(event),
+            onMessageHistoryUpdate: (messageHistory) => {
+                this.currentMessageHistory = messageHistory;
+            },
         });
         this.messageHistory = result.messageHistory;
+        this.currentMessageHistory = result.messageHistory.map((message) => ({ ...message }));
         this.updatedAt = new Date().toISOString();
         return result;
     }
@@ -769,6 +791,13 @@ export class ACPSession {
 
         try {
             const label = commandText.slice("/snapshot".length).trim() || undefined;
+            const historyBeforeCommand = this.messageHistory.map((message) => ({ ...message }));
+            const userMessage: ConversationMessage = {
+                role: "user",
+                content: `========= ${historyBeforeCommand.length > 0 ? "NEW TASK" : "TASK"}\n${commandText}\n=========`,
+            };
+            this.currentMessageHistory = [...historyBeforeCommand, userMessage];
+
             const result = await this.snapshotManager.createSnapshot({
                 trigger: "system_manual",
                 turn,
@@ -778,6 +807,12 @@ export class ACPSession {
             const summary = label
                 ? `Created snapshot ${result.snapshotId} with label "${label}".`
                 : `Created snapshot ${result.snapshotId}.`;
+            const assistantMessage: ConversationMessage = {
+                role: "assistant",
+                content: summary,
+            };
+            this.messageHistory = [...historyBeforeCommand, userMessage, assistantMessage];
+            this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
 
             this.notify("session/update", {
                 sessionId: this.sessionId,
@@ -793,7 +828,7 @@ export class ACPSession {
                 iterations: 0,
                 taskEnded: true,
                 stopReason: "end_turn",
-                messageHistory: this.messageHistory,
+                messageHistory: this.messageHistory.map((message) => ({ ...message })),
             };
         } finally {
             if (this.lifecycleState === "running") {

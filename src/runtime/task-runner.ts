@@ -44,6 +44,7 @@ export interface TaskRunOptions {
     messageHistory?: ConversationMessage[];
     onEvent?: (event: TaskRunEvent) => void;
     shouldCancel?: () => boolean;
+    onMessageHistoryUpdate?: (messageHistory: ConversationMessage[]) => void;
 }
 
 function createTaskMessage(taskDescription: string, isFollowUpTask: boolean): ConversationMessage {
@@ -56,6 +57,10 @@ function createTaskMessage(taskDescription: string, isFollowUpTask: boolean): Co
 
 function emit(options: TaskRunOptions, event: TaskRunEvent): void {
     options.onEvent?.(event);
+}
+
+function emitMessageHistory(options: TaskRunOptions, messageHistory: ConversationMessage[]): void {
+    options.onMessageHistoryUpdate?.(messageHistory.map((message) => ({ ...message })));
 }
 
 function cancelledResult(
@@ -84,6 +89,7 @@ export async function runTaskLoop(
     const maxIterations = options.maxIterations || 20;
     const messageHistory = [...(options.messageHistory || [])];
     messageHistory.push(createTaskMessage(taskDescription, messageHistory.length > 0));
+    emitMessageHistory(options, messageHistory);
 
     if (!diogenes.hasLLMClient()) {
         throw new Error(
@@ -160,6 +166,7 @@ export async function runTaskLoop(
                 role: "assistant",
                 content: streamResult.content,
             });
+            emitMessageHistory(options, messageHistory);
 
             const parseResult = parseToolCalls(streamResult.content);
 
@@ -170,6 +177,7 @@ export async function runTaskLoop(
                     role: "user",
                     content: formatParseError(parseResult.error),
                 });
+                emitMessageHistory(options, messageHistory);
                 continue;
             }
 
@@ -260,6 +268,7 @@ export async function runTaskLoop(
                     role: "user",
                     content: resultContent,
                 });
+                emitMessageHistory(options, messageHistory);
             }
 
             if (taskEnded) {
@@ -275,6 +284,7 @@ export async function runTaskLoop(
                     role: "user",
                     content: feedback,
                 });
+                emitMessageHistory(options, messageHistory);
             }
         }
 

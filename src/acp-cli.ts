@@ -184,7 +184,7 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
         },
         snapshot: {
             ...((merged.security as any)?.snapshot || {}),
-            storageRoot: appPaths.snapshotDir,
+            storageRoot: appPaths.sessionsDir,
         },
     };
 

@@ -41,7 +41,7 @@ describe("CLI reset option", () => {
             homeDir: root,
             configDir,
             dataDir,
-            snapshotDir: path.join(dataDir, "session-snapshot"),
+            sessionsDir: path.join(dataDir, "sessions"),
             defaultConfigCandidates: [],
         });
 
@@ -74,7 +74,7 @@ describe("CLI reset option", () => {
             homeDir: root,
             configDir,
             dataDir,
-            snapshotDir: path.join(dataDir, "session-snapshot"),
+            sessionsDir: path.join(dataDir, "sessions"),
             defaultConfigCandidates: [],
         });
 

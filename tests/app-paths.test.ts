@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
     ensureDiogenesAppDirs,
     findDefaultConfigFileSync,
-    getDefaultSnapshotStorageRoot,
+    getDefaultSessionsStorageRoot,
     resolveDiogenesAppPaths,
 } from "../src/utils/app-paths";
 
@@ -28,7 +28,7 @@ describe("app paths", () => {
         });
 
         expect(result.configDir).toBe(path.join("/xdg/config", "diogenes"));
-        expect(result.snapshotDir).toBe(path.join("/xdg/data", "diogenes", "session-snapshot"));
+        expect(result.sessionsDir).toBe(path.join("/xdg/data", "diogenes", "sessions"));
     });
 
     it("resolves macOS paths under Application Support", () => {
@@ -39,7 +39,7 @@ describe("app paths", () => {
         });
 
         expect(result.configDir).toBe(path.join("/Users/alice", "Library", "Application Support", "diogenes"));
-        expect(result.snapshotDir).toBe(path.join("/Users/alice", "Library", "Application Support", "diogenes", "session-snapshot"));
+        expect(result.sessionsDir).toBe(path.join("/Users/alice", "Library", "Application Support", "diogenes", "sessions"));
     });
 
     it("resolves windows paths from APPDATA and LOCALAPPDATA", () => {
@@ -53,7 +53,7 @@ describe("app paths", () => {
         });
 
         expect(result.configDir).toBe(path.join("C:\\Users\\Alice\\AppData\\Roaming", "diogenes"));
-        expect(result.snapshotDir).toBe(path.join("C:\\Users\\Alice\\AppData\\Local", "diogenes", "session-snapshot"));
+        expect(result.sessionsDir).toBe(path.join("C:\\Users\\Alice\\AppData\\Local", "diogenes", "sessions"));
     });
 
     it("creates config and snapshot directories on first run", async () => {
@@ -71,7 +71,7 @@ describe("app paths", () => {
 
         await expect(fs.access(paths.configDir)).resolves.toBeUndefined();
         await expect(fs.access(paths.dataDir)).resolves.toBeUndefined();
-        await expect(fs.access(paths.snapshotDir)).resolves.toBeUndefined();
+        await expect(fs.access(paths.sessionsDir)).resolves.toBeUndefined();
     });
 
     it("finds the default config file when present", async () => {
@@ -103,7 +103,7 @@ describe("app paths", () => {
     });
 
     it("returns the platform snapshot storage root", () => {
-        const storageRoot = getDefaultSnapshotStorageRoot({
+        const storageRoot = getDefaultSessionsStorageRoot({
             platform: "linux",
             homeDir: "/home/alice",
             env: {
@@ -111,6 +111,6 @@ describe("app paths", () => {
             },
         });
 
-        expect(storageRoot).toBe(path.join("/xdg/data", "diogenes", "session-snapshot"));
+        expect(storageRoot).toBe(path.join("/xdg/data", "diogenes", "sessions"));
     });
 });

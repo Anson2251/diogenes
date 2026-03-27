@@ -43,12 +43,36 @@ export interface SnapshotSummary {
     label?: string;
 }
 
-export interface PersistedDiogenesStatePlaceholder {
+export interface PersistedDiogenesMessage {
+    role: "user" | "assistant";
+    content: string;
+}
+
+export interface PersistedDiogenesLoadedFile {
+    path: string;
+    ranges: Array<{
+        start: number;
+        end: number;
+    }>;
+}
+
+export interface PersistedDiogenesTodoItem {
+    text: string;
+    state: "done" | "active" | "pending";
+}
+
+export interface PersistedDiogenesState {
     version: 1;
-    kind: "placeholder";
+    kind: "diogenes_state";
     sessionId: string;
     cwd: string;
     createdAt: string;
     updatedAt: string;
-    note: string;
+    messageHistory: PersistedDiogenesMessage[];
+    workspace: {
+        loadedDirectories: string[];
+        loadedFiles: PersistedDiogenesLoadedFile[];
+        todo: PersistedDiogenesTodoItem[];
+        notepad: string[];
+    };
 }

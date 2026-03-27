@@ -1,11 +1,11 @@
+import { randomUUID } from "crypto";
 import * as path from "path";
 import type { DiogenesConfig } from "../types";
-import { getDefaultSnapshotStorageRoot, SessionSnapshotManager } from "../snapshot/manager";
+import { getDefaultSessionsStorageRoot, SessionSnapshotManager } from "../snapshot/manager";
 import { ACPSession, type ACPNotificationSink } from "./session";
 
 export class SessionManager {
     private readonly sessions = new Map<string, ACPSession>();
-    private nextId = 1;
 
     constructor(
         private readonly config: DiogenesConfig,
@@ -14,7 +14,7 @@ export class SessionManager {
     ) {}
 
     async createSession(cwd: string): Promise<ACPSession> {
-        const sessionId = `session-${this.nextId++}`;
+        const sessionId = randomUUID();
         const resolvedCwd = path.resolve(cwd);
         const session = new ACPSession(
             sessionId,
@@ -32,9 +32,10 @@ export class SessionManager {
                 cwd: resolvedCwd,
                 config: {
                     ...snapshotConfig,
-                    storageRoot: getDefaultSnapshotStorageRoot(),
+                    storageRoot: getDefaultSessionsStorageRoot(),
                     resticBinaryArgs: snapshotConfig.resticBinaryArgs || [],
                 },
+                stateProvider: session,
             });
 
             try {

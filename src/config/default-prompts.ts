@@ -1,4 +1,4 @@
-import { getDefaultSnapshotStorageRoot } from "../utils/app-paths";
+import { getDefaultSessionsStorageRoot } from "../utils/app-paths";
 
 export const DEFAULT_SYSTEM_PROMPT = `You are Diogenes, a tool-driven coding agent.
 Complete the task by reading the current state, choosing the right tool, checking results, and iterating until the work is done.
@@ -188,7 +188,7 @@ export const DEFAULT_SECURITY_CONFIG = {
         enabled: true,
         includeDiogenesState: false,
         autoBeforePrompt: true,
-        storageRoot: getDefaultSnapshotStorageRoot(),
+        storageRoot: getDefaultSessionsStorageRoot(),
         resticBinary: "restic",
         resticBinaryArgs: [],
         timeoutMs: 120000,

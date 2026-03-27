@@ -61,7 +61,7 @@ export {
     ensureDiogenesAppDirs,
     ensureDiogenesAppDirsSync,
     findDefaultConfigFileSync,
-    getDefaultSnapshotStorageRoot as getDefaultSnapshotStorageRootFromAppPaths,
+    getDefaultSessionsStorageRoot as getDefaultSessionsStorageRootFromAppPaths,
 } from "./utils/app-paths";
 export type {
     ResticClientOptions,
@@ -75,16 +75,20 @@ export type {
 } from "./utils/restic";
 export {
     SessionSnapshotManager,
-    getDefaultSnapshotStorageRoot,
+    getDefaultSessionsStorageRoot,
 } from "./snapshot/manager";
 export { SnapshotManifestStore } from "./snapshot/manifest-store";
 export {
-    PlaceholderStateSerializer,
+    DiogenesStateSerializer,
 } from "./snapshot/state-serializer";
 export type {
     SnapshotManager,
     SnapshotManagerOptions,
 } from "./snapshot/manager";
+export type {
+    SnapshotStateProvider,
+    SnapshotStateSerializer,
+} from "./snapshot/state-serializer";
 export type {
     SnapshotCreateInput,
     SnapshotCreateResult,
@@ -92,7 +96,10 @@ export type {
     SnapshotTrigger,
     SessionSnapshotEntry,
     SessionSnapshotManifest,
-    PersistedDiogenesStatePlaceholder,
+    PersistedDiogenesLoadedFile,
+    PersistedDiogenesMessage,
+    PersistedDiogenesState,
+    PersistedDiogenesTodoItem,
 } from "./snapshot/types";
 
 // ==================== Logger ====================
