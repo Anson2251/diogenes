@@ -5,9 +5,8 @@ import type { DiogenesConfig } from "../types";
 import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "../runtime/task-runner";
 import type { SnapshotManager } from "../snapshot/manager";
 import type { SnapshotStateProvider, SnapshotStateRestorer } from "../snapshot/state-serializer";
-import type { PersistedDiogenesState } from "../snapshot/types";
+import type { PersistedACPUpdate, PersistedDiogenesState } from "../snapshot/types";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
-import { parseToolCalls } from "../utils/tool-parser";
 import { createBaseSlashCommandRegistry, createSnapshotSlashCommands, type MarkdownSection, type ParsedSlashCommand, type SlashCommandContext } from "./slash-commands";
 import type { PromptBlock } from "./types";
 import type { AvailableCommand, SessionLifecycleState, SessionMetadata, StoredSessionMetadata } from "./types";
@@ -29,6 +28,10 @@ interface RestorePersistedStateOptions {
     persist?: boolean;
     emitPlanUpdate?: boolean;
     preserveTimestamps?: boolean;
+}
+
+interface EmitSessionUpdateOptions {
+    record?: boolean;
 }
 
 class SessionResourceRegistry {
@@ -205,31 +208,6 @@ function getVisibleAssistantText(content: string): string {
     return visibleText;
 }
 
-function extractPromptText(content: string): string | null {
-    const prefixes = ["========= TASK\n", "========= NEW TASK\n"];
-
-    for (const prefix of prefixes) {
-        if (!content.startsWith(prefix) || !content.endsWith("\n=========")) {
-            continue;
-        }
-
-        return content.slice(prefix.length, -"\n=========".length);
-    }
-
-    return null;
-}
-
-function isInternalUserMessage(content: string): boolean {
-    return content.startsWith("[SYSTEM]\n")
-        || content.startsWith("[CONTEXT WARNING]\n")
-        || content.startsWith("===== TOOL RESULTS")
-        || content.startsWith("Results from tools:")
-        || content.startsWith("Tool results:")
-        || content.startsWith("Tool execution results:")
-        || content.includes("task.end")
-        || content.includes("No tool calls received");
-}
-
 function promptBlocksToText(prompt: PromptBlock[]): string {
     const parts: string[] = [];
 
@@ -268,59 +246,6 @@ function promptBlocksToText(prompt: PromptBlock[]): string {
     return parts.join("\n\n").trim();
 }
 
-interface ReplayToolResultSection {
-    toolName: string;
-    status: "completed" | "failed";
-    text: string;
-}
-
-interface ReplayToolResultBundle {
-    sections: ReplayToolResultSection[];
-    fallbackText: string | null;
-}
-
-function parseReplayToolResultSections(content: string): ReplayToolResultSection[] {
-    const normalized = content.replace(/\r\n/g, "\n").trim();
-    if (!normalized.startsWith("===== TOOL RESULTS")) {
-        return [];
-    }
-
-    const body = normalized.slice("===== TOOL RESULTS".length).trim();
-    if (body.length === 0) {
-        return [];
-    }
-
-    const sections = body.split(/\n\n(?=\[(?:OK|FAIL)\]\s+)/g);
-    const parsed: ReplayToolResultSection[] = [];
-
-    for (const section of sections) {
-        const trimmed = section.trim();
-        const match = trimmed.match(/^\[(OK|FAIL)\]\s+([^\n]+)$/m);
-        if (!match) {
-            continue;
-        }
-
-        parsed.push({
-            toolName: match[2].trim(),
-            status: match[1] === "OK" ? "completed" : "failed",
-            text: trimmed,
-        });
-    }
-
-    return parsed;
-}
-
-function parseReplayToolResultBundle(content: string | null | undefined): ReplayToolResultBundle {
-    if (!content || !content.startsWith("===== TOOL RESULTS")) {
-        return { sections: [], fallbackText: null };
-    }
-
-    return {
-        sections: parseReplayToolResultSections(content),
-        fallbackText: content.replace(/^===== TOOL RESULTS\s*/, "").trim(),
-    };
-}
-
 function createACPToolCallUpdate(
     toolCallId: string,
     toolCall: ToolCall,
@@ -351,6 +276,10 @@ function createACPToolCallResultUpdate(
         ...(content ? { content } : {}),
         ...(rawOutput ? { rawOutput } : {}),
     };
+}
+
+function cloneACPUpdate(update: PersistedACPUpdate): PersistedACPUpdate {
+    return JSON.parse(JSON.stringify(update)) as PersistedACPUpdate;
 }
 
 function mapToolKind(toolName: string): string {
@@ -615,6 +544,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     private readonly maxIterations: number | undefined;
     private readonly resources = new SessionResourceRegistry();
     private readonly slashCommands = createBaseSlashCommandRegistry();
+    private acpReplayLog: PersistedACPUpdate[] = [];
     private messageHistory: ConversationMessage[] = [];
     private currentMessageHistory: ConversationMessage[] = [];
     private lifecycleState: SessionLifecycleState = "active";
@@ -684,6 +614,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return source.map((message) => ({ ...message }));
     }
 
+    getACPReplayLog(): PersistedACPUpdate[] {
+        return this.acpReplayLog.map((update) => cloneACPUpdate(update));
+    }
+
     getLifecycleState(): SessionLifecycleState {
         return this.lifecycleState;
     }
@@ -727,6 +661,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 title: this.title,
                 description: this.description,
             },
+            acpReplayLog: this.acpReplayLog.map((update) => cloneACPUpdate(update)),
             messageHistory: this.getMessageHistory().map((message) => ({
                 role: message.role,
                 content: message.content,
@@ -750,75 +685,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     }
 
     getReplayUpdates(): Array<Record<string, unknown>> {
-        const updates: Array<Record<string, unknown>> = [];
-
-        for (let index = 0; index < this.messageHistory.length; index += 1) {
-            const message = this.messageHistory[index];
-            if (message.role === "user") {
-                const promptText = extractPromptText(message.content);
-                const visibleText = promptText ?? message.content;
-                if (isInternalUserMessage(visibleText)) {
-                    continue;
-                }
-
-                updates.push({
-                    sessionUpdate: "user_message_chunk",
-                    content: createTextContent(visibleText),
-                });
-                continue;
-            }
-
-            const visibleText = getVisibleAssistantText(message.content).trim();
-            if (visibleText.length > 0) {
-                updates.push({
-                    sessionUpdate: "agent_message_chunk",
-                    content: createTextContent(visibleText),
-                });
-            }
-
-            const parsedToolCalls = parseToolCalls(message.content);
-            if (!parsedToolCalls.success || !parsedToolCalls.toolCalls || parsedToolCalls.toolCalls.length === 0) {
-                continue;
-            }
-
-            const replayedToolCalls = parsedToolCalls.toolCalls;
-            const nextUserMessage = index + 1 < this.messageHistory.length && this.messageHistory[index + 1]?.role === "user"
-                ? this.messageHistory[index + 1].content
-                : null;
-            const replayResultBundle = parseReplayToolResultBundle(nextUserMessage);
-
-            replayedToolCalls.forEach((toolCall, toolIndex) => {
-                const replayToolCallId = `replay-${index}-${toolIndex}`;
-                updates.push(createACPToolCallUpdate(
-                    replayToolCallId,
-                    toolCall,
-                    "completed",
-                    this.extractLocations(toolCall.params),
-                ));
-
-                const matchingSection = replayResultBundle.sections[toolIndex]
-                    ?? (
-                        replayedToolCalls.length === 1 && replayResultBundle.fallbackText
-                            ? {
-                                toolName: toolCall.tool,
-                                status: "completed" as const,
-                                text: replayResultBundle.fallbackText,
-                            }
-                            : undefined
-                    );
-                if (!matchingSection) {
-                    return;
-                }
-
-                updates.push(createACPToolCallResultUpdate(
-                    replayToolCallId,
-                    matchingSection.status,
-                    createToolResultContent(matchingSection.text),
-                ));
-            });
-        }
-
-        return updates;
+        return this.acpReplayLog.map((update) => cloneACPUpdate(update));
     }
 
     getHydratedStateMeta(): {
@@ -885,6 +752,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             }
         }
 
+        this.acpReplayLog = Array.isArray(state.acpReplayLog)
+            ? state.acpReplayLog.map((update) => cloneACPUpdate(update))
+            : [];
         this.messageHistory = state.messageHistory.map((message) => ({ ...message }));
         this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
         if (!options.preserveTimestamps) {
@@ -950,12 +820,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         snapshotId: string,
         options: { emitAgentMessage?: boolean } = {},
     ): Promise<{ safetySnapshotId: string | null }> {
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "snapshot_restore_started",
-                snapshotId,
-            },
+        await this.recordSessionUpdateAndPersist({
+            sessionUpdate: "snapshot_restore_started",
+            snapshotId,
         });
 
         let restoreResult: { safetySnapshotId: string | null } = { safetySnapshotId: null };
@@ -963,27 +830,22 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         try {
             restoreResult = await this.restoreSnapshot(snapshotId);
         } catch (error) {
-            this.notify("session/update", {
-                sessionId: this.sessionId,
-                update: {
-                    sessionUpdate: "snapshot_restore_failed",
-                    snapshotId,
-                    error: error instanceof Error ? error.message : String(error),
-                },
+            await this.recordSessionUpdateAndPersist({
+                sessionUpdate: "snapshot_restore_failed",
+                snapshotId,
+                error: error instanceof Error ? error.message : String(error),
             });
             throw error;
         }
 
         this.emitHydratedStateUpdates();
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "snapshot_restore_completed",
-                snapshotId,
-                _meta: {
-                    diogenes: {
-                        safetySnapshotId: restoreResult.safetySnapshotId,
-                    },
+        await this.persistMetadata();
+        await this.recordSessionUpdateAndPersist({
+            sessionUpdate: "snapshot_restore_completed",
+            snapshotId,
+            _meta: {
+                diogenes: {
+                    safetySnapshotId: restoreResult.safetySnapshotId,
                 },
             },
         });
@@ -1019,40 +881,50 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return this.slashCommands.list().map((definition) => definition.command);
     }
 
-    emitAvailableCommandsUpdate(): void {
+    private emitSessionUpdate(update: Record<string, unknown>, options: EmitSessionUpdateOptions = {}): void {
+        if (options.record ?? true) {
+            this.acpReplayLog.push(cloneACPUpdate(update));
+        }
+
+        this.notify("session/update", {
+            sessionId: this.sessionId,
+            update,
+        });
+    }
+
+    private async recordSessionUpdateAndPersist(update: Record<string, unknown>): Promise<void> {
+        this.emitSessionUpdate(update);
+        await this.persistMetadata();
+    }
+
+    emitAvailableCommandsUpdate(options: EmitSessionUpdateOptions = {}): void {
         const availableCommands = this.getAvailableCommands();
         if (availableCommands.length === 0) {
             return;
         }
 
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "available_commands_update",
-                availableCommands,
-            },
-        });
+        this.emitSessionUpdate({
+            sessionUpdate: "available_commands_update",
+            availableCommands,
+        }, options);
     }
 
-    emitHydratedStateUpdates(): void {
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "session_info_update",
-                title: this.title,
-                updatedAt: this.updatedAt,
-                _meta: {
-                    diogenes: {
-                        description: this.description,
-                        state: this.lifecycleState,
-                        hasActiveRun: this.activeRun !== null,
-                        hydratedState: this.getHydratedStateMeta(),
-                    },
+    emitHydratedStateUpdates(options: EmitSessionUpdateOptions = {}): void {
+        this.emitSessionUpdate({
+            sessionUpdate: "session_info_update",
+            title: this.title,
+            updatedAt: this.updatedAt,
+            _meta: {
+                diogenes: {
+                    description: this.description,
+                    state: this.lifecycleState,
+                    hasActiveRun: this.activeRun !== null,
+                    hydratedState: this.getHydratedStateMeta(),
                 },
             },
-        });
-        this.emitTodoPlanUpdate();
-        this.emitAvailableCommandsUpdate();
+        }, options);
+        this.emitTodoPlanUpdate(options);
+        this.emitAvailableCommandsUpdate(options);
     }
 
     isBusy(): boolean {
@@ -1354,12 +1226,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.messageHistory = [...historyBeforeCommand, userMessage, assistantMessage];
         this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
 
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "agent_message_chunk",
-                content: createTextContent(summary),
-            },
+        this.emitSessionUpdate({
+            sessionUpdate: "agent_message_chunk",
+            content: createTextContent(summary),
         });
 
         return {
@@ -1380,14 +1249,11 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.messageHistory = [...this.messageHistory, assistantMessage];
         this.currentMessageHistory = this.messageHistory.map((message) => ({ ...message }));
         this.updatedAt = new Date().toISOString();
-        await this.persistMetadata();
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "agent_message_chunk",
-                content: createTextContent(content),
-            },
+        this.emitSessionUpdate({
+            sessionUpdate: "agent_message_chunk",
+            content: createTextContent(content),
         });
+        await this.persistMetadata();
     }
 
     private renderMarkdownSections(sections: MarkdownSection[]): string {
@@ -1456,35 +1322,29 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return this.registerToolCallId(iteration, index);
     }
 
-    private emitTodoPlanUpdate(): void {
+    private emitTodoPlanUpdate(options: EmitSessionUpdateOptions = {}): void {
         const items = this.diogenes.getWorkspaceManager().getTodoWorkspace().items;
 
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "plan",
-                entries: items.map((item) => ({
-                    content: item.text,
-                    priority: mapTodoPriority(item.state),
-                    status: mapTodoStatus(item.state),
-                })),
-            },
-        });
+        this.emitSessionUpdate({
+            sessionUpdate: "plan",
+            entries: items.map((item) => ({
+                content: item.text,
+                priority: mapTodoPriority(item.state),
+                status: mapTodoStatus(item.state),
+            })),
+        }, options);
     }
 
     private emitSessionMetadataUpdate(): void {
-        this.notify("session/update", {
-            sessionId: this.sessionId,
-            update: {
-                sessionUpdate: "session_info_update",
-                title: this.title,
-                updatedAt: this.updatedAt,
-                _meta: {
-                    "diogenes": {
-                        description: this.description,
-                        state: this.lifecycleState,
-                        hasActiveRun: this.activeRun !== null,
-                    },
+        this.emitSessionUpdate({
+            sessionUpdate: "session_info_update",
+            title: this.title,
+            updatedAt: this.updatedAt,
+            _meta: {
+                diogenes: {
+                    description: this.description,
+                    state: this.lifecycleState,
+                    hasActiveRun: this.activeRun !== null,
                 },
             },
         });
@@ -1533,49 +1393,37 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 }
 
                 this.activeRun.emittedContentLength = visibleText.length;
-                this.notify("session/update", {
-                    sessionId: this.sessionId,
-                    update: {
-                        sessionUpdate: "agent_message_chunk",
-                        content: createTextContent(nextChunk),
-                    },
+                this.emitSessionUpdate({
+                    sessionUpdate: "agent_message_chunk",
+                    content: createTextContent(nextChunk),
                 });
                 return;
             }
 
-            this.notify("session/update", {
-                sessionId: this.sessionId,
-                update: {
-                    sessionUpdate: "agent_message_chunk",
-                    content: createTextContent(event.chunk.content),
-                },
+            this.emitSessionUpdate({
+                sessionUpdate: "agent_message_chunk",
+                content: createTextContent(event.chunk.content),
             });
             return;
         }
 
         if (event.type === "tool.calls.parsed") {
             event.toolCalls.forEach((toolCall, index) => {
-                this.notify("session/update", {
-                    sessionId: this.sessionId,
-                    update: createACPToolCallUpdate(
-                        this.registerToolCallId(event.iteration, index),
-                        toolCall,
-                        "pending",
-                        this.extractLocations(toolCall.params),
-                    ),
-                });
+                this.emitSessionUpdate(createACPToolCallUpdate(
+                    this.registerToolCallId(event.iteration, index),
+                    toolCall,
+                    "pending",
+                    this.extractLocations(toolCall.params),
+                ));
             });
             return;
         }
 
         if (event.type === "tool.execution.started") {
-            this.notify("session/update", {
-                sessionId: this.sessionId,
-                update: createACPToolCallResultUpdate(
-                    this.getToolCallId(event.iteration, event.index),
-                    "in_progress",
-                ),
-            });
+            this.emitSessionUpdate(createACPToolCallResultUpdate(
+                this.getToolCallId(event.iteration, event.index),
+                "in_progress",
+            ));
             return;
         }
 
@@ -1585,20 +1433,17 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 ? tool?.formatResultForLLM(event.toolCall, event.result)
                 : undefined;
 
-            this.notify("session/update", {
-                sessionId: this.sessionId,
-                update: createACPToolCallResultUpdate(
-                    this.getToolCallId(event.iteration, event.index),
-                    event.result.success ? "completed" : "failed",
-                    createACPToolResultContent(
-                        event.toolCall.tool,
-                        event.toolCall.params,
-                        event.result,
-                        formattedACPText,
-                    ),
+            this.emitSessionUpdate(createACPToolCallResultUpdate(
+                this.getToolCallId(event.iteration, event.index),
+                event.result.success ? "completed" : "failed",
+                createACPToolResultContent(
+                    event.toolCall.tool,
+                    event.toolCall.params,
                     event.result,
+                    formattedACPText,
                 ),
-            });
+                event.result,
+            ));
 
             if (
                 event.result.success
@@ -1634,31 +1479,25 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         if (event.type === "context.warning") {
             for (const index of event.skippedIndexes) {
                 const skippedResult = createSkippedToolResult(event.warning);
-                this.notify("session/update", {
-                    sessionId: this.sessionId,
-                    update: createACPToolCallResultUpdate(
-                        this.getToolCallId(event.iteration, index),
-                        "failed",
-                        createToolResultContent(
-                            formatToolResultFallback("tool", skippedResult),
-                        ),
-                        skippedResult,
+                this.emitSessionUpdate(createACPToolCallResultUpdate(
+                    this.getToolCallId(event.iteration, index),
+                    "failed",
+                    createToolResultContent(
+                        formatToolResultFallback("tool", skippedResult),
                     ),
-                });
+                    skippedResult,
+                ));
             }
 
-            this.notify("session/update", {
-                sessionId: this.sessionId,
-                update: {
-                    sessionUpdate: "plan",
-                    entries: [
-                        {
-                            content: `Context warning: ${event.warning}`,
-                            priority: "high",
-                            status: "in_progress",
-                        },
-                    ],
-                },
+            this.emitSessionUpdate({
+                sessionUpdate: "plan",
+                entries: [
+                    {
+                        content: `Context warning: ${event.warning}`,
+                        priority: "high",
+                        status: "in_progress",
+                    },
+                ],
             });
             return;
         }
@@ -1668,12 +1507,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 return;
             }
 
-            this.notify("session/update", {
-                sessionId: this.sessionId,
-                update: {
-                    sessionUpdate: "agent_message_chunk",
-                    content: createTextContent(event.result.result),
-                },
+            this.emitSessionUpdate({
+                sessionUpdate: "agent_message_chunk",
+                content: createTextContent(event.result.result),
             });
         }
     }

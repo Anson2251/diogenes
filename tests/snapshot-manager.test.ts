@@ -119,6 +119,7 @@ describe("SessionSnapshotManager", () => {
                 kind: "diogenes_state",
                 sessionId: "session-1",
                 cwd: fixture.workspaceDir,
+                acpReplayLog: [],
                 messageHistory: [{ role: "assistant", content: "Earlier summary" }],
             }));
             expect(state.workspace.loadedDirectories).toEqual(["."]);
@@ -207,6 +208,7 @@ describe("SessionSnapshotManager", () => {
             expect(restoredState).toEqual(expect.objectContaining({
                 kind: "diogenes_state",
                 metadata: sessionState,
+                acpReplayLog: [],
                 messageHistory: [{ role: "assistant", content: "captured before restore" }],
             }));
             expect(restoredState.workspace.todo).toEqual([{ text: "before restore", state: "active" }]);

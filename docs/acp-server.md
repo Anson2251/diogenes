@@ -138,7 +138,7 @@ That means:
 
 Sessions are persisted under the managed Diogenes local data directory.
 
-That persistence stores session metadata and lightweight session state so a later ACP server process can load the session again.
+That persistence stores session metadata, lightweight session state, and a persisted ACP replay log so a later ACP server process can load the session again and replay the original ACP-visible update stream.
 
 If the ACP server process exits:
 
@@ -187,6 +187,16 @@ Notes:
 - these commands are handled locally inside the ACP session layer and do not require an LLM round-trip
 - command-specific metadata lives in `availableCommands[*]._meta.diogenes`
 - commands are registered through a dedicated modular registry under `src/acp/slash-commands/`
+
+## Persisted ACP Replay
+
+`session/load` replays a persisted ACP update log instead of reconstructing ACP events from `messageHistory`.
+
+That means:
+
+- Diogenes stores the `session/update` payloads originally sent to the ACP client
+- load replay can preserve ACP-specific structures such as `tool_call`, `tool_call_update`, and structured diff content
+- `messageHistory` remains part of runtime/session state, but is no longer the canonical source for ACP replay
 
 Example metadata shape:
 

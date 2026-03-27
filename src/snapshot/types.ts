@@ -65,6 +65,8 @@ export interface PersistedDiogenesTodoItem {
     state: "done" | "active" | "pending";
 }
 
+export type PersistedACPUpdate = Record<string, unknown>;
+
 export interface PersistedDiogenesState {
     version: 1;
     kind: "diogenes_state";
@@ -76,6 +78,7 @@ export interface PersistedDiogenesState {
         title: string | null;
         description: string | null;
     };
+    acpReplayLog: PersistedACPUpdate[];
     messageHistory: PersistedDiogenesMessage[];
     workspace: {
         loadedDirectories: string[];

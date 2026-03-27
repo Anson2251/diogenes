@@ -60,6 +60,7 @@ describe("DiogenesStateSerializer", () => {
             cwd: workspaceDir,
             createdAt: "2026-03-27T00:00:00.000Z",
             updatedAt: "2026-03-27T00:05:00.000Z",
+            acpReplayLog: [],
             messageHistory: [
                 { role: "user", content: "please inspect" },
                 { role: "assistant", content: "working on it" },

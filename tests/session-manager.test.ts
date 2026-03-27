@@ -163,6 +163,7 @@ describe("SessionManager lifecycle", () => {
             createdAt: session.getCreatedAt(),
             updatedAt: session.getUpdatedAt(),
             metadata: { title: null, description: null },
+            acpReplayLog: [],
             messageHistory: [{ role: "user", content: "hello" }],
             workspace: { loadedDirectories: [], loadedFiles: [], todo: [], notepad: [] },
         });
@@ -346,6 +347,7 @@ describe("ACPServer disposal", () => {
             createdAt: session.getCreatedAt(),
             updatedAt: session.getUpdatedAt(),
             metadata: { title: null, description: null },
+            acpReplayLog: [],
             messageHistory: [{ role: "user", content: "hello" }],
             workspace: { loadedDirectories: [], loadedFiles: [], todo: [], notepad: [] },
         });
@@ -392,7 +394,10 @@ describe("ACPServer disposal", () => {
                         diogenes: expect.objectContaining({
                             liveSession: true,
                             snapshotEnabled: false,
-                            availableCommands: [],
+                            availableCommands: expect.arrayContaining([
+                                expect.objectContaining({ name: "help" }),
+                                expect.objectContaining({ name: "session" }),
+                            ]),
                         }),
                     }),
                 }),

@@ -229,8 +229,7 @@ export class ACPServer {
             });
         }
 
-        session.emitHydratedStateUpdates();
-        session.emitAvailableCommandsUpdate();
+        session.emitHydratedStateUpdates({ record: false });
     }
 
     private async handlePrompt(params: PromptSessionParams | undefined) {

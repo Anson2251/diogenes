@@ -172,6 +172,7 @@ Current ACP support includes:
 
 - persisted managed sessions with `session/load` and `session/list`
 - streamed `session/update` notifications for assistant text, tool calls, plans, and restore lifecycle
+- persisted ACP replay logs so loaded sessions can replay the original ACP-visible event stream
 - session-scoped snapshots with restore support and automatic safety snapshots
 - Diogenes ACP extensions such as `_diogenes/session/get`, `_diogenes/session/snapshots`, and `_diogenes/session/prune`
 - discoverable local ACP slash commands such as `/help`, `/session`, `/restore`, `/snapshots`, and `/snapshot`

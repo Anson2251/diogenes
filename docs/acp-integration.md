@@ -14,7 +14,7 @@ Current implemented ACP shape includes:
 
 - stdio JSON-RPC transport
 - `initialize`, `session/new`, `session/load`, `session/list`, `session/prompt`, `session/cancel`, and `session/restore`
-- managed persisted sessions with replayable ACP-visible history
+- managed persisted sessions with replayable ACP-visible update logs
 - session-scoped snapshots and ACP-visible restore flows with safety snapshots
 - Diogenes-specific ACP extension methods under `_diogenes/session/*`
 - discoverable ACP-local slash commands exposed through `available_commands_update`
@@ -382,8 +382,10 @@ The current model is:
 
 - session metadata is persisted under managed local storage
 - lightweight state is persisted separately from snapshots
-- `session/load` reconstructs a live session and replays ACP-visible history through `session/update`
+- ACP-visible `session/update` payloads are persisted and replayed directly during `session/load`
 - empty sessions with no messages are deleted on close instead of being kept as empty persisted records
+
+This avoids reconstructing ACP tool events from generic session text history and keeps replay aligned with the original ACP client experience.
 
 ### Session Extensions
 

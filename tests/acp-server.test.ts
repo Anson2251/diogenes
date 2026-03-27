@@ -156,7 +156,7 @@ describe("ACPServer", () => {
         }
     });
 
-    it("loads a stored session by replaying persisted session history", async () => {
+    it("loads a stored session by replaying persisted ACP updates", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-"));
         const originalHome = process.env.HOME;
         process.env.HOME = root;
@@ -189,6 +189,16 @@ describe("ACPServer", () => {
                 cwd: process.cwd(),
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
+                acpReplayLog: [
+                    {
+                        sessionUpdate: "user_message_chunk",
+                        content: { type: "text", text: "hello" },
+                    },
+                    {
+                        sessionUpdate: "agent_message_chunk",
+                        content: { type: "text", text: "world" },
+                    },
+                ],
                 messageHistory: [
                     { role: "user", content: "hello" },
                     { role: "assistant", content: "world" },
@@ -374,6 +384,62 @@ describe("ACPServer", () => {
                 cwd: workspaceDir,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
+                acpReplayLog: [
+                    {
+                        sessionUpdate: "user_message_chunk",
+                        content: { type: "text", text: "update the greeting" },
+                    },
+                    {
+                        sessionUpdate: "agent_message_chunk",
+                        content: { type: "text", text: "I will edit the file." },
+                    },
+                    {
+                        sessionUpdate: "tool_call",
+                        toolCallId: "saved-tool-1",
+                        title: "Editing file sample.ts",
+                        kind: "edit",
+                        status: "completed",
+                        rawInput: {
+                            path: "sample.ts",
+                            edits: [
+                                {
+                                    mode: "replace",
+                                    anchor: {
+                                        start: {
+                                            line: 1,
+                                            text: "const greeting = 'hello';",
+                                        },
+                                    },
+                                    content: ["const greeting = 'hello there';"],
+                                },
+                            ],
+                        },
+                        locations: [{ path: path.join(workspaceDir, "sample.ts") }],
+                    },
+                    {
+                        sessionUpdate: "tool_call_update",
+                        toolCallId: "saved-tool-1",
+                        status: "completed",
+                        content: [
+                            {
+                                type: "content",
+                                content: {
+                                    type: "text",
+                                    text: [
+                                        "Updated sample.ts: 1 edit applied, 2 total lines",
+                                        "replace lines 1-1 -> 1-1",
+                                    ].join("\n"),
+                                },
+                            },
+                            {
+                                type: "diff",
+                                path: path.join(workspaceDir, "sample.ts"),
+                                oldText: "const greeting = 'hello';\nconsole.log(greeting);",
+                                newText: "const greeting = 'hello there';\nconsole.log(greeting);",
+                            },
+                        ],
+                    },
+                ],
                 messageHistory: [
                     { role: "user", content: "update the greeting" },
                     {
@@ -446,6 +512,12 @@ describe("ACPServer", () => {
                                             "replace lines 1-1 -> 1-1",
                                         ].join("\n"),
                                     }),
+                                }),
+                                expect.objectContaining({
+                                    type: "diff",
+                                    path: path.join(workspaceDir, "sample.ts"),
+                                    oldText: "const greeting = 'hello';\nconsole.log(greeting);",
+                                    newText: "const greeting = 'hello there';\nconsole.log(greeting);",
                                 }),
                             ]),
                         }),
@@ -866,6 +938,7 @@ describe("ACPServer", () => {
                     createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
                     updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
                     metadata: { title: `Session ${i}`, description: null },
+                    acpReplayLog: [],
                     messageHistory: [],
                     workspace: { loadedDirectories: [], loadedFiles: [], todo: [], notepad: [] },
                 }, null, 2));
@@ -2568,6 +2641,16 @@ describe("ACPServer", () => {
                 }),
             ]));
             expect(await fs.promises.readFile(path.join(root, "workspace", "hello.txt"), "utf8")).toBe("restored via acp\n");
+            const persistedState = JSON.parse(
+                await fs.promises.readFile(
+                    path.join(root, "Library", "Application Support", "diogenes", "sessions", sessionId, "state.json"),
+                    "utf8",
+                ),
+            );
+            expect(persistedState.acpReplayLog.some(
+                (update: any) => update.sessionUpdate === "agent_message_chunk"
+                    && update.content?.text?.includes("Safety Snapshot:"),
+            )).toBe(true);
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;

@@ -12,7 +12,8 @@ Implemented since this draft:
 - `SessionManager` ownership of live sessions
 - explicit close/dispose vs persisted delete semantics
 - managed on-disk session persistence with `metadata.json` and `state.json`
-- `session/load` replay of ACP-visible conversation history
+- persisted ACP replay log stored alongside session state
+- `session/load` replay from the persisted ACP update log
 - `session/list` with cursor pagination
 - session-owned snapshot infrastructure and ACP-visible restore flows
 - pruning of broken or orphaned persisted sessions
@@ -48,6 +49,12 @@ Implementation note:
 - slash commands are now implemented as dedicated modules under `src/acp/slash-commands/`
 - a shared registry owns command registration and lookup
 - `ACPSession` keeps unknown-command fallback and shared execution helpers
+
+Replay note:
+
+- ACP-visible history is now replayed from stored `session/update` payloads
+- load no longer reconstructs tool events from `messageHistory`
+- this keeps replay aligned with the exact ACP JSON originally seen by the client
 
 ## Goal
 

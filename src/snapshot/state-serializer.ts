@@ -2,11 +2,12 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import type { ConversationMessage } from "../runtime/task-runner";
 import type { WorkspaceManager } from "../context/workspace";
-import type { PersistedDiogenesState } from "./types";
+import type { PersistedACPUpdate, PersistedDiogenesState } from "./types";
 
 export interface SnapshotStateProvider {
     getWorkspaceManager(): WorkspaceManager;
     getMessageHistory(): ConversationMessage[];
+    getACPReplayLog?(): PersistedACPUpdate[];
     getCreatedAt(): string;
     getUpdatedAt(): string;
     getSnapshotMetadata?(): {
@@ -54,6 +55,7 @@ export class DiogenesStateSerializer implements SnapshotStateSerializer {
             createdAt: params.stateProvider.getCreatedAt(),
             updatedAt: params.stateProvider.getUpdatedAt(),
             metadata: params.stateProvider.getSnapshotMetadata?.(),
+            acpReplayLog: params.stateProvider.getACPReplayLog?.() ?? [],
             messageHistory: params.stateProvider.getMessageHistory().map((message) => ({
                 role: message.role,
                 content: message.content,
