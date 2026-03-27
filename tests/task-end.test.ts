@@ -15,10 +15,14 @@ describe("TaskEndTool", () => {
             expect(def.namespace).toBe("task");
             expect(def.name).toBe("end");
             expect(def.description).toContain("End the current task");
-            expect(def.description).toContain("multi-line Markdown");
-            expect(def.description).toContain("prefer heredoc");
+            expect(def.description).toContain("handed back to the user");
             expect(def.params.reason.type).toBe("string");
             expect(def.params.summary.type).toBe("string");
+            expect(def.params.summary.description).toContain("exact user-facing message");
+            expect(def.params.summary.description).toContain("brief greeting");
+            expect(def.params.summary.description).toContain("substantive explanatory answer");
+            expect(def.params.summary.description).toContain("actual answer in summary");
+            expect(def.params.summary.description).toContain("meta-summary");
             expect(def.params.summary.description).toContain("Multi-line Markdown is allowed");
             expect(def.params.summary.description).toContain("prefer heredoc");
             expect(def.params.summary.description).toContain("follow-up instructions");

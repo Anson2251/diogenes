@@ -10,7 +10,7 @@ export class TaskEndTool extends BaseTool {
         super({
             namespace: "task",
             name: "end",
-            description: "End the current task, either because it is complete or because the user must clarify something before work can continue. The summary may be multi-line Markdown and may be fairly detailed when that helps the user understand what happened or decide the next step. If the summary is long or spans multiple lines, prefer heredoc.",
+            description: "End the current task when work is complete, blocked, or the turn should be handed back to the user.",
             params: {
                 title: {
                     type: "string",
@@ -28,7 +28,7 @@ export class TaskEndTool extends BaseTool {
                 },
                 summary: {
                     type: "string",
-                    description: "A user-facing summary of what was completed, or the exact clarification/question the user must answer next. Multi-line Markdown is allowed. If the summary is long or spans multiple lines, prefer heredoc. Be detailed when useful, because the user may respond with follow-up instructions based directly on this summary.",
+                    description: "The exact user-facing message for this turn. This may be a completion result, a direct clarification question, a brief greeting, or a substantive explanatory answer. For explanatory or analytical requests, put the actual answer in summary instead of a brief recap like 'I reviewed the project structure.' Prefer the message itself over a meta-summary like 'I asked what the user needs help with.' Multi-line Markdown is allowed. If the summary is long or spans multiple lines, prefer heredoc. Be detailed when useful, because the user may respond with follow-up instructions based directly on this summary.",
                 },
             },
             returns: {
