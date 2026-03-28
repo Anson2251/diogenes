@@ -1,10 +1,165 @@
+import { z } from "zod";
+
 import type { TaskStopReason } from "../runtime/task-runner";
+
+// Zod schemas for RPC params validation
+export const InitializeParamsSchema = z.object({
+    protocolVersion: z.number(),
+    clientCapabilities: z
+        .object({
+            fs: z
+                .object({
+                    readTextFile: z.boolean().optional(),
+                    writeTextFile: z.boolean().optional(),
+                })
+                .optional(),
+            terminal: z.boolean().optional(),
+        })
+        .optional(),
+    clientInfo: z
+        .object({
+            name: z.string(),
+            title: z.string().nullable().optional(),
+            version: z.string(),
+        })
+        .optional(),
+});
+
+export const NewSessionParamsSchema = z.object({
+    cwd: z.string(),
+    mcpServers: z.array(z.any()).optional(),
+});
+
+export const LoadSessionParamsSchema = NewSessionParamsSchema.extend({
+    sessionId: z.string(),
+});
+
+export const PromptTextBlockSchema = z.object({
+    type: z.literal("text"),
+    text: z.string(),
+});
+
+export const PromptResourceLinkBlockSchema = z.object({
+    type: z.literal("resource_link"),
+    uri: z.string(),
+    name: z.string(),
+    title: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    mimeType: z.string().nullable().optional(),
+    size: z.number().nullable().optional(),
+});
+
+export const PromptEmbeddedResourceBlockSchema = z.object({
+    type: z.literal("resource"),
+    resource: z.object({
+        uri: z.string(),
+        text: z.string().optional(),
+        blob: z.string().optional(),
+        mimeType: z.string().nullable().optional(),
+    }),
+});
+
+export const PromptBlockSchema = z.union([
+    PromptTextBlockSchema,
+    PromptResourceLinkBlockSchema,
+    PromptEmbeddedResourceBlockSchema,
+]);
+
+export const PromptSessionParamsSchema = z.object({
+    sessionId: z.string(),
+    prompt: z.array(PromptBlockSchema),
+});
+
+export const CancelSessionParamsSchema = z.object({
+    sessionId: z.string(),
+});
+
+export const RestoreSessionParamsSchema = z.object({
+    sessionId: z.string(),
+    snapshotId: z.string(),
+});
+
+export const ListSessionsParamsSchema = z.object({
+    cwd: z.string().optional(),
+    cursor: z.string().optional(),
+    pageSize: z.number().optional(),
+});
+
+export const DiogenesGetSessionParamsSchema = z.object({
+    sessionId: z.string(),
+    includeSnapshots: z.boolean().optional(),
+});
+
+export const DiogenesDisposeSessionParamsSchema = z.object({
+    sessionId: z.string(),
+});
+
+export const DiogenesDeleteSessionParamsSchema = z.object({
+    sessionId: z.string(),
+});
+
+export const DiogenesPruneSessionsParamsSchema = z.object({
+    dryRun: z.boolean().optional(),
+});
+
+export const DiogenesRestoreSessionParamsSchema = z.object({
+    sessionId: z.string(),
+    snapshotId: z.string(),
+});
+
+// Schemas for session store types
+export const SessionLifecycleStateSchema = z.enum(["active", "running", "disposing", "disposed"]);
+
+export const SessionMetadataSchema = z.object({
+    sessionId: z.string(),
+    cwd: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    title: z.string().nullable(),
+    description: z.string().nullable(),
+    state: SessionLifecycleStateSchema,
+    hasActiveRun: z.boolean(),
+});
+
+export const AvailableCommandInputSchema = z.object({
+    hint: z.string(),
+});
+
+export const AvailableCommandSchema = z.object({
+    name: z.string(),
+    description: z.string(),
+    input: AvailableCommandInputSchema.optional(),
+    _meta: z
+        .object({
+            diogenes: z
+                .object({
+                    kind: z.string().optional(),
+                    invocations: z.array(z.string()).optional(),
+                    example: z.string().optional(),
+                })
+                .optional(),
+        })
+        .optional(),
+});
+
+export const StoredSessionMetadataSchema = SessionMetadataSchema.extend({
+    availableCommands: z.array(AvailableCommandSchema),
+    snapshotEnabled: z.boolean(),
+});
+
+// JSON-RPC schemas
+export const JsonRpcRequestSchema = z.object({
+    jsonrpc: z.literal("2.0"),
+    id: z.union([z.string(), z.number(), z.null()]).optional(),
+    method: z.string(),
+    params: z.unknown().optional(),
+});
 
 export interface JsonRpcRequest {
     jsonrpc: "2.0";
     id?: string | number | null;
     method: string;
-    params?: any;
+    params?: unknown;
 }
 
 export interface JsonRpcSuccessResponse {
@@ -82,10 +237,7 @@ export interface PromptEmbeddedResourceBlock {
     };
 }
 
-export type PromptBlock =
-    | PromptTextBlock
-    | PromptResourceLinkBlock
-    | PromptEmbeddedResourceBlock;
+export type PromptBlock = PromptTextBlock | PromptResourceLinkBlock | PromptEmbeddedResourceBlock;
 
 export interface PromptSessionParams {
     sessionId: string;
@@ -151,11 +303,7 @@ export interface AvailableCommand {
     };
 }
 
-export type SessionLifecycleState =
-    | "active"
-    | "running"
-    | "disposing"
-    | "disposed";
+export type SessionLifecycleState = "active" | "running" | "disposing" | "disposed";
 
 export interface SessionMetadata {
     sessionId: string;

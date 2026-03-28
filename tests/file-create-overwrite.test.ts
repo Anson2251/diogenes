@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
 import { WorkspaceManager } from "../src/context/workspace";
 import { FileCreateTool } from "../src/tools/file/file-create";
 import { FileOverwriteTool } from "../src/tools/file/file-overwrite";
@@ -41,7 +42,9 @@ describe("FileCreateTool and FileOverwriteTool", () => {
         });
 
         expect(result.success).toBe(true);
-        expect(fs.readFileSync(path.join(testDir, "nested", "deep", "created.txt"), "utf-8")).toBe("alpha\nbeta");
+        expect(fs.readFileSync(path.join(testDir, "nested", "deep", "created.txt"), "utf-8")).toBe(
+            "alpha\nbeta",
+        );
     });
 
     it("should reject file.create when file already exists", async () => {
@@ -64,7 +67,9 @@ describe("FileCreateTool and FileOverwriteTool", () => {
         });
 
         expect(result.success).toBe(true);
-        expect(fs.readFileSync(existingFilePath, "utf-8")).toBe("new line 1\nnew line 2\nnew line 3");
+        expect(fs.readFileSync(existingFilePath, "utf-8")).toBe(
+            "new line 1\nnew line 2\nnew line 3",
+        );
         expect(result.data?.workspace_update).toBeDefined();
 
         const entry = workspace.getFileEntry("existing.txt");
@@ -90,7 +95,7 @@ describe("FileCreateTool and FileOverwriteTool", () => {
         });
 
         expect(result.success).toBe(false);
-        expect(result.error?.code).toBe("INVALID_PARAM");
+        expect(result.error?.code).toBe("INVALID_PARAMS");
     });
 
     it("should reject file.overwrite when file does not exist", async () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+
 import { ShellExecTool } from "../src/tools/shell/shell-exec";
 
 describe("ShellExecTool", () => {
@@ -109,11 +110,11 @@ describe("ShellExecTool", () => {
             expect(result.error?.code).toBe("PATH_OUTSIDE_WORKSPACE");
         });
 
-        it("should reject invalid parameters", async () => {
+        it("should validate missing command parameter", async () => {
             const result = await tool.execute({});
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_PARAM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should handle command with timeout", async () => {
@@ -134,38 +135,31 @@ describe("ShellExecTool", () => {
             expect(result.success).toBe(true);
             expect(result.data?.stdout).toContain("100");
         });
-    });
 
-    describe("validateParams", () => {
-        it("should validate missing command parameter", () => {
-            const result = tool.validateParams({});
+        it("should validate non-string command parameter", async () => {
+            const result = await tool.execute({ command: 123 });
 
-            expect(result.valid).toBe(false);
-            expect(result.errors.length).toBeGreaterThan(0);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-string command parameter", () => {
-            const result = tool.validateParams({ command: 123 });
-
-            expect(result.valid).toBe(false);
-        });
-
-        it("should validate non-number timeout parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-number timeout parameter", async () => {
+            const result = await tool.execute({
                 command: "echo hello",
                 timeout: "not a number",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate optional cwd parameter", () => {
-            const result = tool.validateParams({
+        it("should validate optional cwd parameter", async () => {
+            const result = await tool.execute({
                 command: "echo hello",
-                cwd: "/valid/path",
+                cwd: ".",
             });
 
-            expect(result.valid).toBe(true);
+            expect(result.success).toBe(true);
         });
     });
 });

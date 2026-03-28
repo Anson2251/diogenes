@@ -28,7 +28,7 @@ export interface ToolDefinition {
     params: Record<
         string,
         {
-            type: "string" | "number" | "bool" | "array" | "object" | string;
+            type: "string" | "number" | "bool" | "array" | "object";
             optional?: boolean;
             description: string;
         }
@@ -169,40 +169,40 @@ export interface ContextSections {
 // ==================== Security Types ====================
 
 export interface SecurityConfig {
-    workspaceRoot: string;
-    allowOutsideWorkspace: boolean;
-    watch: {
-        enabled: boolean;
-        debounceMs: number;
+    workspaceRoot?: string;
+    allowOutsideWorkspace?: boolean;
+    watch?: {
+        enabled?: boolean;
+        debounceMs?: number;
     };
-    interaction: {
-        enabled: boolean;
+    interaction?: {
+        enabled?: boolean;
     };
-    shell: {
-        enabled: boolean;
-        timeout: number;
-        blockedCommands: string[];
+    shell?: {
+        enabled?: boolean;
+        timeout?: number;
+        blockedCommands?: string[];
     };
-    file: {
-        maxFileSize: number;
-        blockedExtensions: string[];
+    file?: {
+        maxFileSize?: number;
+        blockedExtensions?: string[];
     };
-    snapshot: {
-        enabled: boolean;
-        includeDiogenesState: boolean;
-        autoBeforePrompt: boolean;
-        storageRoot: string;
-        resticBinary: string;
-        resticBinaryArgs: string[];
-        timeoutMs: number;
+    snapshot?: {
+        enabled?: boolean;
+        includeDiogenesState?: boolean;
+        autoBeforePrompt?: boolean;
+        storageRoot?: string;
+        resticBinary?: string;
+        resticBinaryArgs?: string[];
+        timeoutMs?: number;
     };
 }
 
 // ==================== Logger Types ====================
 
 export interface LoggerConfig {
-    level: 'debug' | 'info' | 'warn' | 'error' | 'silent';
-    style?: 'tui' | 'console' | 'silent';
+    level: "debug" | "info" | "warn" | "error" | "silent";
+    style?: "tui" | "console" | "silent";
 }
 
 // ==================== LLM Configuration ====================

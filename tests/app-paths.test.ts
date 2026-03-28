@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
+
 import {
     ensureDiogenesAppDirs,
     findDefaultConfigFileSync,
@@ -38,8 +39,12 @@ describe("app paths", () => {
             env: {},
         });
 
-        expect(result.configDir).toBe(path.join("/Users/alice", "Library", "Application Support", "diogenes"));
-        expect(result.sessionsDir).toBe(path.join("/Users/alice", "Library", "Application Support", "diogenes", "sessions"));
+        expect(result.configDir).toBe(
+            path.join("/Users/alice", "Library", "Application Support", "diogenes"),
+        );
+        expect(result.sessionsDir).toBe(
+            path.join("/Users/alice", "Library", "Application Support", "diogenes", "sessions"),
+        );
     });
 
     it("resolves windows paths from APPDATA and LOCALAPPDATA", () => {
@@ -53,7 +58,9 @@ describe("app paths", () => {
         });
 
         expect(result.configDir).toBe(path.join("C:\\Users\\Alice\\AppData\\Roaming", "diogenes"));
-        expect(result.sessionsDir).toBe(path.join("C:\\Users\\Alice\\AppData\\Local", "diogenes", "sessions"));
+        expect(result.sessionsDir).toBe(
+            path.join("C:\\Users\\Alice\\AppData\\Local", "diogenes", "sessions"),
+        );
     });
 
     it("creates config and snapshot directories on first run", async () => {

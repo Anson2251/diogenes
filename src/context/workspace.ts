@@ -2,6 +2,9 @@
  * Workspace management system
  */
 
+import * as fs from "fs";
+import * as path from "path";
+
 import {
     DirectoryWorkspace,
     DirectoryEntry,
@@ -11,8 +14,6 @@ import {
     TodoItem,
     NotepadWorkspace,
 } from "../types";
-import * as fs from "fs";
-import * as path from "path";
 import { rstrip } from "../utils/str";
 
 interface GitIgnoreRule {
@@ -102,16 +103,12 @@ export class WorkspaceManager {
 
     // ==================== File Workspace Methods ====================
 
-    async loadFile(
-        filePath: string,
-        start?: number,
-        end?: number,
-    ): Promise<FileWorkspaceEntry> {
+    async loadFile(filePath: string, start?: number, end?: number): Promise<FileWorkspaceEntry> {
         const absolutePath = await this.resolveReadableFilePath(filePath);
 
         // Get current file stats
         const content = await fs.promises.readFile(absolutePath, "utf-8");
-        const lines = content.split("\n").map(l => rstrip(l));
+        const lines = content.split("\n").map((l) => rstrip(l));
         const totalLines = lines.length;
 
         let startLine = start || 1;
@@ -121,9 +118,7 @@ export class WorkspaceManager {
         if (startLine < 1) startLine = 1;
         if (endLine > totalLines) endLine = totalLines;
         if (startLine > endLine) {
-            throw new Error(
-                `Invalid line range: start (${startLine}) > end (${endLine})`,
-            );
+            throw new Error(`Invalid line range: start (${startLine}) > end (${endLine})`);
         }
 
         const existingEntry = this.fileWorkspace[absolutePath];
@@ -131,7 +126,10 @@ export class WorkspaceManager {
         // If file exists and totalLines match, merge ranges (using FRESH content from disk)
         if (existingEntry && existingEntry.totalLines === totalLines) {
             // Merge existing ranges with new range
-            const mergedRanges = this.mergeRanges([...existingEntry.ranges, { start: startLine, end: endLine }]);
+            const mergedRanges = this.mergeRanges([
+                ...existingEntry.ranges,
+                { start: startLine, end: endLine },
+            ]);
 
             // Extract content for merged ranges from FRESH disk content
             const allLines: string[] = [];
@@ -182,23 +180,23 @@ export class WorkspaceManager {
         return false;
     }
 
-    async reloadFileWithRangesContent(
+    reloadFileWithRangesContent(
         filePath: string,
         content: string,
         ranges: Array<{ start: number; end: number }>,
-    ): Promise<FileWorkspaceEntry | undefined> {
+    ): FileWorkspaceEntry | undefined {
         const absolutePath = this.resolvePath(filePath);
-        const lines = content.split("\n").map(l => rstrip(l));
+        const lines = content.split("\n").map((l) => rstrip(l));
         const totalLines = lines.length;
 
         // Filter and clamp ranges to valid line numbers
         const validRanges = ranges
-            .filter(r => r.start <= r.end)
-            .map(r => ({
+            .filter((r) => r.start <= r.end)
+            .map((r) => ({
                 start: Math.max(1, Math.min(r.start, totalLines)),
                 end: Math.max(1, Math.min(r.end, totalLines)),
             }))
-            .filter(r => r.start <= r.end);
+            .filter((r) => r.start <= r.end);
 
         if (validRanges.length === 0) {
             return undefined;
@@ -227,7 +225,10 @@ export class WorkspaceManager {
     async syncLoadedFileAfterEdit(
         filePath: string,
         appliedEdits: Array<{ matchedRange: [number, number]; newRange: [number, number] }>,
-    ): Promise<{ loaded_ranges: Array<{ start: number; end: number }>; total_lines_in_workspace: number } | undefined> {
+    ): Promise<
+        | { loaded_ranges: Array<{ start: number; end: number }>; total_lines_in_workspace: number }
+        | undefined
+    > {
         const absolutePath = this.resolvePath(filePath);
         const existingEntry = this.fileWorkspace[absolutePath];
         if (!existingEntry) {
@@ -362,13 +363,8 @@ export class WorkspaceManager {
         this.todoWorkspace.items = [...items];
     }
 
-    updateTodoItem(
-        text: string,
-        state: "done" | "active" | "pending",
-    ): boolean {
-        const item = this.todoWorkspace.items.find(
-            (item) => item.text === text,
-        );
+    updateTodoItem(text: string, state: "done" | "active" | "pending"): boolean {
+        const item = this.todoWorkspace.items.find((item) => item.text === text);
         if (item) {
             item.state = state;
             return true;
@@ -431,16 +427,11 @@ export class WorkspaceManager {
         return path.resolve(resolved);
     }
 
-    private async validatePath(
-        absolutePath: string,
-        isDirectory: boolean,
-    ): Promise<void> {
+    private async validatePath(absolutePath: string, isDirectory: boolean): Promise<void> {
         // Check if path is within workspace
         const relative = path.relative(this.workspaceRoot, absolutePath);
         if (relative.startsWith("..") || path.isAbsolute(relative)) {
-            throw new Error(
-                `Path ${absolutePath} is outside workspace root ${this.workspaceRoot}`,
-            );
+            throw new Error(`Path ${absolutePath} is outside workspace root ${this.workspaceRoot}`);
         }
 
         // Check if path exists
@@ -453,11 +444,7 @@ export class WorkspaceManager {
                 throw new Error(`Path ${absolutePath} is not a file`);
             }
         } catch (error) {
-            if (
-                error instanceof Error &&
-                "code" in error &&
-                error.code === "ENOENT"
-            ) {
+            if (error instanceof Error && "code" in error && error.code === "ENOENT") {
                 throw new Error(`Path ${absolutePath} does not exist`);
             }
             throw error;
@@ -467,17 +454,14 @@ export class WorkspaceManager {
     private async validateReadAccess(absolutePath: string): Promise<void> {
         if (await this.isGitIgnored(absolutePath)) {
             const relativePath = this.toWorkspaceRelativePath(absolutePath);
-            throw new Error(
-                `Path ${relativePath} is blocked because it is ignored by .gitignore`,
-            );
+            throw new Error(`Path ${relativePath} is blocked because it is ignored by .gitignore`);
         }
     }
 
     private async isGitIgnored(absolutePath: string): Promise<boolean> {
         const relativePath = this.toWorkspaceRelativePath(absolutePath);
-        const pathParts = path.dirname(relativePath) === "."
-            ? []
-            : path.dirname(relativePath).split(path.sep);
+        const pathParts =
+            path.dirname(relativePath) === "." ? [] : path.dirname(relativePath).split(path.sep);
         const ignoreDirs = [this.workspaceRoot];
 
         let currentDir = this.workspaceRoot;
@@ -523,11 +507,7 @@ export class WorkspaceManager {
                     ).replace(/\/+$/, (match) => (match ? "/" : match)),
                 }));
         } catch (error) {
-            if (
-                error instanceof Error &&
-                "code" in error &&
-                error.code === "ENOENT"
-            ) {
+            if (error instanceof Error && "code" in error && error.code === "ENOENT") {
                 return [];
             }
             throw error;
@@ -683,10 +663,7 @@ export class WorkspaceManager {
 
         if (!this.filePollingWatchers.has(absolutePath)) {
             const pollHandler = (curr: fs.Stats, prev: fs.Stats) => {
-                if (
-                    curr.mtimeMs !== prev.mtimeMs ||
-                    curr.size !== prev.size
-                ) {
+                if (curr.mtimeMs !== prev.mtimeMs || curr.size !== prev.size) {
                     this.scheduleFileRefresh(absolutePath);
                 }
             };
@@ -701,9 +678,9 @@ export class WorkspaceManager {
             clearTimeout(existing);
         }
 
-        const timer = setTimeout(async () => {
+        const timer = setTimeout(() => {
             this.directoryRefreshTimers.delete(dirPath);
-            await this.refreshDirectoryEntries(dirPath);
+            void this.refreshDirectoryEntries(dirPath);
         }, this.watchDebounceMs);
 
         this.directoryRefreshTimers.set(dirPath, timer);
@@ -715,9 +692,9 @@ export class WorkspaceManager {
             clearTimeout(existing);
         }
 
-        const timer = setTimeout(async () => {
+        const timer = setTimeout(() => {
             this.fileRefreshTimers.delete(absolutePath);
-            await this.refreshLoadedFileEntry(absolutePath);
+            void this.refreshLoadedFileEntry(absolutePath);
         }, this.watchDebounceMs);
 
         this.fileRefreshTimers.set(absolutePath, timer);

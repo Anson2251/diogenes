@@ -1,11 +1,12 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "oxc", "jsx-a11y", "react"],
+  "ignorePatterns": ["dist/**", "coverage/**", "vendor/**", "tests/", "examples/"],
+  "plugins": ["typescript", "oxc"],
   "rules": {
     "typescript/await-thenable": "error",
     "typescript/no-array-delete": "error",
     "typescript/no-base-to-string": "error",
-    // "typescript/no-confusing-void-expression": "error",
+    "typescript/no-confusing-void-expression": "error",
     "typescript/no-deprecated": "error",
     "typescript/no-duplicate-type-constituents": "error",
     "typescript/no-floating-promises": "error",
@@ -21,12 +22,12 @@
     "typescript/no-unnecessary-type-arguments": "error",
     "typescript/no-unnecessary-type-assertion": "error",
     "typescript/no-unsafe-argument": "error",
-    // "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-assignment": "error",
     "typescript/no-unsafe-call": "error",
     "typescript/no-unsafe-enum-comparison": "error",
     "typescript/no-unsafe-member-access": "error",
     "typescript/no-unsafe-return": "error",
-    // "typescript/no-unsafe-type-assertion": "error",
+    "typescript/no-unsafe-type-assertion": "error",
     "typescript/no-unsafe-unary-minus": "error",
     "typescript/non-nullable-type-assertion-style": "error",
     "typescript/only-throw-error": "error",
@@ -40,9 +41,12 @@
     "typescript/restrict-plus-operands": "error",
     "typescript/restrict-template-expressions": "error",
     "typescript/return-await": "error",
-    // "typescript/strict-boolean-expressions": "error",
+    "typescript/strict-boolean-expressions": "allow",
     "typescript/switch-exhaustiveness-check": "error",
     "typescript/unbound-method": "error",
     "typescript/use-unknown-in-catch-callback-variable": "error"
+  },
+  "options": {
+    "typeAware": true
   }
 }

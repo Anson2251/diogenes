@@ -2,13 +2,24 @@
  * Directory unload tool
  */
 
-import { BaseTool } from "../base-tool";
+import { z } from "zod";
+
+import type { WorkspaceManager } from "../../context/workspace";
+
 import { ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
 
-export class DirUnloadTool extends BaseTool {
-    private workspace: any;
+const dirUnloadSchema = z.object({
+    path: z.string(),
+});
 
-    constructor(workspace: any) {
+type DirUnloadParams = z.infer<typeof dirUnloadSchema>;
+
+export class DirUnloadTool extends BaseTool<typeof dirUnloadSchema> {
+    protected schema = dirUnloadSchema;
+    private workspace: WorkspaceManager;
+
+    constructor(workspace: WorkspaceManager) {
         super({
             namespace: "dir",
             name: "unload",
@@ -23,18 +34,8 @@ export class DirUnloadTool extends BaseTool {
         this.workspace = workspace;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for dir.unload",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
-
-        const { path } = validation.data as { path: string };
+    run(params: DirUnloadParams): ToolResult {
+        const { path } = params;
 
         const success = this.workspace.unloadDirectory(path);
 

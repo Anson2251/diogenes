@@ -48,7 +48,9 @@ export function ensureDiogenesAppDirsSync(options: ResolveOptions = {}): Diogene
     return paths;
 }
 
-export async function ensureDiogenesAppDirs(options: ResolveOptions = {}): Promise<DiogenesAppPaths> {
+export async function ensureDiogenesAppDirs(
+    options: ResolveOptions = {},
+): Promise<DiogenesAppPaths> {
     const paths = resolveDiogenesAppPaths(options);
     await fs.promises.mkdir(paths.configDir, { recursive: true });
     await fs.promises.mkdir(paths.dataDir, { recursive: true });
@@ -80,6 +82,16 @@ function resolveConfigDir(platform: Platform, env: NodeJS.ProcessEnv, homeDir: s
             return path.join(homeDir, "Library", "Application Support", "diogenes");
         case "win32":
             return path.join(env.APPDATA || path.join(homeDir, "AppData", "Roaming"), "diogenes");
+        case "linux":
+        case "freebsd":
+        case "openbsd":
+        case "netbsd":
+        case "aix":
+        case "android":
+        case "cygwin":
+        case "haiku":
+        case "sunos":
+            return path.join(env.XDG_CONFIG_HOME || path.join(homeDir, ".config"), "diogenes");
         default:
             return path.join(env.XDG_CONFIG_HOME || path.join(homeDir, ".config"), "diogenes");
     }
@@ -90,8 +102,27 @@ function resolveDataDir(platform: Platform, env: NodeJS.ProcessEnv, homeDir: str
         case "darwin":
             return path.join(homeDir, "Library", "Application Support", "diogenes");
         case "win32":
-            return path.join(env.LOCALAPPDATA || path.join(homeDir, "AppData", "Local"), "diogenes");
+            return path.join(
+                env.LOCALAPPDATA || path.join(homeDir, "AppData", "Local"),
+                "diogenes",
+            );
+        case "linux":
+        case "freebsd":
+        case "openbsd":
+        case "netbsd":
+        case "aix":
+        case "android":
+        case "cygwin":
+        case "haiku":
+        case "sunos":
+            return path.join(
+                env.XDG_DATA_HOME || path.join(homeDir, ".local", "share"),
+                "diogenes",
+            );
         default:
-            return path.join(env.XDG_DATA_HOME || path.join(homeDir, ".local", "share"), "diogenes");
+            return path.join(
+                env.XDG_DATA_HOME || path.join(homeDir, ".local", "share"),
+                "diogenes",
+            );
     }
 }

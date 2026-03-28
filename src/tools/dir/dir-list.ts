@@ -2,11 +2,20 @@
  * Directory listing tool
  */
 
-import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
-import { WorkspaceManager } from "../../context/workspace";
+import { z } from "zod";
 
-export class DirListTool extends BaseTool {
+import { WorkspaceManager } from "../../context/workspace";
+import { ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
+
+const dirListSchema = z.object({
+    path: z.string(),
+});
+
+type DirListParams = z.infer<typeof dirListSchema>;
+
+export class DirListTool extends BaseTool<typeof dirListSchema> {
+    protected schema = dirListSchema;
     private workspace: WorkspaceManager;
 
     constructor(workspace: WorkspaceManager) {
@@ -22,18 +31,8 @@ export class DirListTool extends BaseTool {
         this.workspace = workspace;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for dir.list",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
-
-        const { path } = validation.data as { path: string };
+    async run(params: DirListParams): Promise<ToolResult> {
+        const { path } = params;
 
         try {
             const entries = await this.workspace.loadDirectory(path);

@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { clearDiogenesAppData, CLEAR_APP_DATA_PASSPHRASE, parseArgs } from "../src/cli";
 import * as appPaths from "../src/utils/app-paths";
 

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { FileEditTool } from "../src/tools/file/file-edit";
-import { WorkspaceManager } from "../src/context/workspace";
 import * as fs from "fs";
 import * as path from "path";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
+import { WorkspaceManager } from "../src/context/workspace";
+import { FileEditTool } from "../src/tools/file/file-edit";
 
 describe("FileEditTool", () => {
     let workspace: WorkspaceManager;
@@ -16,14 +17,8 @@ describe("FileEditTool", () => {
     beforeEach(() => {
         fs.mkdirSync(testDir, { recursive: true });
         fs.writeFileSync(testFilePath, "Hello World\n");
-        fs.writeFileSync(
-            multiLineFilePath,
-            "line 1\nline 2\nline 3\nline 4\nline 5\n",
-        );
-        fs.writeFileSync(
-            duplicateFilePath,
-            "alpha\nrepeat\nbeta\nrepeat\ngamma\n",
-        );
+        fs.writeFileSync(multiLineFilePath, "line 1\nline 2\nline 3\nline 4\nline 5\n");
+        fs.writeFileSync(duplicateFilePath, "alpha\nrepeat\nbeta\nrepeat\ngamma\n");
         fs.writeFileSync(
             fullDocFilePath,
             "# Diogenes\n\nA minimal LLM-controlled agent framework with explicit context management, implemented in TypeScript.\n\n## License\n\nDiogenes is released under the MIT License. See the [LICENSE](LICENSE) file for details.\n\nCopyright (c) 2024\n\n",
@@ -167,34 +162,37 @@ describe("FileEditTool", () => {
         });
     });
 
-    describe("validateParams", () => {
-        it("should validate missing path parameter", () => {
-            const result = tool.validateParams({
+    describe("parameter validation via execute", () => {
+        it("should validate missing path parameter", async () => {
+            const result = await tool.execute({
                 edits: [],
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate missing edits parameter", () => {
-            const result = tool.validateParams({
+        it("should validate missing edits parameter", async () => {
+            const result = await tool.execute({
                 path: testFilePath,
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-array edits parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-array edits parameter", async () => {
+            const result = await tool.execute({
                 path: testFilePath,
                 edits: "not an array",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate valid parameters", () => {
-            const result = tool.validateParams({
+        it("should validate valid parameters", async () => {
+            const result = await tool.execute({
                 path: testFilePath,
                 edits: [
                     {
@@ -202,7 +200,7 @@ describe("FileEditTool", () => {
                         anchor: {
                             start: {
                                 line: 1,
-                                text: "text",
+                                text: "Hello World",
                                 before: [],
                                 after: [],
                             },
@@ -212,11 +210,11 @@ describe("FileEditTool", () => {
                 ],
             });
 
-            expect(result.valid).toBe(true);
+            expect(result.success).toBe(true);
         });
 
-        it("should reject edit content that is neither string nor string array", () => {
-            const result = tool.validateParams({
+        it("should reject edit content that is neither string nor string array", async () => {
+            const result = await tool.execute({
                 path: testFilePath,
                 edits: [
                     {
@@ -224,7 +222,7 @@ describe("FileEditTool", () => {
                         anchor: {
                             start: {
                                 line: 1,
-                                text: "text",
+                                text: "Hello World",
                                 before: [],
                                 after: [],
                             },
@@ -234,8 +232,8 @@ describe("FileEditTool", () => {
                 ],
             });
 
-            expect(result.valid).toBe(false);
-            expect(result.errors).toContain("edits.0.content: Expected string or array of strings");
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
     });
 
@@ -422,11 +420,7 @@ describe("FileEditTool", () => {
                                 after: [],
                             },
                         },
-                        content: [
-                            "Line A",
-                            "Line B",
-                            "Line C",
-                        ],
+                        content: ["Line A", "Line B", "Line C"],
                     },
                 ],
             });
@@ -466,11 +460,7 @@ describe("FileEditTool", () => {
                                 after: [],
                             },
                         },
-                        content: [
-                            "# Rewritten",
-                            "",
-                            "replacement text",
-                        ],
+                        content: ["# Rewritten", "", "replacement text"],
                     },
                 ],
             });
@@ -595,7 +585,7 @@ describe("FileEditTool", () => {
             expect(formatted).toContain("Match 1:");
             expect(formatted).toContain("Lines 1-6 of 6");
             expect(formatted).not.toContain("failedEdits");
-            expect(formatted).not.toContain("\"suggestion\"");
+            expect(formatted).not.toContain('"suggestion"');
         });
 
         it("should reject conflicting context instead of silently matching by line hint", async () => {
@@ -674,7 +664,9 @@ describe("FileEditTool", () => {
             expect(result.success).toBe(false);
             expect(result.error?.code).toBe("ATOMIC_FAILURE");
             expect(result.error?.suggestion).toContain("Closest match:");
-            expect(result.error?.suggestion).not.toContain("Anchor hint window around line 3 (±5):");
+            expect(result.error?.suggestion).not.toContain(
+                "Anchor hint window around line 3 (±5):",
+            );
             expect(result.error?.suggestion).toContain("Lines 1-6 of 6");
             expect(result.error?.suggestion).toContain("Mismatch details:");
             expect(result.error?.suggestion).toContain("before[0] expected: wrong before");

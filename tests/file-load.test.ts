@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { FileLoadTool } from "../src/tools/file/file-load";
-import { WorkspaceManager } from "../src/context/workspace";
 import * as fs from "fs";
 import * as path from "path";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
+import { WorkspaceManager } from "../src/context/workspace";
+import { FileLoadTool } from "../src/tools/file/file-load";
 
 describe("FileLoadTool", () => {
     let workspace: WorkspaceManager;
@@ -19,14 +20,14 @@ describe("FileLoadTool", () => {
         fs.mkdirSync(testDir, { recursive: true });
         fs.mkdirSync(ignoredDirPath, { recursive: true });
         fs.writeFileSync(testFilePath, "single line");
-        fs.writeFileSync(multiLineFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10");
+        fs.writeFileSync(
+            multiLineFilePath,
+            "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10",
+        );
         fs.writeFileSync(nestedFilePath, "nested content");
         fs.writeFileSync(ignoredFilePath, "top secret");
         fs.writeFileSync(ignoredNestedFilePath, "hidden content");
-        fs.writeFileSync(
-            path.join(testDir, ".gitignore"),
-            "secret.txt\nignored-dir/\n",
-        );
+        fs.writeFileSync(path.join(testDir, ".gitignore"), "secret.txt\nignored-dir/\n");
         workspace = new WorkspaceManager(testDir);
         tool = new FileLoadTool(workspace);
     });
@@ -171,56 +172,57 @@ describe("FileLoadTool", () => {
             expect(result.success).toBe(true);
             expect(result.data?.loaded_range).toEqual([[8, 10]]);
         });
-    });
 
-    describe("validateParams", () => {
-        it("should validate missing path parameter", () => {
-            const result = tool.validateParams({});
+        it("should validate missing path parameter via execute", async () => {
+            const result = await tool.execute({});
 
-            expect(result.valid).toBe(false);
-            expect(result.errors.length).toBeGreaterThan(0);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-string path parameter", () => {
-            const result = tool.validateParams({ path: 123 });
+        it("should validate non-string path parameter via execute", async () => {
+            const result = await tool.execute({ path: 123 });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate optional start parameter", () => {
-            const result = tool.validateParams({
+        it("should validate optional start parameter via execute", async () => {
+            const result = await tool.execute({
                 path: "test.txt",
                 start: 1,
             });
 
-            expect(result.valid).toBe(true);
+            expect(result.success).toBe(true);
         });
 
-        it("should validate optional end parameter", () => {
-            const result = tool.validateParams({
+        it("should validate optional end parameter via execute", async () => {
+            const result = await tool.execute({
                 path: "test.txt",
                 end: 10,
             });
 
-            expect(result.valid).toBe(true);
+            expect(result.success).toBe(true);
         });
 
-        it("should validate non-number start parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-number start parameter via execute", async () => {
+            const result = await tool.execute({
                 path: "test.txt",
                 start: "not a number",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-number end parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-number end parameter via execute", async () => {
+            const result = await tool.execute({
                 path: "test.txt",
                 end: "not a number",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
     });
 });

@@ -1,8 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
+
 import { DEFAULT_LLM_CONFIG, DEFAULT_SECURITY_CONFIG } from "../config/default-prompts";
-import { ensureDiogenesAppDirsSync, findDefaultConfigFileSync, resolveDiogenesAppPaths } from "./app-paths";
+import {
+    ensureDiogenesAppDirsSync,
+    findDefaultConfigFileSync,
+    resolveDiogenesAppPaths,
+} from "./app-paths";
 
 export function ensureDefaultConfigFileSync(): string {
     const appPaths = ensureDiogenesAppDirsSync();

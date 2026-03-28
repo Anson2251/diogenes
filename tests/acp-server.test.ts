@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { PassThrough } from "stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
@@ -85,7 +86,9 @@ describe("ACPServer", () => {
         });
 
         expect(initialize && "result" in initialize && initialize.result.protocolVersion).toBe(1);
-        expect(sessionNew && "result" in sessionNew && sessionNew.result.sessionId).toBeTypeOf("string");
+        expect(sessionNew && "result" in sessionNew && sessionNew.result.sessionId).toBeTypeOf(
+            "string",
+        );
         expect(sessionNew && "result" in sessionNew ? sessionNew.result : null).toEqual({
             sessionId: expect.any(String),
         });
@@ -106,7 +109,11 @@ describe("ACPServer", () => {
             params: { protocolVersion: 1 },
         });
 
-        expect(initialize && "result" in initialize ? initialize.result.agentCapabilities.sessionCapabilities : null).toEqual(
+        expect(
+            initialize && "result" in initialize
+                ? initialize.result.agentCapabilities.sessionCapabilities
+                : null,
+        ).toEqual(
             expect.objectContaining({
                 list: {},
                 _meta: expect.objectContaining({
@@ -137,9 +144,17 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
-                            resticBinaryArgs: [path.join(process.cwd(), "tests/fixtures/fake-restic.cjs")],
+                            resticBinaryArgs: [
+                                path.join(process.cwd(), "tests/fixtures/fake-restic.cjs"),
+                            ],
                             timeoutMs: 5_000,
                         },
                     },
@@ -193,7 +208,8 @@ describe("ACPServer", () => {
                 method: "session/new",
                 params: { cwd: process.cwd() },
             });
-            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
 
             const session = (firstServer as any).sessionManager.getSession(sessionId);
             await session.restorePersistedState({
@@ -244,9 +260,11 @@ describe("ACPServer", () => {
                 method: "session/load",
                 params: { sessionId, cwd: process.cwd(), mcpServers: [] },
             });
-            await waitFor(() => notifications.find(
-                (item) => item.params?.update?.sessionUpdate === "available_commands_update",
-            ));
+            await waitFor(() =>
+                notifications.find(
+                    (item) => item.params?.update?.sessionUpdate === "available_commands_update",
+                ),
+            );
             const slashPrompt = await secondServer.handleMessage({
                 jsonrpc: "2.0",
                 id: 5,
@@ -258,83 +276,87 @@ describe("ACPServer", () => {
             });
 
             expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
-            expect(slashPrompt && "result" in slashPrompt ? slashPrompt.result.stopReason : null).toBe("end_turn");
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "user_message_chunk",
-                            content: { type: "text", text: "hello" },
+            expect(
+                slashPrompt && "result" in slashPrompt ? slashPrompt.result.stopReason : null,
+            ).toBe("end_turn");
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "user_message_chunk",
+                                content: { type: "text", text: "hello" },
+                            }),
                         }),
                     }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: { type: "text", text: "world" },
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: { type: "text", text: "world" },
+                            }),
                         }),
                     }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "session_info_update",
-                            _meta: expect.objectContaining({
-                                diogenes: expect.objectContaining({
-                                    hydratedState: expect.objectContaining({
-                                        loadedDirectories: [],
-                                        loadedFiles: [],
-                                        notepad: [],
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "session_info_update",
+                                _meta: expect.objectContaining({
+                                    diogenes: expect.objectContaining({
+                                        hydratedState: expect.objectContaining({
+                                            loadedDirectories: [],
+                                            loadedFiles: [],
+                                            notepad: [],
+                                        }),
                                     }),
                                 }),
                             }),
                         }),
                     }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "available_commands_update",
-                            availableCommands: expect.arrayContaining([
-                                expect.objectContaining({ name: "help" }),
-                                expect.objectContaining({ name: "session" }),
-                            ]),
-                        }),
-                    }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "plan",
-                            entries: [],
-                        }),
-                    }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("## ACP Slash Commands"),
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "available_commands_update",
+                                availableCommands: expect.arrayContaining([
+                                    expect.objectContaining({ name: "help" }),
+                                    expect.objectContaining({ name: "session" }),
+                                ]),
                             }),
                         }),
                     }),
-                }),
-            ]));
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "plan",
+                                entries: [],
+                            }),
+                        }),
+                    }),
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("## ACP Slash Commands"),
+                                }),
+                            }),
+                        }),
+                    }),
+                ]),
+            );
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
@@ -364,7 +386,8 @@ describe("ACPServer", () => {
                 method: "session/new",
                 params: { cwd: process.cwd() },
             });
-            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
 
             const session = (firstServer as any).sessionManager.getSession(sessionId);
             await session.restorePersistedState({
@@ -426,7 +449,9 @@ describe("ACPServer", () => {
     it("replays ACP tool updates when loading a stored session", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-tools-"));
         const originalHome = process.env.HOME;
-        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-tools-workspace-"));
+        const workspaceDir = fs.mkdtempSync(
+            path.join(os.tmpdir(), "acp-session-load-tools-workspace-"),
+        );
         process.env.HOME = root;
 
         try {
@@ -447,7 +472,8 @@ describe("ACPServer", () => {
                 method: "session/new",
                 params: { cwd: workspaceDir },
             });
-            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
 
             const toolResultText = formatToolResults(
                 [
@@ -469,10 +495,11 @@ describe("ACPServer", () => {
                         },
                     },
                 ],
-                () => [
-                    "Updated sample.ts: 1 edit applied, 2 total lines",
-                    "replace lines 1-1 -> 1-1",
-                ].join("\n"),
+                () =>
+                    [
+                        "Updated sample.ts: 1 edit applied, 2 total lines",
+                        "replace lines 1-1 -> 1-1",
+                    ].join("\n"),
             );
 
             const session = (firstServer as any).sessionManager.getSession(sessionId);
@@ -546,7 +573,7 @@ describe("ACPServer", () => {
                         content: [
                             "I will edit the file.",
                             "```tool-call",
-                            "[{\"tool\":\"file.edit\",\"params\":{\"path\":\"sample.ts\",\"edits\":[{\"mode\":\"replace\",\"anchor\":{\"start\":{\"line\":1,\"text\":\"const greeting = 'hello';\"}},\"content\":[\"const greeting = 'hello there';\"]}]}}]",
+                            '[{"tool":"file.edit","params":{"path":"sample.ts","edits":[{"mode":"replace","anchor":{"start":{"line":1,"text":"const greeting = \'hello\';"}},"content":["const greeting = \'hello there\';"]}]}}]',
                             "```",
                         ].join("\n"),
                     },
@@ -581,51 +608,55 @@ describe("ACPServer", () => {
             });
 
             expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
-            await waitFor(() => notifications.find(
-                (item) => item.params?.update?.sessionUpdate === "tool_call",
-            ));
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "tool_call",
-                            title: "Editing file sample.ts",
-                            kind: "edit",
-                            status: "completed",
+            await waitFor(() =>
+                notifications.find((item) => item.params?.update?.sessionUpdate === "tool_call"),
+            );
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "tool_call",
+                                title: "Editing file sample.ts",
+                                kind: "edit",
+                                status: "completed",
+                            }),
                         }),
                     }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "tool_call_update",
-                            status: "completed",
-                            content: expect.arrayContaining([
-                                expect.objectContaining({
-                                    type: "content",
-                                    content: expect.objectContaining({
-                                        type: "text",
-                                        text: [
-                                            "Updated sample.ts: 1 edit applied, 2 total lines",
-                                            "replace lines 1-1 -> 1-1",
-                                        ].join("\n"),
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "tool_call_update",
+                                status: "completed",
+                                content: expect.arrayContaining([
+                                    expect.objectContaining({
+                                        type: "content",
+                                        content: expect.objectContaining({
+                                            type: "text",
+                                            text: [
+                                                "Updated sample.ts: 1 edit applied, 2 total lines",
+                                                "replace lines 1-1 -> 1-1",
+                                            ].join("\n"),
+                                        }),
                                     }),
-                                }),
-                                expect.objectContaining({
-                                    type: "diff",
-                                    path: path.join(workspaceDir, "sample.ts"),
-                                    oldText: "const greeting = 'hello';\nconsole.log(greeting);",
-                                    newText: "const greeting = 'hello there';\nconsole.log(greeting);",
-                                }),
-                            ]),
+                                    expect.objectContaining({
+                                        type: "diff",
+                                        path: path.join(workspaceDir, "sample.ts"),
+                                        oldText:
+                                            "const greeting = 'hello';\nconsole.log(greeting);",
+                                        newText:
+                                            "const greeting = 'hello there';\nconsole.log(greeting);",
+                                    }),
+                                ]),
+                            }),
                         }),
                     }),
-                }),
-            ]));
+                ]),
+            );
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
@@ -635,12 +666,15 @@ describe("ACPServer", () => {
 
     it("replays the original user prompt after loading a persisted session", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-user-prompt-"));
-        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-user-prompt-workspace-"));
+        const workspaceDir = fs.mkdtempSync(
+            path.join(os.tmpdir(), "acp-session-load-user-prompt-workspace-"),
+        );
         const originalHome = process.env.HOME;
         process.env.HOME = root;
 
         vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
-            content: "```tool-call\n[{\"tool\":\"task.end\",\"params\":{\"title\":\"Done\",\"description\":\"Finished\",\"reason\":\"done\",\"summary\":\"Finished\"}}]\n```",
+            content:
+                '```tool-call\n[{"tool":"task.end","params":{"title":"Done","description":"Finished","reason":"done","summary":"Finished"}}]\n```',
             reasoning: "",
         });
 
@@ -662,7 +696,8 @@ describe("ACPServer", () => {
                 method: "session/new",
                 params: { cwd: workspaceDir },
             });
-            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
 
             await firstServer.handleMessage({
                 jsonrpc: "2.0",
@@ -695,21 +730,25 @@ describe("ACPServer", () => {
             });
 
             expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
-            await waitFor(() => notifications.find(
-                (item) => item.params?.update?.sessionUpdate === "user_message_chunk",
-            ));
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "user_message_chunk",
-                            content: { type: "text", text: "Please inspect hello.txt" },
+            await waitFor(() =>
+                notifications.find(
+                    (item) => item.params?.update?.sessionUpdate === "user_message_chunk",
+                ),
+            );
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "user_message_chunk",
+                                content: { type: "text", text: "Please inspect hello.txt" },
+                            }),
                         }),
                     }),
-                }),
-            ]));
+                ]),
+            );
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
@@ -734,7 +773,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -743,14 +788,20 @@ describe("ACPServer", () => {
                 },
             });
 
-            await firstServer.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const created = await firstServer.handleMessage({
                 jsonrpc: "2.0",
                 id: 2,
                 method: "session/new",
                 params: { cwd: workspaceDir },
             });
-            const sessionId = created && "result" in created ? created.result.sessionId as string : "";
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
 
             const notifications: Array<{ method: string; params: any }> = [];
             const secondServer = new ACPServer({
@@ -761,7 +812,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -771,7 +828,12 @@ describe("ACPServer", () => {
                 notify: (method, params) => notifications.push({ method, params }),
             });
 
-            await secondServer.handleMessage({ jsonrpc: "2.0", id: 3, method: "initialize", params: { protocolVersion: 1 } });
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const loaded = await secondServer.handleMessage({
                 jsonrpc: "2.0",
                 id: 4,
@@ -789,36 +851,42 @@ describe("ACPServer", () => {
             });
 
             expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
-            expect(promptResponse && "result" in promptResponse ? promptResponse.result.stopReason : null).toBe("end_turn");
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "available_commands_update",
-                            availableCommands: expect.arrayContaining([
-                                expect.objectContaining({ name: "snapshot" }),
-                                expect.objectContaining({ name: "snapshots" }),
-                                expect.objectContaining({ name: "restore" }),
-                            ]),
-                        }),
-                    }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("## Snapshot Created"),
+            expect(
+                promptResponse && "result" in promptResponse
+                    ? promptResponse.result.stopReason
+                    : null,
+            ).toBe("end_turn");
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "available_commands_update",
+                                availableCommands: expect.arrayContaining([
+                                    expect.objectContaining({ name: "snapshot" }),
+                                    expect.objectContaining({ name: "snapshots" }),
+                                    expect.objectContaining({ name: "restore" }),
+                                ]),
                             }),
                         }),
                     }),
-                }),
-            ]));
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("✅ **Snapshot created**"),
+                                }),
+                            }),
+                        }),
+                    }),
+                ]),
+            );
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             process.env.HOME = originalHome;
@@ -842,9 +910,17 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
-                            resticBinaryArgs: [path.join(process.cwd(), "tests/fixtures/fake-restic.cjs")],
+                            resticBinaryArgs: [
+                                path.join(process.cwd(), "tests/fixtures/fake-restic.cjs"),
+                            ],
                             timeoutMs: 5_000,
                         },
                     },
@@ -864,7 +940,8 @@ describe("ACPServer", () => {
                 method: "session/new",
                 params: { cwd: process.cwd() },
             });
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -895,7 +972,9 @@ describe("ACPServer", () => {
                 params: { sessionId },
             });
 
-            expect(listResponse && "result" in listResponse ? listResponse.result.sessions : []).toEqual(
+            expect(
+                listResponse && "result" in listResponse ? listResponse.result.sessions : [],
+            ).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({
                         sessionId,
@@ -909,7 +988,9 @@ describe("ACPServer", () => {
                                     {
                                         name: "help",
                                         description: "List available ACP slash commands",
-                                        input: { hint: "optional command name, for example snapshot" },
+                                        input: {
+                                            hint: "optional command name, for example snapshot",
+                                        },
                                         _meta: {
                                             diogenes: {
                                                 kind: "help",
@@ -932,12 +1013,12 @@ describe("ACPServer", () => {
                                     {
                                         name: "restore",
                                         description: "Restore a session snapshot",
-                                        input: { hint: "snapshot id, for example snapshot-123" },
+                                        input: { hint: "snapshot id, number, or label" },
                                         _meta: {
                                             diogenes: {
                                                 kind: "snapshot_restore",
                                                 invocations: ["/restore"],
-                                                example: "/restore snapshot-123",
+                                                example: "/restore 1",
                                             },
                                         },
                                     },
@@ -983,7 +1064,9 @@ describe("ACPServer", () => {
                                     {
                                         name: "help",
                                         description: "List available ACP slash commands",
-                                        input: { hint: "optional command name, for example snapshot" },
+                                        input: {
+                                            hint: "optional command name, for example snapshot",
+                                        },
                                         _meta: {
                                             diogenes: {
                                                 kind: "help",
@@ -1006,12 +1089,12 @@ describe("ACPServer", () => {
                                     {
                                         name: "restore",
                                         description: "Restore a session snapshot",
-                                        input: { hint: "snapshot id, for example snapshot-123" },
+                                        input: { hint: "snapshot id, number, or label" },
                                         _meta: {
                                             diogenes: {
                                                 kind: "snapshot_restore",
                                                 invocations: ["/restore"],
-                                                example: "/restore snapshot-123",
+                                                example: "/restore 1",
                                             },
                                         },
                                     },
@@ -1048,7 +1131,11 @@ describe("ACPServer", () => {
                     ]),
                 }),
             );
-            expect(snapshotsResponse && "result" in snapshotsResponse ? snapshotsResponse.result : null).toEqual({
+            expect(
+                snapshotsResponse && "result" in snapshotsResponse
+                    ? snapshotsResponse.result
+                    : null,
+            ).toEqual({
                 sessionId,
                 liveSession: true,
                 snapshots: expect.arrayContaining([
@@ -1066,47 +1153,67 @@ describe("ACPServer", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-stored-session-management-"));
         const originalHome = process.env.HOME;
         const sessionId = "stored-session-1";
-        const sessionsRoot = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+        const sessionsRoot = path.join(
+            root,
+            "Library",
+            "Application Support",
+            "diogenes",
+            "sessions",
+        );
         const sessionDir = path.join(sessionsRoot, sessionId);
 
         process.env.HOME = root;
 
         try {
             fs.mkdirSync(sessionDir, { recursive: true });
-            fs.writeFileSync(path.join(sessionDir, "metadata.json"), JSON.stringify({
-                sessionId,
-                cwd: "/tmp/workspace",
-                createdAt: "2026-03-27T00:00:00.000Z",
-                updatedAt: "2026-03-27T00:00:01.000Z",
-                title: "Stored session",
-                description: "Persisted between ACP server runs",
-                state: "active",
-                hasActiveRun: false,
-                availableCommands: [
+            fs.writeFileSync(
+                path.join(sessionDir, "metadata.json"),
+                JSON.stringify(
                     {
-                        name: "snapshot",
-                        description: "Create a defensive session snapshot",
-                        input: { hint: "optional label for the snapshot" },
+                        sessionId,
+                        cwd: "/tmp/workspace",
+                        createdAt: "2026-03-27T00:00:00.000Z",
+                        updatedAt: "2026-03-27T00:00:01.000Z",
+                        title: "Stored session",
+                        description: "Persisted between ACP server runs",
+                        state: "active",
+                        hasActiveRun: false,
+                        availableCommands: [
+                            {
+                                name: "snapshot",
+                                description: "Create a defensive session snapshot",
+                                input: { hint: "optional label for the snapshot" },
+                            },
+                        ],
+                        snapshotEnabled: true,
                     },
-                ],
-                snapshotEnabled: true,
-            }, null, 2));
+                    null,
+                    2,
+                ),
+            );
             fs.mkdirSync(path.join(sessionDir, "snapshots"), { recursive: true });
-            fs.writeFileSync(path.join(sessionDir, "snapshots", "manifest.json"), JSON.stringify({
-                sessionId,
-                cwd: "/tmp/workspace",
-                createdAt: "2026-03-27T00:00:00.000Z",
-                snapshots: [
+            fs.writeFileSync(
+                path.join(sessionDir, "snapshots", "manifest.json"),
+                JSON.stringify(
                     {
-                        snapshotId: "snapshot-stored-1",
-                        createdAt: "2026-03-27T00:00:02.000Z",
-                        trigger: "system_manual",
-                        turn: 1,
-                        label: "stored snapshot",
-                        resticSnapshotId: "restic-stored-1",
+                        sessionId,
+                        cwd: "/tmp/workspace",
+                        createdAt: "2026-03-27T00:00:00.000Z",
+                        snapshots: [
+                            {
+                                snapshotId: "snapshot-stored-1",
+                                createdAt: "2026-03-27T00:00:02.000Z",
+                                trigger: "system_manual",
+                                turn: 1,
+                                label: "stored snapshot",
+                                resticSnapshotId: "restic-stored-1",
+                            },
+                        ],
                     },
-                ],
-            }, null, 2));
+                    null,
+                    2,
+                ),
+            );
 
             const server = new ACPServer({
                 config: {
@@ -1152,7 +1259,9 @@ describe("ACPServer", () => {
                 params: { sessionId },
             });
 
-            expect(listResponse && "result" in listResponse ? listResponse.result.sessions : []).toEqual(
+            expect(
+                listResponse && "result" in listResponse ? listResponse.result.sessions : [],
+            ).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({
                         sessionId,
@@ -1179,19 +1288,33 @@ describe("ACPServer", () => {
                         }),
                     }),
                     snapshots: expect.arrayContaining([
-                        expect.objectContaining({ snapshotId: "snapshot-stored-1", label: "stored snapshot" }),
+                        expect.objectContaining({
+                            snapshotId: "snapshot-stored-1",
+                            label: "stored snapshot",
+                        }),
                     ]),
                 }),
             );
-            expect(snapshotsResponse && "result" in snapshotsResponse ? snapshotsResponse.result : null).toEqual({
+            expect(
+                snapshotsResponse && "result" in snapshotsResponse
+                    ? snapshotsResponse.result
+                    : null,
+            ).toEqual({
                 sessionId,
                 liveSession: false,
                 snapshots: [
-                    expect.objectContaining({ snapshotId: "snapshot-stored-1", label: "stored snapshot" }),
+                    expect.objectContaining({
+                        snapshotId: "snapshot-stored-1",
+                        label: "stored snapshot",
+                    }),
                 ],
             });
-            expect(disposeResponse && "error" in disposeResponse ? disposeResponse.error.code : null).toBe(-32001);
-            expect(deleteResponse && "result" in deleteResponse ? deleteResponse.result : null).toEqual({
+            expect(
+                disposeResponse && "error" in disposeResponse ? disposeResponse.error.code : null,
+            ).toBe(-32001);
+            expect(
+                deleteResponse && "result" in deleteResponse ? deleteResponse.result : null,
+            ).toEqual({
                 deleted: true,
                 sessionId,
             });
@@ -1205,7 +1328,13 @@ describe("ACPServer", () => {
     it("paginates session/list results with cursor", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-pagination-"));
         const originalHome = process.env.HOME;
-        const sessionsDir = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+        const sessionsDir = path.join(
+            root,
+            "Library",
+            "Application Support",
+            "diogenes",
+            "sessions",
+        );
         process.env.HOME = root;
 
         try {
@@ -1214,47 +1343,94 @@ describe("ACPServer", () => {
                 const sessionId = `session-${String(i).padStart(2, "0")}`;
                 const sessionDir = path.join(sessionsDir, sessionId);
                 fs.mkdirSync(sessionDir, { recursive: true });
-                fs.writeFileSync(path.join(sessionDir, "metadata.json"), JSON.stringify({
-                    sessionId,
-                    cwd: "/tmp/workspace",
-                    createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
-                    updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
-                    title: `Session ${i}`,
-                    description: null,
-                    state: "active",
-                    hasActiveRun: false,
-                    availableCommands: [],
-                    snapshotEnabled: false,
-                }, null, 2));
-                fs.writeFileSync(path.join(sessionDir, "state.json"), JSON.stringify({
-                    version: 1,
-                    kind: "diogenes_state",
-                    sessionId,
-                    cwd: "/tmp/workspace",
-                    createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
-                    updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
-                    metadata: { title: `Session ${i}`, description: null },
-                    acpReplayLog: [],
-                    messageHistory: [],
-                    workspace: { loadedDirectories: [], loadedFiles: [], todo: [], notepad: [] },
-                }, null, 2));
+                fs.writeFileSync(
+                    path.join(sessionDir, "metadata.json"),
+                    JSON.stringify(
+                        {
+                            sessionId,
+                            cwd: "/tmp/workspace",
+                            createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
+                            updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
+                            title: `Session ${i}`,
+                            description: null,
+                            state: "active",
+                            hasActiveRun: false,
+                            availableCommands: [],
+                            snapshotEnabled: false,
+                        },
+                        null,
+                        2,
+                    ),
+                );
+                fs.writeFileSync(
+                    path.join(sessionDir, "state.json"),
+                    JSON.stringify(
+                        {
+                            version: 1,
+                            kind: "diogenes_state",
+                            sessionId,
+                            cwd: "/tmp/workspace",
+                            createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
+                            updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
+                            metadata: { title: `Session ${i}`, description: null },
+                            acpReplayLog: [],
+                            messageHistory: [],
+                            workspace: {
+                                loadedDirectories: [],
+                                loadedFiles: [],
+                                todo: [],
+                                notepad: [],
+                            },
+                        },
+                        null,
+                        2,
+                    ),
+                );
             }
 
-            const server = new ACPServer({ config: { llm: { apiKey: "test-key", model: "gpt-4" } } });
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const server = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
 
-            const firstPage = await server.handleMessage({ jsonrpc: "2.0", id: 2, method: "session/list", params: { pageSize: 5 } });
-            const nextCursor = firstPage && "result" in firstPage ? firstPage.result.nextCursor as string | null : null;
-            const secondPage = await server.handleMessage({ jsonrpc: "2.0", id: 3, method: "session/list", params: { cursor: nextCursor, pageSize: 5 } });
+            const firstPage = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/list",
+                params: { pageSize: 5 },
+            });
+            const nextCursor =
+                firstPage && "result" in firstPage
+                    ? (firstPage.result.nextCursor as string | null)
+                    : null;
+            const secondPage = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/list",
+                params: { cursor: nextCursor, pageSize: 5 },
+            });
 
-            expect(firstPage && "result" in firstPage ? firstPage.result.sessions : []).toHaveLength(5);
+            expect(
+                firstPage && "result" in firstPage ? firstPage.result.sessions : [],
+            ).toHaveLength(5);
             expect(nextCursor).toEqual(expect.any(String));
-            expect(firstPage && "result" in firstPage ? firstPage.result._meta?.diogenes : null).toEqual({
+            expect(
+                firstPage && "result" in firstPage ? firstPage.result._meta?.diogenes : null,
+            ).toEqual({
                 pageSize: 5,
                 supportsCursorPagination: true,
             });
-            expect(secondPage && "result" in secondPage ? secondPage.result.sessions : []).toHaveLength(5);
-            expect(secondPage && "result" in secondPage ? secondPage.result.nextCursor : null).toEqual(expect.any(String));
+            expect(
+                secondPage && "result" in secondPage ? secondPage.result.sessions : [],
+            ).toHaveLength(5);
+            expect(
+                secondPage && "result" in secondPage ? secondPage.result.nextCursor : null,
+            ).toEqual(expect.any(String));
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });
@@ -1262,40 +1438,77 @@ describe("ACPServer", () => {
     });
 
     it("prunes broken persisted sessions through ACP", async () => {
-            const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-prune-"));
-            const originalHome = process.env.HOME;
-            const sessionsDir = path.join(root, "Library", "Application Support", "diogenes", "sessions");
-            process.env.HOME = root;
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-prune-"));
+        const originalHome = process.env.HOME;
+        const sessionsDir = path.join(
+            root,
+            "Library",
+            "Application Support",
+            "diogenes",
+            "sessions",
+        );
+        process.env.HOME = root;
 
         try {
             fs.mkdirSync(path.join(sessionsDir, "broken-session"), { recursive: true });
-            fs.writeFileSync(path.join(sessionsDir, "broken-session", "metadata.json"), JSON.stringify({ sessionId: "broken-session" }, null, 2));
+            fs.writeFileSync(
+                path.join(sessionsDir, "broken-session", "metadata.json"),
+                JSON.stringify({ sessionId: "broken-session" }, null, 2),
+            );
             fs.mkdirSync(path.join(sessionsDir, "snapshot-only", "snapshots"), { recursive: true });
-            fs.writeFileSync(path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"), JSON.stringify({
-                sessionId: "snapshot-only",
-                cwd: "/tmp/workspace",
-                createdAt: "2026-03-27T00:00:00.000Z",
-                snapshots: [],
-            }, null, 2));
+            fs.writeFileSync(
+                path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"),
+                JSON.stringify(
+                    {
+                        sessionId: "snapshot-only",
+                        cwd: "/tmp/workspace",
+                        createdAt: "2026-03-27T00:00:00.000Z",
+                        snapshots: [],
+                    },
+                    null,
+                    2,
+                ),
+            );
 
-            const server = new ACPServer({ config: { llm: { apiKey: "test-key", model: "gpt-4" } } });
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            const server = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
 
-            const dryRun = await server.handleMessage({ jsonrpc: "2.0", id: 2, method: "_diogenes/session/prune", params: { dryRun: true } });
-            const applied = await server.handleMessage({ jsonrpc: "2.0", id: 3, method: "_diogenes/session/prune", params: {} });
+            const dryRun = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "_diogenes/session/prune",
+                params: { dryRun: true },
+            });
+            const applied = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "_diogenes/session/prune",
+                params: {},
+            });
 
-            expect(dryRun && "result" in dryRun ? dryRun.result : null).toEqual(expect.objectContaining({
-                dryRun: true,
-                deletedSessionIds: ["broken-session", "snapshot-only"],
-                reasonsBySessionId: {
-                    "broken-session": "missing_state",
-                    "snapshot-only": "orphaned_snapshot_artifacts",
-                },
-            }));
-            expect(applied && "result" in applied ? applied.result : null).toEqual(expect.objectContaining({
-                dryRun: false,
-                deletedSessionIds: ["broken-session", "snapshot-only"],
-            }));
+            expect(dryRun && "result" in dryRun ? dryRun.result : null).toEqual(
+                expect.objectContaining({
+                    dryRun: true,
+                    deletedSessionIds: ["broken-session", "snapshot-only"],
+                    reasonsBySessionId: {
+                        "broken-session": "missing_state",
+                        "snapshot-only": "orphaned_snapshot_artifacts",
+                    },
+                }),
+            );
+            expect(applied && "result" in applied ? applied.result : null).toEqual(
+                expect.objectContaining({
+                    dryRun: false,
+                    deletedSessionIds: ["broken-session", "snapshot-only"],
+                }),
+            );
             expect(fs.existsSync(path.join(sessionsDir, "broken-session"))).toBe(false);
             expect(fs.existsSync(path.join(sessionsDir, "snapshot-only"))).toBe(false);
         } finally {
@@ -1320,9 +1533,14 @@ describe("ACPServer", () => {
                 onChunk({ type: "reasoning", content: "**" });
                 onChunk({ type: "content", content: "Running tools...\n" });
                 onChunk({ type: "content", content: "```to" });
-                onChunk({ type: "content", content: 'ol-call\n[{"tool":"task.end","params":{"reason":"done","summary":"Finished via ACP"}}]\n```' });
+                onChunk({
+                    type: "content",
+                    content:
+                        'ol-call\n[{"tool":"task.end","params":{"reason":"done","summary":"Finished via ACP"}}]\n```',
+                });
                 return {
-                    content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"Finished via ACP"}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"Finished via ACP"}}]\n```',
                     reasoning: "",
                 };
             },
@@ -1342,7 +1560,7 @@ describe("ACPServer", () => {
             params: { cwd: process.cwd() },
         });
         const sessionId =
-            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
         const promptResponse = await server.handleMessage({
             jsonrpc: "2.0",
@@ -1354,12 +1572,12 @@ describe("ACPServer", () => {
             },
         });
 
-        const finalResponse = await waitFor(
-            () => responses.find((response) => response.id === 3),
-        );
+        const finalResponse = await waitFor(() => responses.find((response) => response.id === 3));
 
         expect(promptResponse).toBeNull();
-        expect(finalResponse && "result" in finalResponse && finalResponse.result.stopReason).toBe("end_turn");
+        expect(finalResponse && "result" in finalResponse && finalResponse.result.stopReason).toBe(
+            "end_turn",
+        );
         expect(notifications.some((item) => item.method === "session/update")).toBe(true);
         expect(
             notifications.some(
@@ -1368,54 +1586,62 @@ describe("ACPServer", () => {
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "tool_call"
-                    && item.params.update.title === "Calling the task done"
-                    && item.params.update.kind === "other",
+                (item) =>
+                    item.params.update.sessionUpdate === "tool_call" &&
+                    item.params.update.title === "Calling the task done" &&
+                    item.params.update.kind === "other",
             ),
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "tool_call_update"
-                    && item.params.update.status === "completed",
+                (item) =>
+                    item.params.update.sessionUpdate === "tool_call_update" &&
+                    item.params.update.status === "completed",
             ),
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "tool_call_update"
-                    && item.params.update.status === "completed"
-                    && Array.isArray(item.params.update.content)
-                    && item.params.update.content[0]?.content?.text === "Finished via ACP",
+                (item) =>
+                    item.params.update.sessionUpdate === "tool_call_update" &&
+                    item.params.update.status === "completed" &&
+                    Array.isArray(item.params.update.content) &&
+                    item.params.update.content[0]?.content?.text === "Finished via ACP",
             ),
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "tool_call_update"
-                    && item.params.update.rawOutput?.success === true,
+                (item) =>
+                    item.params.update.sessionUpdate === "tool_call_update" &&
+                    item.params.update.rawOutput?.success === true,
             ),
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "agent_message_chunk"
-                    && item.params.update.content.text === "**",
+                (item) =>
+                    item.params.update.sessionUpdate === "agent_message_chunk" &&
+                    item.params.update.content.text === "**",
             ),
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "agent_message_chunk"
-                    && item.params.update.content.text === "Running tools...\n",
+                (item) =>
+                    item.params.update.sessionUpdate === "agent_message_chunk" &&
+                    item.params.update.content.text === "Running tools...\n",
             ),
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "agent_message_chunk"
-                    && item.params.update.content.text === "Finished via ACP",
+                (item) =>
+                    item.params.update.sessionUpdate === "agent_message_chunk" &&
+                    item.params.update.content.text === "Finished via ACP",
             ),
         ).toBe(true);
         expect(
             notifications.some(
-                (item) => item.params.update.sessionUpdate === "agent_message_chunk"
-                    && typeof item.params.update.content.text === "string"
-                    && item.params.update.content.text.includes("```tool-call"),
+                (item) =>
+                    item.params.update.sessionUpdate === "agent_message_chunk" &&
+                    typeof item.params.update.content.text === "string" &&
+                    item.params.update.content.text.includes("```tool-call"),
             ),
         ).toBe(false);
     });
@@ -1433,16 +1659,26 @@ describe("ACPServer", () => {
 
         vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream")
             .mockImplementationOnce(async (_messages, onChunk) => {
-                onChunk({ type: "content", content: '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["round one"]}}]\n```' });
+                onChunk({
+                    type: "content",
+                    content:
+                        '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["round one"]}}]\n```',
+                });
                 return {
-                    content: '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["round one"]}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["round one"]}}]\n```',
                     reasoning: "",
                 };
             })
             .mockImplementationOnce(async (_messages, onChunk) => {
-                onChunk({ type: "content", content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"round two"}}]\n```' });
+                onChunk({
+                    type: "content",
+                    content:
+                        '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"round two"}}]\n```',
+                });
                 return {
-                    content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"round two"}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"round two"}}]\n```',
                     reasoning: "",
                 };
             });
@@ -1460,7 +1696,7 @@ describe("ACPServer", () => {
             params: { cwd: process.cwd() },
         });
         const sessionId =
-            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
         const promptResponse = await server.handleMessage({
             jsonrpc: "2.0",
@@ -1472,9 +1708,7 @@ describe("ACPServer", () => {
             },
         });
 
-        const finalResponse = await waitFor(
-            () => responses.find((response) => response.id === 3),
-        );
+        const finalResponse = await waitFor(() => responses.find((response) => response.id === 3));
         const toolCallIds = notifications
             .filter((item) => item.params?.update?.sessionUpdate === "tool_call")
             .map((item) => item.params.update.toolCallId);
@@ -1486,14 +1720,12 @@ describe("ACPServer", () => {
         expect(toolCallIds[0]).not.toBe(toolCallIds[1]);
         expect(
             notifications.some(
-                (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                    && item.params.update.status === "completed"
-                    && Array.isArray(item.params.update.content)
-                    && item.params.update.content[0]?.content?.text === [
-                        "Updated working notes (1 line total)",
-                        "",
-                        "round one",
-                    ].join("\n"),
+                (item) =>
+                    item.params?.update?.sessionUpdate === "tool_call_update" &&
+                    item.params.update.status === "completed" &&
+                    Array.isArray(item.params.update.content) &&
+                    item.params.update.content[0]?.content?.text ===
+                        ["Updated working notes (1 line total)", "", "round one"].join("\n"),
             ),
         ).toBe(true);
     });
@@ -1501,13 +1733,16 @@ describe("ACPServer", () => {
     it("inserts a NEW TASK user message on later prompts in the same session", async () => {
         const notifications: Array<{ method: string; params: any }> = [];
         const responses: any[] = [];
-        const streamSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+        const streamSpy = vi
+            .spyOn(OpenAIClient.prototype, "createChatCompletionStream")
             .mockResolvedValueOnce({
-                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"first prompt done"}}]\n```',
+                content:
+                    '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"first prompt done"}}]\n```',
                 reasoning: "",
             })
             .mockResolvedValueOnce({
-                content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"second prompt done"}}]\n```',
+                content:
+                    '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"second prompt done"}}]\n```',
                 reasoning: "",
             });
 
@@ -1532,7 +1767,7 @@ describe("ACPServer", () => {
             params: { cwd: process.cwd() },
         });
         const sessionId =
-            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
         await server.handleMessage({
             jsonrpc: "2.0",
@@ -1557,7 +1792,11 @@ describe("ACPServer", () => {
         await waitFor(() => responses.find((response) => response.id === 4));
 
         const secondPromptMessages = streamSpy.mock.calls[1]?.[0] ?? [];
-        expect(secondPromptMessages.some((message) => message.content.includes("========= TASK\nfirst prompt\n========="))).toBe(true);
+        expect(
+            secondPromptMessages.some((message) =>
+                message.content.includes("========= TASK\nfirst prompt\n========="),
+            ),
+        ).toBe(true);
         expect(secondPromptMessages.at(-1)?.content).toContain("========= NEW TASK");
         expect(secondPromptMessages.at(-1)?.content).toContain("second prompt");
     });
@@ -1577,10 +1816,12 @@ describe("ACPServer", () => {
             async (_messages, onChunk) => {
                 onChunk({
                     type: "content",
-                    content: '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["one"]}},{"tool":"task.end","params":{"reason":"done","summary":"two"}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["one"]}},{"tool":"task.end","params":{"reason":"done","summary":"two"}}]\n```',
                 });
                 return {
-                    content: '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["one"]}},{"tool":"task.end","params":{"reason":"done","summary":"two"}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["one"]}},{"tool":"task.end","params":{"reason":"done","summary":"two"}}]\n```',
                     reasoning: "",
                 };
             },
@@ -1599,7 +1840,7 @@ describe("ACPServer", () => {
             params: { cwd: process.cwd() },
         });
         const sessionId =
-            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
         await server.handleMessage({
             jsonrpc: "2.0",
@@ -1636,20 +1877,24 @@ describe("ACPServer", () => {
             .mockImplementationOnce(async (_messages, onChunk) => {
                 onChunk({
                     type: "content",
-                    content: '```tool-call\n[{"tool":"todo.set","params":{"items":[{"text":"Inspect repo","state":"active"},{"text":"Write tests","state":"pending"}]}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"todo.set","params":{"items":[{"text":"Inspect repo","state":"active"},{"text":"Write tests","state":"pending"}]}}]\n```',
                 });
                 return {
-                    content: '```tool-call\n[{"tool":"todo.set","params":{"items":[{"text":"Inspect repo","state":"active"},{"text":"Write tests","state":"pending"}]}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"todo.set","params":{"items":[{"text":"Inspect repo","state":"active"},{"text":"Write tests","state":"pending"}]}}]\n```',
                     reasoning: "",
                 };
             })
             .mockImplementationOnce(async (_messages, onChunk) => {
                 onChunk({
                     type: "content",
-                    content: '```tool-call\n[{"tool":"todo.update","params":{"text":"Inspect repo","state":"done"}},{"tool":"todo.update","params":{"text":"Write tests","state":"active"}},{"tool":"task.end","params":{"reason":"done","summary":"planned"}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"todo.update","params":{"text":"Inspect repo","state":"done"}},{"tool":"todo.update","params":{"text":"Write tests","state":"active"}},{"tool":"task.end","params":{"reason":"done","summary":"planned"}}]\n```',
                 });
                 return {
-                    content: '```tool-call\n[{"tool":"todo.update","params":{"text":"Inspect repo","state":"done"}},{"tool":"todo.update","params":{"text":"Write tests","state":"active"}},{"tool":"task.end","params":{"reason":"done","summary":"planned"}}]\n```',
+                    content:
+                        '```tool-call\n[{"tool":"todo.update","params":{"text":"Inspect repo","state":"done"}},{"tool":"todo.update","params":{"text":"Write tests","state":"active"}},{"tool":"task.end","params":{"reason":"done","summary":"planned"}}]\n```',
                     reasoning: "",
                 };
             });
@@ -1667,7 +1912,7 @@ describe("ACPServer", () => {
             params: { cwd: process.cwd() },
         });
         const sessionId =
-            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
         await server.handleMessage({
             jsonrpc: "2.0",
@@ -1694,8 +1939,14 @@ describe("ACPServer", () => {
         expect(todoToolCalls).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ title: "Sketching the plan", kind: "think" }),
-                expect.objectContaining({ title: "Advancing plan item Inspect repo", kind: "think" }),
-                expect.objectContaining({ title: "Advancing plan item Write tests", kind: "think" }),
+                expect.objectContaining({
+                    title: "Advancing plan item Inspect repo",
+                    kind: "think",
+                }),
+                expect.objectContaining({
+                    title: "Advancing plan item Write tests",
+                    kind: "think",
+                }),
             ]),
         );
         expect(todoToolUpdates).toEqual(
@@ -1751,10 +2002,7 @@ describe("ACPServer", () => {
 
         fs.writeFileSync(
             filePath,
-            [
-                "const greeting = 'hello';",
-                "console.log(greeting);",
-            ].join("\n"),
+            ["const greeting = 'hello';", "console.log(greeting);"].join("\n"),
             "utf-8",
         );
 
@@ -1796,7 +2044,7 @@ describe("ACPServer", () => {
                 params: { cwd: workspaceDir },
             });
             const sessionId =
-                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -1811,32 +2059,36 @@ describe("ACPServer", () => {
 
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "completed"
-                        && Array.isArray(item.params.update.content)
-                        && item.params.update.content[0]?.content?.text === [
-                            "Updated sample.ts: 1 edit applied, 2 total lines",
-                            "replace lines 1-1 -> 1-1",
-                        ].join("\n"),
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "completed" &&
+                        Array.isArray(item.params.update.content) &&
+                        item.params.update.content[0]?.content?.text ===
+                            [
+                                "Updated sample.ts: 1 edit applied, 2 total lines",
+                                "replace lines 1-1 -> 1-1",
+                            ].join("\n"),
                 ),
             ).toBe(true);
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "completed"
-                        && Array.isArray(item.params.update.content)
-                        && item.params.update.content.some(
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "completed" &&
+                        Array.isArray(item.params.update.content) &&
+                        item.params.update.content.some(
                             (content: any) =>
-                                content.type === "diff"
-                                && content.path === filePath
-                                && content.oldText === [
-                                    "const greeting = 'hello';",
-                                    "console.log(greeting);",
-                                ].join("\n")
-                                && content.newText === [
-                                    "const greeting = 'hello there';",
-                                    "console.log(greeting);",
-                                ].join("\n"),
+                                content.type === "diff" &&
+                                content.path === filePath &&
+                                content.oldText ===
+                                    ["const greeting = 'hello';", "console.log(greeting);"].join(
+                                        "\n",
+                                    ) &&
+                                content.newText ===
+                                    [
+                                        "const greeting = 'hello there';",
+                                        "console.log(greeting);",
+                                    ].join("\n"),
                         ),
                 ),
             ).toBe(true);
@@ -1853,10 +2105,7 @@ describe("ACPServer", () => {
 
         fs.writeFileSync(
             filePath,
-            [
-                "const greeting = 'hello';",
-                "console.log(greeting);",
-            ].join("\n"),
+            ["const greeting = 'hello';", "console.log(greeting);"].join("\n"),
             "utf-8",
         );
 
@@ -1898,7 +2147,7 @@ describe("ACPServer", () => {
                 params: { cwd: workspaceDir },
             });
             const sessionId =
-                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -1913,14 +2162,17 @@ describe("ACPServer", () => {
 
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "failed"
-                        && Array.isArray(item.params.update.content)
-                        && typeof item.params.update.content[0]?.content?.text === "string"
-                        && item.params.update.content[0].content.text.includes("[FAIL] file.edit")
-                        && item.params.update.content[0].content.text.includes("Could not apply edits to sample.ts")
-                        && item.params.update.content[0].content.text.includes("Closest match:")
-                        && !item.params.update.content[0].content.text.includes("failedEdits"),
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "failed" &&
+                        Array.isArray(item.params.update.content) &&
+                        typeof item.params.update.content[0]?.content?.text === "string" &&
+                        item.params.update.content[0].content.text.includes("[FAIL] file.edit") &&
+                        item.params.update.content[0].content.text.includes(
+                            "Could not apply edits to sample.ts",
+                        ) &&
+                        item.params.update.content[0].content.text.includes("Closest match:") &&
+                        !item.params.update.content[0].content.text.includes("failedEdits"),
                 ),
             ).toBe(true);
         } finally {
@@ -1934,11 +2186,7 @@ describe("ACPServer", () => {
         const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-file-overwrite-"));
         const filePath = path.join(workspaceDir, "notes.txt");
 
-        fs.writeFileSync(
-            filePath,
-            ["old line 1", "old line 2"].join("\n"),
-            "utf-8",
-        );
+        fs.writeFileSync(filePath, ["old line 1", "old line 2"].join("\n"), "utf-8");
 
         try {
             const server = new ACPServer({
@@ -1978,7 +2226,7 @@ describe("ACPServer", () => {
                 params: { cwd: workspaceDir },
             });
             const sessionId =
-                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -1993,15 +2241,16 @@ describe("ACPServer", () => {
 
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "completed"
-                        && Array.isArray(item.params.update.content)
-                        && item.params.update.content.some(
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "completed" &&
+                        Array.isArray(item.params.update.content) &&
+                        item.params.update.content.some(
                             (content: any) =>
-                                content.type === "diff"
-                                && content.path === filePath
-                                && content.oldText === "old line 1\nold line 2"
-                                && content.newText === "new line 1\nnew line 2\nnew line 3",
+                                content.type === "diff" &&
+                                content.path === filePath &&
+                                content.oldText === "old line 1\nold line 2" &&
+                                content.newText === "new line 1\nnew line 2\nnew line 3",
                         ),
                 ),
             ).toBe(true);
@@ -2054,7 +2303,7 @@ describe("ACPServer", () => {
                 params: { cwd: workspaceDir },
             });
             const sessionId =
-                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2069,15 +2318,16 @@ describe("ACPServer", () => {
 
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "completed"
-                        && Array.isArray(item.params.update.content)
-                        && item.params.update.content.some(
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "completed" &&
+                        Array.isArray(item.params.update.content) &&
+                        item.params.update.content.some(
                             (content: any) =>
-                                content.type === "diff"
-                                && content.path === createdPath
-                                && content.oldText === null
-                                && content.newText === "line 1\nline 2",
+                                content.type === "diff" &&
+                                content.path === createdPath &&
+                                content.oldText === null &&
+                                content.newText === "line 1\nline 2",
                         ),
                 ),
             ).toBe(true);
@@ -2092,11 +2342,7 @@ describe("ACPServer", () => {
         const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-file-peek-"));
         const filePath = path.join(workspaceDir, "peek.txt");
 
-        fs.writeFileSync(
-            filePath,
-            ["line 1", "line 2", "line 3"].join("\n"),
-            "utf-8",
-        );
+        fs.writeFileSync(filePath, ["line 1", "line 2", "line 3"].join("\n"), "utf-8");
 
         try {
             const server = new ACPServer({
@@ -2133,7 +2379,7 @@ describe("ACPServer", () => {
                 params: { cwd: workspaceDir },
             });
             const sessionId =
-                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2148,20 +2394,22 @@ describe("ACPServer", () => {
 
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "completed"
-                        && Array.isArray(item.params.update.content)
-                        && item.params.update.content[0]?.content?.text === [
-                            "Peeked peek.txt",
-                            "Lines 2-3 of 3",
-                            "",
-                            "```",
-                            "2 | line 2",
-                            "3 | line 3",
-                            "```",
-                            "",
-                            "Peeked content not loaded into workspace. Use file.load to load for editing.",
-                        ].join("\n"),
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "completed" &&
+                        Array.isArray(item.params.update.content) &&
+                        item.params.update.content[0]?.content?.text ===
+                            [
+                                "Peeked peek.txt",
+                                "Lines 2-3 of 3",
+                                "",
+                                "```",
+                                "2 | line 2",
+                                "3 | line 3",
+                                "```",
+                                "",
+                                "Peeked content not loaded into workspace. Use file.load to load for editing.",
+                            ].join("\n"),
                 ),
             ).toBe(true);
         } finally {
@@ -2212,7 +2460,7 @@ describe("ACPServer", () => {
                 params: { cwd: workspaceDir },
             });
             const sessionId =
-                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2227,18 +2475,22 @@ describe("ACPServer", () => {
 
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "completed"
-                        && Array.isArray(item.params.update.content)
-                        && item.params.update.content[0]?.content?.text === "Removed sample.ts from workspace context",
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "completed" &&
+                        Array.isArray(item.params.update.content) &&
+                        item.params.update.content[0]?.content?.text ===
+                            "Removed sample.ts from workspace context",
                 ),
             ).toBe(true);
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "tool_call_update"
-                        && item.params.update.status === "completed"
-                        && Array.isArray(item.params.update.content)
-                        && item.params.update.content[0]?.content?.text === "Removed . from workspace context",
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "tool_call_update" &&
+                        item.params.update.status === "completed" &&
+                        Array.isArray(item.params.update.content) &&
+                        item.params.update.content[0]?.content?.text ===
+                            "Removed . from workspace context",
                 ),
             ).toBe(true);
         } finally {
@@ -2269,8 +2521,8 @@ describe("ACPServer", () => {
 
         vi.spyOn(globalThis, "fetch").mockResolvedValue(
             createStreamingResponse([
-                "data: {\"id\":\"cmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Working...\\n\"},\"finish_reason\":null}]}\n\n",
-                "data: {\"id\":\"cmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"```tool-call\\n[{\\\"tool\\\":\\\"task.end\\\",\\\"params\\\":{\\\"reason\\\":\\\"done\\\",\\\"summary\\\":\\\"Mock reply delivered\\\"}}]\\n```\"},\"finish_reason\":null}]}\n\n",
+                'data: {"id":"cmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Working...\\n"},"finish_reason":null}]}\n\n',
+                'data: {"id":"cmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"```tool-call\\n[{\\"tool\\":\\"task.end\\",\\"params\\":{\\"reason\\":\\"done\\",\\"summary\\":\\"Mock reply delivered\\"}}]\\n```"},"finish_reason":null}]}\n\n',
                 "data: [DONE]\n\n",
             ]),
         );
@@ -2284,29 +2536,37 @@ describe("ACPServer", () => {
             error: error as NodeJS.WriteStream,
         });
 
-        input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } })}\n`);
-        input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: process.cwd() } })}\n`);
-        const sessionNewResponse = await waitFor(() => lines
-            .map((line) => JSON.parse(line))
-            .find((message) => message.id === 2), 500);
+        input.write(
+            `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } })}\n`,
+        );
+        input.write(
+            `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: process.cwd() } })}\n`,
+        );
+        const sessionNewResponse = await waitFor(
+            () => lines.map((line) => JSON.parse(line)).find((message) => message.id === 2),
+            500,
+        );
         const sessionId = sessionNewResponse?.result?.sessionId as string;
 
-        input.write(`${JSON.stringify({
-            jsonrpc: "2.0",
-            id: 3,
-            method: "session/prompt",
-            params: {
-                sessionId,
-                prompt: [{ type: "text", text: "Finish the task" }],
-            },
-        })}\n`);
+        input.write(
+            `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "session/prompt",
+                params: {
+                    sessionId,
+                    prompt: [{ type: "text", text: "Finish the task" }],
+                },
+            })}\n`,
+        );
         await waitFor(() => {
             const messages = lines.map((line) => JSON.parse(line));
             const promptResponse = messages.find((message) => message.id === 3);
             const finalReply = messages.find(
-                (message) => message.method === "session/update"
-                    && message.params?.update?.sessionUpdate === "agent_message_chunk"
-                    && message.params?.update?.content?.text === "Mock reply delivered",
+                (message) =>
+                    message.method === "session/update" &&
+                    message.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                    message.params?.update?.content?.text === "Mock reply delivered",
             );
             return promptResponse && finalReply ? true : undefined;
         }, 2000);
@@ -2314,15 +2574,17 @@ describe("ACPServer", () => {
         const messages = lines.map((line) => JSON.parse(line));
         const promptResponse = messages.find((message) => message.id === 3);
         const finalReply = messages.find(
-            (message) => message.method === "session/update"
-                && message.params?.update?.sessionUpdate === "agent_message_chunk"
-                && message.params?.update?.content?.text === "Mock reply delivered",
+            (message) =>
+                message.method === "session/update" &&
+                message.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                message.params?.update?.content?.text === "Mock reply delivered",
         );
         const toolCallChunk = messages.find(
-            (message) => message.method === "session/update"
-                && message.params?.update?.sessionUpdate === "agent_message_chunk"
-                && typeof message.params?.update?.content?.text === "string"
-                && message.params.update.content.text.includes("```tool-call"),
+            (message) =>
+                message.method === "session/update" &&
+                message.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                typeof message.params?.update?.content?.text === "string" &&
+                message.params.update.content.text.includes("```tool-call"),
         );
 
         expect(errors).toEqual([]);
@@ -2351,7 +2613,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2361,7 +2629,12 @@ describe("ACPServer", () => {
                 notify: (method, params) => notifications.push({ method, params }),
             });
 
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const sessionNew = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 2,
@@ -2369,12 +2642,16 @@ describe("ACPServer", () => {
                 params: { cwd: process.cwd() },
             });
 
-            expect(sessionNew && "result" in sessionNew ? sessionNew.result.sessionId : null).toBeTypeOf("string");
+            expect(
+                sessionNew && "result" in sessionNew ? sessionNew.result.sessionId : null,
+            ).toBeTypeOf("string");
             expect(notifications).toEqual([]);
 
-            await waitFor(() => notifications.find(
-                (item) => item.params?.update?.sessionUpdate === "available_commands_update",
-            ));
+            await waitFor(() =>
+                notifications.find(
+                    (item) => item.params?.update?.sessionUpdate === "available_commands_update",
+                ),
+            );
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             process.env.HOME = originalHome;
@@ -2402,7 +2679,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2412,14 +2695,20 @@ describe("ACPServer", () => {
                 notify: (method, params) => notifications.push({ method, params }),
             });
 
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const sessionNew = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 2,
                 method: "session/new",
                 params: { cwd: process.cwd() },
             });
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             const response = await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2431,38 +2720,44 @@ describe("ACPServer", () => {
                 },
             });
 
-            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+            expect(response && "result" in response ? response.result.stopReason : null).toBe(
+                "end_turn",
+            );
             expect(llmSpy).not.toHaveBeenCalled();
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("## Unknown Command"),
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("## Unknown Command"),
+                                }),
                             }),
                         }),
                     }),
-                }),
-            ]));
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("/help"),
+                ]),
+            );
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("/help"),
+                                }),
                             }),
                         }),
                     }),
-                }),
-            ]));
+                ]),
+            );
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             process.env.HOME = originalHome;
@@ -2480,19 +2775,30 @@ describe("ACPServer", () => {
             notify: (method, params) => notifications.push({ method, params }),
         });
 
-        await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
         const sessionNew = await server.handleMessage({
             jsonrpc: "2.0",
             id: 2,
             method: "session/new",
             params: { cwd: process.cwd() },
         });
-        const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+        const sessionId =
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
-        await waitFor(() => notifications.find(
-            (item) => item.params?.update?.sessionUpdate === "available_commands_update"
-                && item.params?.update?.availableCommands?.some((command: any) => command.name === "help"),
-        ));
+        await waitFor(() =>
+            notifications.find(
+                (item) =>
+                    item.params?.update?.sessionUpdate === "available_commands_update" &&
+                    item.params?.update?.availableCommands?.some(
+                        (command: any) => command.name === "help",
+                    ),
+            ),
+        );
 
         const response = await server.handleMessage({
             jsonrpc: "2.0",
@@ -2504,28 +2810,33 @@ describe("ACPServer", () => {
             },
         });
 
-        expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+        expect(response && "result" in response ? response.result.stopReason : null).toBe(
+            "end_turn",
+        );
         expect(llmSpy).not.toHaveBeenCalled();
-        expect(notifications).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                method: "session/update",
-                params: expect.objectContaining({
-                    sessionId,
-                    update: expect.objectContaining({
-                        sessionUpdate: "available_commands_update",
-                        availableCommands: expect.arrayContaining([
-                            expect.objectContaining({ name: "help" }),
-                            expect.objectContaining({ name: "session" }),
-                        ]),
+        expect(notifications).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "available_commands_update",
+                            availableCommands: expect.arrayContaining([
+                                expect.objectContaining({ name: "help" }),
+                                expect.objectContaining({ name: "session" }),
+                            ]),
+                        }),
                     }),
                 }),
-            }),
-        ]));
-        expect(notifications).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                method: "session/update",
-                params: expect.objectContaining({
-                    sessionId,
+            ]),
+        );
+        expect(notifications).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
                         update: expect.objectContaining({
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
@@ -2534,8 +2845,9 @@ describe("ACPServer", () => {
                             }),
                         }),
                     }),
-            }),
-        ]));
+                }),
+            ]),
+        );
     });
 
     it("skips auto snapshots for local ACP slash commands", async () => {
@@ -2556,7 +2868,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2565,14 +2883,20 @@ describe("ACPServer", () => {
                 },
             });
 
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const sessionNew = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 2,
                 method: "session/new",
                 params: { cwd: process.cwd() },
             });
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2585,7 +2909,11 @@ describe("ACPServer", () => {
             });
 
             const lines = fs.existsSync(logPath)
-                ? fs.readFileSync(logPath, "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
+                ? fs
+                      .readFileSync(logPath, "utf8")
+                      .split(/\r?\n/)
+                      .filter(Boolean)
+                      .map((line) => JSON.parse(line))
                 : [];
             expect(lines.filter((entry) => entry.args.includes("backup"))).toHaveLength(0);
         } finally {
@@ -2613,7 +2941,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2623,14 +2957,20 @@ describe("ACPServer", () => {
                 notify: (method, params) => notifications.push({ method, params }),
             });
 
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const sessionNew = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 2,
                 method: "session/new",
                 params: { cwd: process.cwd() },
             });
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             const response = await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2642,22 +2982,26 @@ describe("ACPServer", () => {
                 },
             });
 
-            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("## `/snapshot`"),
+            expect(response && "result" in response ? response.result.stopReason : null).toBe(
+                "end_turn",
+            );
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("## `/snapshot`"),
+                                }),
                             }),
                         }),
                     }),
-                }),
-            ]));
+                ]),
+            );
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             process.env.HOME = originalHome;
@@ -2675,14 +3019,20 @@ describe("ACPServer", () => {
             notify: (method, params) => notifications.push({ method, params }),
         });
 
-        await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
         const sessionNew = await server.handleMessage({
             jsonrpc: "2.0",
             id: 2,
             method: "session/new",
             params: { cwd: process.cwd() },
         });
-        const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+        const sessionId =
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
         const response = await server.handleMessage({
             jsonrpc: "2.0",
@@ -2694,13 +3044,16 @@ describe("ACPServer", () => {
             },
         });
 
-        expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+        expect(response && "result" in response ? response.result.stopReason : null).toBe(
+            "end_turn",
+        );
         expect(llmSpy).not.toHaveBeenCalled();
-        expect(notifications).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                method: "session/update",
-                params: expect.objectContaining({
-                    sessionId,
+        expect(notifications).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
                         update: expect.objectContaining({
                             sessionUpdate: "agent_message_chunk",
                             content: expect.objectContaining({
@@ -2709,8 +3062,9 @@ describe("ACPServer", () => {
                             }),
                         }),
                     }),
-            }),
-        ]));
+                }),
+            ]),
+        );
     });
 
     it("handles /snapshots locally", async () => {
@@ -2731,7 +3085,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2741,14 +3101,20 @@ describe("ACPServer", () => {
                 notify: (method, params) => notifications.push({ method, params }),
             });
 
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const sessionNew = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 2,
                 method: "session/new",
                 params: { cwd: process.cwd() },
             });
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2770,35 +3136,39 @@ describe("ACPServer", () => {
                 },
             });
 
-            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("## Snapshots"),
+            expect(response && "result" in response ? response.result.stopReason : null).toBe(
+                "end_turn",
+            );
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("snapshot(s) total"),
+                                }),
                             }),
                         }),
                     }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("| Snapshot ID | Trigger | Label | Created At |"),
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("manual-list-test"),
+                                }),
                             }),
                         }),
                     }),
-                }),
-            ]));
+                ]),
+            );
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             process.env.HOME = originalHome;
@@ -2830,7 +3200,13 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(root, "Library", "Application Support", "diogenes", "sessions"),
+                            storageRoot: path.join(
+                                root,
+                                "Library",
+                                "Application Support",
+                                "diogenes",
+                                "sessions",
+                            ),
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2840,14 +3216,20 @@ describe("ACPServer", () => {
                 notify: (method, params) => notifications.push({ method, params }),
             });
 
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
             const sessionNew = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 2,
                 method: "session/new",
                 params: { cwd: workspaceDir },
             });
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -2862,11 +3244,13 @@ describe("ACPServer", () => {
             await fs.promises.writeFile(path.join(workspaceDir, "hello.txt"), "mutated\n", "utf8");
 
             const restoreMessage = notifications.find(
-                (item) => item.params?.update?.sessionUpdate === "agent_message_chunk"
-                    && typeof item.params?.update?.content?.text === "string"
-                    && item.params.update.content.text.includes("## Snapshot Created"),
+                (item) =>
+                    item.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                    typeof item.params?.update?.content?.text === "string" &&
+                    item.params.update.content.text.includes("✅ **Snapshot created**"),
             );
-            const snapshotIdMatch = restoreMessage?.params?.update?.content?.text?.match(/Snapshot ID:\*\* `([^`]+)`/);
+            const snapshotIdMatch =
+                restoreMessage?.params?.update?.content?.text?.match(/\*\*ID:\*\* `([^`]+)`/);
             const snapshotId = snapshotIdMatch?.[1];
 
             const response = await server.handleMessage({
@@ -2880,73 +3264,92 @@ describe("ACPServer", () => {
             });
 
             expect(snapshotId).toBeTypeOf("string");
-            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "snapshot_restore_started",
-                            snapshotId,
+            expect(response && "result" in response ? response.result.stopReason : null).toBe(
+                "end_turn",
+            );
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "snapshot_restore_started",
+                                snapshotId: expect.stringContaining(snapshotId || ""),
+                            }),
                         }),
                     }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "snapshot_restore_completed",
-                            snapshotId,
-                            _meta: expect.objectContaining({
-                                diogenes: expect.objectContaining({
-                                    safetySnapshotId: expect.any(String),
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "snapshot_restore_completed",
+                                snapshotId: expect.stringContaining(snapshotId || ""),
+                                _meta: expect.objectContaining({
+                                    diogenes: expect.objectContaining({
+                                        safetySnapshotId: expect.any(String),
+                                    }),
                                 }),
                             }),
                         }),
                     }),
-                }),
-            ]));
-            expect(notifications).toEqual(expect.arrayContaining([
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("Snapshot restore completed."),
+                ]),
+            );
+            expect(notifications).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("✅ **Restored**"),
+                                }),
                             }),
                         }),
                     }),
-                }),
-                expect.objectContaining({
-                    method: "session/update",
-                    params: expect.objectContaining({
-                        sessionId,
-                        update: expect.objectContaining({
-                            sessionUpdate: "agent_message_chunk",
-                            content: expect.objectContaining({
-                                type: "text",
-                                text: expect.stringContaining("Safety Snapshot:"),
+                    expect.objectContaining({
+                        method: "session/update",
+                        params: expect.objectContaining({
+                            sessionId,
+                            update: expect.objectContaining({
+                                sessionUpdate: "agent_message_chunk",
+                                content: expect.objectContaining({
+                                    type: "text",
+                                    text: expect.stringContaining("Safety backup:"),
+                                }),
                             }),
                         }),
                     }),
-                }),
-            ]));
-            expect(await fs.promises.readFile(path.join(root, "workspace", "hello.txt"), "utf8")).toBe("restored via acp\n");
+                ]),
+            );
+            expect(
+                await fs.promises.readFile(path.join(root, "workspace", "hello.txt"), "utf8"),
+            ).toBe("restored via acp\n");
             const persistedState = JSON.parse(
                 await fs.promises.readFile(
-                    path.join(root, "Library", "Application Support", "diogenes", "sessions", sessionId, "state.json"),
+                    path.join(
+                        root,
+                        "Library",
+                        "Application Support",
+                        "diogenes",
+                        "sessions",
+                        sessionId,
+                        "state.json",
+                    ),
                     "utf8",
                 ),
             );
-            expect(persistedState.acpReplayLog.some(
-                (update: any) => update.sessionUpdate === "agent_message_chunk"
-                    && update.content?.text?.includes("Safety Snapshot:"),
-            )).toBe(true);
+            expect(
+                persistedState.acpReplayLog.some(
+                    (update: any) =>
+                        update.sessionUpdate === "agent_message_chunk" &&
+                        update.content?.text?.includes("Safety backup:"),
+                ),
+            ).toBe(true);
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;
@@ -2993,7 +3396,7 @@ describe("ACPServer", () => {
             params: { cwd: process.cwd() },
         });
         const sessionId =
-            sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
         const promptStartResponse = await server.handleMessage({
             jsonrpc: "2.0",
@@ -3012,23 +3415,31 @@ describe("ACPServer", () => {
             method: "session/cancel",
             params: { sessionId },
         });
-        const promptResponse = await waitFor(
-            () => responses.find((response) => response.id === 3),
-        );
+        const promptResponse = await waitFor(() => responses.find((response) => response.id === 3));
 
         expect(promptStartResponse).toBeNull();
         expect(cancelResponse).toBeNull();
-        expect(promptResponse && "result" in promptResponse && promptResponse.result.stopReason).toBe("cancelled");
+        expect(
+            promptResponse && "result" in promptResponse && promptResponse.result.stopReason,
+        ).toBe("cancelled");
         expect(cancelled).toBe(true);
-        expect(notifications.every(
-            (item) => item.params?.update?.sessionUpdate === "available_commands_update",
-        )).toBe(true);
+        expect(
+            notifications.every(
+                (item) => item.params?.update?.sessionUpdate === "available_commands_update",
+            ),
+        ).toBe(true);
     });
 
     it("restores a snapshot through the host-controlled ACP method", async () => {
         const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "acp-restore-"));
         const workspaceDir = path.join(root, "workspace");
-        const storageRoot = path.join(root, "Library", "Application Support", "diogenes", "sessions");
+        const storageRoot = path.join(
+            root,
+            "Library",
+            "Application Support",
+            "diogenes",
+            "sessions",
+        );
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const logPath = path.join(root, "restic.log");
         const notifications: any[] = [];
@@ -3037,7 +3448,8 @@ describe("ACPServer", () => {
         await fs.promises.writeFile(path.join(workspaceDir, "hello.txt"), "hello\n", "utf8");
 
         vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
-            content: '```tool-call\n[{"tool":"task.end","params":{"title":"Initial snapshot","description":"Creates the baseline snapshot.","reason":"done","summary":"done"}}]\n```',
+            content:
+                '```tool-call\n[{"tool":"task.end","params":{"title":"Initial snapshot","description":"Creates the baseline snapshot.","reason":"done","summary":"done"}}]\n```',
             reasoning: "",
         });
 
@@ -3066,9 +3478,20 @@ describe("ACPServer", () => {
                 notify: (method, params) => notifications.push({ method, params }),
             });
 
-            await server.handleMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } });
-            const sessionNew = await server.handleMessage({ jsonrpc: "2.0", id: 2, method: "session/new", params: { cwd: workspaceDir } });
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+            const sessionNew = await server.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: workspaceDir },
+            });
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await server.handleMessage({
                 jsonrpc: "2.0",
@@ -3077,7 +3500,12 @@ describe("ACPServer", () => {
                 params: { sessionId, prompt: [{ type: "text", text: "take baseline" }] },
             });
 
-            const manifest = JSON.parse(await fs.promises.readFile(path.join(storageRoot, sessionId, "snapshots", "manifest.json"), "utf8"));
+            const manifest = JSON.parse(
+                await fs.promises.readFile(
+                    path.join(storageRoot, sessionId, "snapshots", "manifest.json"),
+                    "utf8",
+                ),
+            );
             await fs.promises.writeFile(path.join(workspaceDir, "hello.txt"), "mutated\n", "utf8");
 
             const restoreResponse = await server.handleMessage({
@@ -3087,28 +3515,53 @@ describe("ACPServer", () => {
                 params: { sessionId, snapshotId: manifest.snapshots[0].snapshotId },
             });
 
-            expect(restoreResponse && "result" in restoreResponse ? restoreResponse.result.restored : null).toBe(true);
-            expect(restoreResponse && "result" in restoreResponse ? restoreResponse.result.metadata : null).toEqual(
+            expect(
+                restoreResponse && "result" in restoreResponse
+                    ? restoreResponse.result.restored
+                    : null,
+            ).toBe(true);
+            expect(
+                restoreResponse && "result" in restoreResponse
+                    ? restoreResponse.result.metadata
+                    : null,
+            ).toEqual(
                 expect.objectContaining({
                     title: "Initial snapshot",
                     description: "Creates the baseline snapshot.",
                 }),
             );
-            expect(restoreResponse && "result" in restoreResponse ? restoreResponse.result._meta : null).toEqual(
+            expect(
+                restoreResponse && "result" in restoreResponse
+                    ? restoreResponse.result._meta
+                    : null,
+            ).toEqual(
                 expect.objectContaining({
                     diogenes: expect.objectContaining({
                         safetySnapshotId: expect.any(String),
                     }),
                 }),
             );
-            expect(await fs.promises.readFile(path.join(workspaceDir, "hello.txt"), "utf8")).toBe("restored via acp\n");
-            expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_started")).toBe(true);
-            expect(notifications.some((item) => item.params?.update?.sessionUpdate === "snapshot_restore_completed")).toBe(true);
-            expect(notifications.some(
-                (item) => item.params?.update?.sessionUpdate === "agent_message_chunk"
-                    && typeof item.params?.update?.content?.text === "string"
-                    && item.params.update.content.text.includes("Safety Snapshot:"),
-            )).toBe(true);
+            expect(await fs.promises.readFile(path.join(workspaceDir, "hello.txt"), "utf8")).toBe(
+                "restored via acp\n",
+            );
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "snapshot_restore_started",
+                ),
+            ).toBe(true);
+            expect(
+                notifications.some(
+                    (item) => item.params?.update?.sessionUpdate === "snapshot_restore_completed",
+                ),
+            ).toBe(true);
+            expect(
+                notifications.some(
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                        typeof item.params?.update?.content?.text === "string" &&
+                        item.params.update.content.text.includes("Safety Snapshot:"),
+                ),
+            ).toBe(true);
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;

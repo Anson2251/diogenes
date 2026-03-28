@@ -1,9 +1,19 @@
-import { BaseTool } from "../base-tool";
+import { z } from "zod";
+
 import { ToolCall, ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
+
+const taskAskSchema = z.object({
+    question: z.string(),
+});
+
+type TaskAskParams = z.infer<typeof taskAskSchema>;
 
 export type AskHandler = (question: string) => Promise<string>;
 
-export class TaskAskTool extends BaseTool {
+export class TaskAskTool extends BaseTool<typeof taskAskSchema> {
+    protected schema = taskAskSchema;
+
     constructor(private readonly askHandler: AskHandler) {
         super({
             namespace: "task",
@@ -21,18 +31,8 @@ export class TaskAskTool extends BaseTool {
         });
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for task.ask",
-                { errors: validation.errors },
-                "Provide a single question string",
-            );
-        }
-
-        const { question } = validation.data as { question: string };
+    async run(params: TaskAskParams): Promise<ToolResult> {
+        const { question } = params;
 
         try {
             const answer = await this.askHandler(question);

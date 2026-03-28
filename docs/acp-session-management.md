@@ -118,11 +118,7 @@ This keeps session ownership local and makes later snapshot integration straight
 Recommended session lifecycle:
 
 ```ts
-type SessionLifecycleState =
-  | "active"
-  | "running"
-  | "disposing"
-  | "disposed";
+type SessionLifecycleState = "active" | "running" | "disposing" | "disposed";
 ```
 
 Semantics:

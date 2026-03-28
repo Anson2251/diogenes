@@ -2,13 +2,24 @@
  * File unload tool
  */
 
-import { BaseTool } from "../base-tool";
+import { z } from "zod";
+
+import type { WorkspaceManager } from "../../context/workspace";
+
 import { ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
 
-export class FileUnloadTool extends BaseTool {
-    private workspace: any;
+const fileUnloadSchema = z.object({
+    path: z.string(),
+});
 
-    constructor(workspace: any) {
+type FileUnloadParams = z.infer<typeof fileUnloadSchema>;
+
+export class FileUnloadTool extends BaseTool<typeof fileUnloadSchema> {
+    protected schema = fileUnloadSchema;
+    private workspace: WorkspaceManager;
+
+    constructor(workspace: WorkspaceManager) {
         super({
             namespace: "file",
             name: "unload",
@@ -23,18 +34,8 @@ export class FileUnloadTool extends BaseTool {
         this.workspace = workspace;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for file.unload",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
-
-        const { path } = validation.data as { path: string };
+    run(params: FileUnloadParams): ToolResult {
+        const { path } = params;
 
         const success = this.workspace.unloadFile(path);
 

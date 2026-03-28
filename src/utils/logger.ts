@@ -1,11 +1,16 @@
 /**
  * Logging abstraction layer with TUI-style display support
- * 
+ *
  * Provides clean separation between logging and presentation,
  * supporting both traditional logging and TUI-style progress display.
  */
 
+import { TRON } from "@tron-format/tron";
+import { z } from "zod";
+
 import { StreamChunk } from "../llm/openai-client";
+
+const stringRecordSchema = z.record(z.string(), z.unknown());
 
 export enum LogLevel {
     DEBUG = 0,
@@ -31,10 +36,10 @@ export interface ToolResultData {
     error?: {
         code: string;
         message: string;
-        details?: Record<string, any>;
+        details?: Record<string, unknown>;
         suggestion?: string;
     };
-    data?: any;
+    data?: unknown;
     /**
      * Custom formatted output from the tool's formatResult() method.
      * If provided, this should be used instead of default formatting.
@@ -120,25 +125,25 @@ export class TUILogger implements Logger {
         return level >= this.logLevel;
     }
 
-    debug(message: string, ...args: any[]): void {
+    debug(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.DEBUG)) {
             console.log(`${colors.dim}${message}${colors.reset}`, ...args);
         }
     }
 
-    info(message: string, ...args: any[]): void {
+    info(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.INFO)) {
             console.log(message, ...args);
         }
     }
 
-    warn(message: string, ...args: any[]): void {
+    warn(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.WARN)) {
             console.warn(`${colors.yellow}Warning: ${message}${colors.reset}`, ...args);
         }
     }
 
-    error(message: string, ...args: any[]): void {
+    error(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.ERROR)) {
             console.error(`${colors.red}${colors.bright}Error:${colors.reset} ${message}`, ...args);
         }
@@ -146,7 +151,7 @@ export class TUILogger implements Logger {
 
     iterationStart(iteration: number): void {
         console.log(
-            `\n${colors.cyan}${colors.bright}=== Iteration ${iteration} ===${colors.reset}`
+            `\n${colors.cyan}${colors.bright}=== Iteration ${iteration} ===${colors.reset}`,
         );
     }
 
@@ -157,15 +162,12 @@ export class TUILogger implements Logger {
     }
 
     toolCalls(toolCalls: ToolCallData[]): void {
-        const { TRON } = require('@tron-format/tron');
         console.log(
-            `${colors.yellow}${colors.bright}Tool Calls (${toolCalls.length}):${colors.reset}`
+            `${colors.yellow}${colors.bright}Tool Calls (${toolCalls.length}):${colors.reset}`,
         );
         for (let i = 0; i < toolCalls.length; i++) {
             const toolCall = toolCalls[i];
-            console.log(
-                `${colors.yellow}[${i + 1}] ${toolCall.tool}:${colors.reset}`
-            );
+            console.log(`${colors.yellow}[${i + 1}] ${toolCall.tool}:${colors.reset}`);
             console.log(TRON.stringify(toolCall.params));
             console.log();
         }
@@ -180,23 +182,39 @@ export class TUILogger implements Logger {
 
         if (result.success) {
             // For task.end, print the summary
-            if (toolName === "task.end" && result.data?.summary) {
+            const parseResult =
+                typeof result.data === "object" && result.data !== null
+                    ? stringRecordSchema.safeParse(result.data)
+                    : ({ success: false } as const);
+            const dataRecord = parseResult.success ? parseResult.data : undefined;
+            const summary =
+                dataRecord && "summary" in dataRecord && typeof dataRecord.summary === "string"
+                    ? dataRecord.summary
+                    : undefined;
+            if (toolName === "task.end" && summary) {
                 console.log(
-                    `${colors.magenta}${colors.bright}Task completed: ${toolName}${colors.reset}`
+                    `${colors.magenta}${colors.bright}Task completed: ${toolName}${colors.reset}`,
                 );
-                console.log(`${colors.bright}Summary:${colors.reset} ${result.data.summary}`);
+                console.log(`${colors.bright}Summary:${colors.reset} ${summary}`);
                 console.log();
                 return;
             }
 
             // Check if there's meaningful data beyond just "success: true"
-            const hasMeaningfulData = result.data &&
-                Object.keys(result.data).length > 0 &&
-                !(Object.keys(result.data).length === 1 && result.data.success === true);
+            const dataObj = dataRecord;
+            const hasMeaningfulData: boolean = !!(
+                dataObj &&
+                Object.keys(dataObj).length > 0 &&
+                !(
+                    Object.keys(dataObj).length === 1 &&
+                    "success" in dataObj &&
+                    dataObj.success === true
+                )
+            );
 
             if (hasMeaningfulData) {
                 console.log(
-                    `${colors.magenta}${colors.bright}Tool Result: ${toolName}${colors.reset}`
+                    `${colors.magenta}${colors.bright}Tool Result: ${toolName}${colors.reset}`,
                 );
                 console.log(`${colors.green}Success:${colors.reset}`);
                 console.log(result.data);
@@ -206,17 +224,13 @@ export class TUILogger implements Logger {
                 console.log(`${colors.green}Tool ${toolName} success${colors.reset}`);
             }
         } else {
-            console.log(
-                `${colors.magenta}${colors.bright}Tool Result: ${toolName}${colors.reset}`
-            );
+            console.log(`${colors.magenta}${colors.bright}Tool Result: ${toolName}${colors.reset}`);
             console.log(`${colors.red}Error:${colors.reset}`);
             const error = result.error!;
             console.log(`Code: ${error.code}`);
             console.log(`Message: ${error.message}`);
             if (error.details) {
-                console.log(
-                    `Details: ${JSON.stringify(error.details, null, 2)}`
-                );
+                console.log(`Details: ${JSON.stringify(error.details, null, 2)}`);
             }
             if (error.suggestion) {
                 console.log(`Suggestion: ${error.suggestion}`);
@@ -226,9 +240,7 @@ export class TUILogger implements Logger {
     }
 
     taskStarted(taskDescription: string): void {
-        console.log(
-            `${colors.cyan}${colors.bright}Task:${colors.reset} ${taskDescription}`
-        );
+        console.log(`${colors.cyan}${colors.bright}Task:${colors.reset} ${taskDescription}`);
         console.log(`${colors.dim}Starting execution...${colors.reset}\n`);
     }
 
@@ -239,10 +251,10 @@ export class TUILogger implements Logger {
 
         if (data.success) {
             console.log(
-                `${colors.green}${colors.bright}✓ Task completed successfully!${colors.reset}`
+                `${colors.green}${colors.bright}✓ Task completed successfully!${colors.reset}`,
             );
             console.log(
-                `${colors.dim}Iterations: ${data.iterations}, Time: ${elapsedTime}s${colors.reset}`
+                `${colors.dim}Iterations: ${data.iterations}, Time: ${elapsedTime}s${colors.reset}`,
             );
 
             if (data.result) {
@@ -250,26 +262,19 @@ export class TUILogger implements Logger {
                 console.log(data.result);
             }
         } else {
+            console.log(`${colors.red}${colors.bright}✗ Task failed${colors.reset}`);
             console.log(
-                `${colors.red}${colors.bright}✗ Task failed${colors.reset}`
-            );
-            console.log(
-                `${colors.dim}Iterations: ${data.iterations}, Time: ${elapsedTime}s${colors.reset}`
+                `${colors.dim}Iterations: ${data.iterations}, Time: ${elapsedTime}s${colors.reset}`,
             );
 
             if (data.error) {
-                console.log(
-                    `\n${colors.bright}Error:${colors.reset} ${data.error}`
-                );
+                console.log(`\n${colors.bright}Error:${colors.reset} ${data.error}`);
             }
         }
     }
 
     taskError(error: Error): void {
-        console.error(
-            `\n${colors.red}${colors.bright}Fatal error:${colors.reset}`,
-            error
-        );
+        console.error(`\n${colors.red}${colors.bright}Fatal error:${colors.reset}`, error);
     }
 
     interactiveMessage(message: string): void {
@@ -341,25 +346,25 @@ export class ConsoleLogger implements Logger {
         return level >= this.logLevel;
     }
 
-    debug(message: string, ...args: any[]): void {
+    debug(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.DEBUG)) {
             console.log(`[DEBUG] ${message}`, ...args);
         }
     }
 
-    info(message: string, ...args: any[]): void {
+    info(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.INFO)) {
             console.log(message, ...args);
         }
     }
 
-    warn(message: string, ...args: any[]): void {
+    warn(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.WARN)) {
             console.warn(`[WARN] ${message}`, ...args);
         }
     }
 
-    error(message: string, ...args: any[]): void {
+    error(message: string, ...args: unknown[]): void {
         if (this.shouldLog(LogLevel.ERROR)) {
             console.error(`[ERROR] ${message}`, ...args);
         }
@@ -386,15 +391,31 @@ export class ConsoleLogger implements Logger {
 
         if (result.success) {
             // For task.end, print the summary at INFO level
-            if (toolName === "task.end" && result.data?.summary) {
-                this.info(`Task completed: ${result.data.summary}`);
+            const parseResult =
+                typeof result.data === "object" && result.data !== null
+                    ? stringRecordSchema.safeParse(result.data)
+                    : ({ success: false } as const);
+            const dataRecord = parseResult.success ? parseResult.data : undefined;
+            const summary =
+                dataRecord && "summary" in dataRecord && typeof dataRecord.summary === "string"
+                    ? dataRecord.summary
+                    : undefined;
+            if (toolName === "task.end" && summary) {
+                this.info(`Task completed: ${summary}`);
                 return;
             }
 
             // Check if there's meaningful data beyond just "success: true"
-            const hasMeaningfulData = result.data &&
-                Object.keys(result.data).length > 0 &&
-                !(Object.keys(result.data).length === 1 && result.data.success === true);
+            const dataObj = dataRecord;
+            const hasMeaningfulData: boolean = !!(
+                dataObj &&
+                Object.keys(dataObj).length > 0 &&
+                !(
+                    Object.keys(dataObj).length === 1 &&
+                    "success" in dataObj &&
+                    dataObj.success === true
+                )
+            );
 
             if (hasMeaningfulData) {
                 this.info(`Tool ${toolName} success: ${JSON.stringify(result.data)}`);
@@ -418,7 +439,7 @@ export class ConsoleLogger implements Logger {
                 this.info(`Result: ${data.result}`);
             }
         } else {
-            this.error(`Task failed in ${elapsedTime}s: ${data.error || 'Unknown error'}`);
+            this.error(`Task failed in ${elapsedTime}s: ${data.error || "Unknown error"}`);
         }
     }
 

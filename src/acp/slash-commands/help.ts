@@ -19,19 +19,33 @@ export function createHelpSlashCommand(): SlashCommandDefinition {
         },
         aliases: ["commands"],
         skipAutoBeforePromptSnapshot: true,
-        execute: async (context, parsed) => context.runLocalCommand(parsed, async (historyBeforeCommand, userMessage) => {
-            const definitions = context.getAvailableCommands();
-            const requestedName = parsed.argumentsText.replace(/^\//, "").trim().toLowerCase();
-            const matched = requestedName.length > 0
-                ? definitions.find((command) => command.name === requestedName || command._meta?.diogenes?.invocations?.includes(`/${requestedName}`))
-                : undefined;
+        execute: async (context, parsed) =>
+            context.runLocalCommand(parsed, async (historyBeforeCommand, userMessage) => {
+                await Promise.resolve();
+                const definitions = context.getAvailableCommands();
+                const requestedName = parsed.argumentsText.replace(/^\//, "").trim().toLowerCase();
+                const matched =
+                    requestedName.length > 0
+                        ? definitions.find(
+                              (command) =>
+                                  command.name === requestedName ||
+                                  command._meta?.diogenes?.invocations?.includes(
+                                      `/${requestedName}`,
+                                  ),
+                          )
+                        : undefined;
 
-            const summary = matched
-                ? formatHelpForCommand(context, matched)
-                : formatHelpSummary(context, definitions);
+                const summary = matched
+                    ? formatHelpForCommand(context, matched)
+                    : formatHelpSummary(context, definitions);
 
-            return context.completeLocalCommand(historyBeforeCommand, userMessage, summary, true);
-        }),
+                return context.completeLocalCommand(
+                    historyBeforeCommand,
+                    userMessage,
+                    summary,
+                    true,
+                );
+            }),
     };
 }
 
@@ -55,7 +69,9 @@ function formatHelpSummary(context: SlashCommandContext, definitions: AvailableC
 function formatHelpForCommand(context: SlashCommandContext, command: AvailableCommand): string {
     const invocations = command._meta?.diogenes?.invocations ?? [`/${command.name}`];
     const example = command._meta?.diogenes?.example;
-    const bullets = [`**Invocations:** ${invocations.map((invocation) => `\`${invocation}\``).join(", ")}`];
+    const bullets = [
+        `**Invocations:** ${invocations.map((invocation) => `\`${invocation}\``).join(", ")}`,
+    ];
 
     if (command.input?.hint) {
         bullets.push(`**Input:** ${command.input.hint}`);

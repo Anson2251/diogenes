@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseArgs as parseCliArgs } from "../src/cli";
+
 import { parseArgs as parseAcpCliArgs } from "../src/acp-cli";
+import { parseArgs as parseCliArgs } from "../src/cli";
 
 function withArgv(argv: string[], run: () => void): void {
     const originalArgv = process.argv;
@@ -19,7 +20,9 @@ describe("config path lockdown", () => {
     });
 
     it("rejects --config in the main CLI", () => {
-        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code?: string | number | null,
+        ) => {
             throw new Error(`process.exit:${code ?? 0}`);
         }) as never);
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -33,7 +36,9 @@ describe("config path lockdown", () => {
     });
 
     it("rejects --config-file in the ACP CLI", () => {
-        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code?: string | number | null,
+        ) => {
             throw new Error(`process.exit:${code ?? 0}`);
         }) as never);
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -47,7 +52,9 @@ describe("config path lockdown", () => {
     });
 
     it("rejects --config in the ACP CLI", () => {
-        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code?: string | number | null,
+        ) => {
             throw new Error(`process.exit:${code ?? 0}`);
         }) as never);
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

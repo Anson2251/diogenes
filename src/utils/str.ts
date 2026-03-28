@@ -13,7 +13,11 @@ export function normalizeWhitespace(str: string | undefined | null): string {
     return str.replace(/\s+/g, " ").trim();
 }
 
-export function compareLines(a: string | undefined | null, b: string | undefined | null, loose: boolean): boolean {
+export function compareLines(
+    a: string | undefined | null,
+    b: string | undefined | null,
+    loose: boolean,
+): boolean {
     if (a === b) return true;
     if (!loose) return false;
     return rstrip(a) === rstrip(b);
@@ -27,18 +31,22 @@ export function compareLines(a: string | undefined | null, b: string | undefined
  * @param minLength Minimum length for a match to be considered valid (default: 10)
  * @returns true if one string is a substantial substring of the other
  */
-export function containsOrContained(a: string | undefined | null, b: string | undefined | null, minLength = 10): boolean {
+export function containsOrContained(
+    a: string | undefined | null,
+    b: string | undefined | null,
+    minLength = 10,
+): boolean {
     if (!a || !b) return false;
-    
+
     // Normalize both strings for comparison
     const normalizedA = normalizeWhitespace(a);
     const normalizedB = normalizeWhitespace(b);
-    
+
     // Skip if either is too short to be meaningful
     if (normalizedA.length < minLength || normalizedB.length < minLength) {
         return false;
     }
-    
+
     // Check if one contains the other
     return normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA);
 }
@@ -47,28 +55,31 @@ export function containsOrContained(a: string | undefined | null, b: string | un
  * Calculate similarity score between two strings (0-1).
  * Uses a simple approach based on common characters and length.
  */
-export function similarityScore(a: string | undefined | null, b: string | undefined | null): number {
+export function similarityScore(
+    a: string | undefined | null,
+    b: string | undefined | null,
+): number {
     if (!a || !b) return 0;
     if (a === b) return 1;
-    
+
     const normalizedA = normalizeWhitespace(a);
     const normalizedB = normalizeWhitespace(b);
-    
+
     if (normalizedA === normalizedB) return 0.95;
-    
+
     // Check substring match
     if (normalizedA.includes(normalizedB)) return normalizedB.length / normalizedA.length;
     if (normalizedB.includes(normalizedA)) return normalizedA.length / normalizedB.length;
-    
+
     // Simple character-based similarity
     const shorter = normalizedA.length < normalizedB.length ? normalizedA : normalizedB;
     const longer = normalizedA.length < normalizedB.length ? normalizedB : normalizedA;
-    
+
     let matches = 0;
     for (const char of shorter) {
         if (longer.includes(char)) matches++;
     }
-    
+
     return matches / longer.length;
 }
 
@@ -132,7 +143,7 @@ function buildMyersDiffOps(oldLines: string[], newLines: string[]): MyersDiffOp[
     const max = oldLines.length + newLines.length;
     const offset = max;
     const trace: number[][] = [];
-    let v = new Array(2 * max + 1).fill(0);
+    let v: number[] = Array.from({ length: 2 * max + 1 }, () => 0);
 
     for (let d = 0; d <= max; d++) {
         trace.push([...v]);
@@ -167,8 +178,9 @@ function buildMyersDiffOps(oldLines: string[], newLines: string[]): MyersDiffOp[
                     let previousK: number;
 
                     if (
-                        currentK === -(depth - 1)
-                        || (currentK !== (depth - 1) && previous[currentIndex - 1] < previous[currentIndex + 1])
+                        currentK === -(depth - 1) ||
+                        (currentK !== depth - 1 &&
+                            previous[currentIndex - 1] < previous[currentIndex + 1])
                     ) {
                         previousK = currentK + 1;
                     } else {

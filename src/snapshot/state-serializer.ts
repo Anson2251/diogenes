@@ -1,8 +1,54 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import type { ConversationMessage } from "../runtime/task-runner";
+import { z } from "zod";
+
 import type { WorkspaceManager } from "../context/workspace";
+import type { ConversationMessage } from "../runtime/task-runner";
 import type { PersistedACPUpdate, PersistedDiogenesState } from "./types";
+
+// Zod schema for runtime validation
+const PersistedDiogenesStateSchema: z.ZodType<PersistedDiogenesState> = z.object({
+    version: z.literal(1),
+    kind: z.literal("diogenes_state"),
+    sessionId: z.string(),
+    cwd: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    metadata: z
+        .object({
+            title: z.string().nullable(),
+            description: z.string().nullable(),
+        })
+        .optional(),
+    acpReplayLog: z.array(z.record(z.string(), z.unknown())),
+    messageHistory: z.array(
+        z.object({
+            role: z.enum(["user", "assistant"]),
+            content: z.string(),
+        }),
+    ),
+    workspace: z.object({
+        loadedDirectories: z.array(z.string()),
+        loadedFiles: z.array(
+            z.object({
+                path: z.string(),
+                ranges: z.array(
+                    z.object({
+                        start: z.number(),
+                        end: z.number(),
+                    }),
+                ),
+            }),
+        ),
+        todo: z.array(
+            z.object({
+                text: z.string(),
+                state: z.enum(["done", "active", "pending"]),
+            }),
+        ),
+        notepad: z.array(z.string()),
+    }),
+});
 
 export interface SnapshotStateProvider {
     getWorkspaceManager(): WorkspaceManager;
@@ -83,6 +129,11 @@ export class DiogenesStateSerializer implements SnapshotStateSerializer {
 
     async deserialize(statePath: string): Promise<PersistedDiogenesState> {
         const content = await fs.readFile(statePath, "utf8");
-        return JSON.parse(content) as PersistedDiogenesState;
+        const parsed: unknown = JSON.parse(content);
+        const result = PersistedDiogenesStateSchema.safeParse(parsed);
+        if (!result.success) {
+            throw new Error(`Invalid state format: ${result.error.message}`);
+        }
+        return result.data;
     }
 }

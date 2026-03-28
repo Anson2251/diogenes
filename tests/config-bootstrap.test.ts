@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { ensureDefaultConfigFileSync } from "../src/utils/config-bootstrap";
 
 describe("config bootstrap", () => {
@@ -23,7 +24,9 @@ describe("config bootstrap", () => {
         const configPath = ensureDefaultConfigFileSync();
         const content = fs.readFileSync(configPath, "utf8");
 
-        expect(configPath).toBe(path.join(home, "Library", "Application Support", "diogenes", "config.yaml"));
+        expect(configPath).toBe(
+            path.join(home, "Library", "Application Support", "diogenes", "config.yaml"),
+        );
         expect(content).toContain("# Diogenes default configuration");
         expect(content).toContain("llm:");
         expect(content).toContain("security:");

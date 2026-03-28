@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DirListTool } from "../src/tools/dir/dir-list";
-import { WorkspaceManager } from "../src/context/workspace";
 import * as fs from "fs";
 import * as path from "path";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+
+import { WorkspaceManager } from "../src/context/workspace";
+import { DirListTool } from "../src/tools/dir/dir-list";
 
 describe("DirListTool", () => {
     let workspace: WorkspaceManager;
@@ -98,24 +99,25 @@ describe("DirListTool", () => {
         });
     });
 
-    describe("validateParams", () => {
-        it("should validate missing path parameter", () => {
-            const result = tool.validateParams({});
+    describe("parameter validation via execute", () => {
+        it("should validate missing path parameter", async () => {
+            const result = await tool.execute({});
 
-            expect(result.valid).toBe(false);
-            expect(result.errors.length).toBeGreaterThan(0);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-string path parameter", () => {
-            const result = tool.validateParams({ path: 123 });
+        it("should validate non-string path parameter", async () => {
+            const result = await tool.execute({ path: 123 });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate valid path parameter", () => {
-            const result = tool.validateParams({ path: "." });
+        it("should validate valid path parameter", async () => {
+            const result = await tool.execute({ path: "." });
 
-            expect(result.valid).toBe(true);
+            expect(result.success).toBe(true);
         });
     });
 });

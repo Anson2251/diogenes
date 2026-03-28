@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
+
+import { WorkspaceManager } from "../src/context/workspace";
 import { TodoSetTool } from "../src/tools/todo/todo-set";
 import { TodoUpdateTool } from "../src/tools/todo/todo-update";
-import { WorkspaceManager } from "../src/context/workspace";
 
 describe("TodoSetTool", () => {
     let workspace: WorkspaceManager;
@@ -19,7 +20,7 @@ describe("TodoSetTool", () => {
             expect(def.namespace).toBe("todo");
             expect(def.name).toBe("set");
             expect(def.description).toBe("Overwrite entire todo list");
-            expect(def.params.items.type).toBe("array<object>");
+            expect(def.params.items.type).toBe("array");
         });
     });
 
@@ -60,7 +61,7 @@ describe("TodoSetTool", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_PARAM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should reject non-object item", async () => {
@@ -69,7 +70,7 @@ describe("TodoSetTool", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_ITEM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should reject item with missing text", async () => {
@@ -78,7 +79,7 @@ describe("TodoSetTool", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_ITEM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should reject item with missing state", async () => {
@@ -87,7 +88,7 @@ describe("TodoSetTool", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_ITEM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should reject item with invalid state", async () => {
@@ -96,7 +97,7 @@ describe("TodoSetTool", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_ITEM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should reject non-string text", async () => {
@@ -105,7 +106,7 @@ describe("TodoSetTool", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_ITEM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
     });
 });
@@ -188,7 +189,7 @@ describe("TodoUpdateTool", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_STATE");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should require exact text match", async () => {
@@ -213,48 +214,52 @@ describe("TodoUpdateTool", () => {
         });
     });
 
-    describe("validateParams", () => {
-        it("should validate missing text parameter", () => {
-            const result = tool.validateParams({
+    describe("parameter validation via execute", () => {
+        it("should validate missing text parameter", async () => {
+            const result = await tool.execute({
                 state: "done",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate missing state parameter", () => {
-            const result = tool.validateParams({
+        it("should validate missing state parameter", async () => {
+            const result = await tool.execute({
                 text: "Task",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-string text parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-string text parameter", async () => {
+            const result = await tool.execute({
                 text: 123,
                 state: "done",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-string state parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-string state parameter", async () => {
+            const result = await tool.execute({
                 text: "Task",
                 state: 123,
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate valid parameters", () => {
-            const result = tool.validateParams({
-                text: "Task",
+        it("should validate valid parameters", async () => {
+            const result = await tool.execute({
+                text: "Task 1",
                 state: "done",
             });
 
-            expect(result.valid).toBe(true);
+            expect(result.success).toBe(true);
         });
     });
 });

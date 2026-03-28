@@ -2,13 +2,24 @@
  * File peek tool - quick preview without loading
  */
 
-import { BaseTool } from "../base-tool";
-import { ToolCall, ToolResult } from "../../types";
-import { WorkspaceManager } from "../../context/workspace";
 import * as fs from "fs";
-import { formatDisplayLine } from "../../utils/str";
+import { z } from "zod";
 
-export class FilePeekTool extends BaseTool {
+import { WorkspaceManager } from "../../context/workspace";
+import { ToolCall, ToolResult } from "../../types";
+import { formatDisplayLine } from "../../utils/str";
+import { BaseTool } from "../base-tool";
+
+const filePeekSchema = z.object({
+    path: z.string(),
+    start: z.number().optional(),
+    end: z.number().optional(),
+});
+
+type FilePeekParams = z.infer<typeof filePeekSchema>;
+
+export class FilePeekTool extends BaseTool<typeof filePeekSchema> {
+    protected schema = filePeekSchema;
     private workspace: WorkspaceManager;
 
     constructor(workspace: WorkspaceManager) {
@@ -49,22 +60,8 @@ This tool is lightweight and doesn't affect your workspace context.`,
         this.workspace = workspace;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for file.peek",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
-
-        const { path: filePath, start, end } = validation.data as {
-            path: string;
-            start?: number;
-            end?: number;
-        };
+    async run(params: FilePeekParams): Promise<ToolResult> {
+        const { path: filePath, start, end } = params;
 
         try {
             const absolutePath = await this.workspace.resolveReadableFilePath(filePath);
@@ -116,38 +113,70 @@ This tool is lightweight and doesn't affect your workspace context.`,
     }
 
     formatResult(result: ToolResult): string | undefined {
-        if (result.success && result.data?.lines) {
-            const lines = result.data.lines as string[];
-            const [start, end] = result.data.preview_range as [number, number];
-            const total = result.data.total_lines as number;
+        if (
+            result.success &&
+            result.data?.lines &&
+            Array.isArray(result.data.lines) &&
+            Array.isArray(result.data.preview_range) &&
+            typeof result.data.total_lines === "number"
+        ) {
+            const lines = result.data.lines;
+            const previewRange = result.data.preview_range;
+            const total = result.data.total_lines;
+            const start = typeof previewRange[0] === "number" ? previewRange[0] : 1;
+            const end = typeof previewRange[1] === "number" ? previewRange[1] : start;
             const formatted = lines.join("\n");
 
-            const warning = "\n\x1b[33m⚠ Peeked content not loaded into workspace. Use file.load to load for editing.\x1b[0m";
+            const warning =
+                "\n\x1b[33m⚠ Peeked content not loaded into workspace. Use file.load to load for editing.\x1b[0m";
             return `\x1b[32m✓\x1b[0m Peeked lines ${start}-${end} of ${total}:\n${formatted}${warning}`;
         }
         return undefined;
     }
 
     formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
-        if (!result.success || !result.data?.lines || !result.data?.preview_range) {
+        if (
+            !result.success ||
+            !result.data?.lines ||
+            !Array.isArray(result.data.lines) ||
+            !result.data?.preview_range ||
+            !Array.isArray(result.data.preview_range)
+        ) {
             return super.formatResultForLLM(toolCall, result);
         }
 
-        const filePath = typeof toolCall.params.path === "string" ? toolCall.params.path : "unknown file";
-        const [start, end] = result.data.preview_range as [number, number];
-        const total = result.data.total_lines as number;
-        const lines = result.data.lines as string[];
+        const filePath =
+            typeof toolCall.params.path === "string" ? toolCall.params.path : "unknown file";
+        const previewRange = result.data.preview_range;
+        const start = typeof previewRange[0] === "number" ? previewRange[0] : 1;
+        const end = typeof previewRange[1] === "number" ? previewRange[1] : start;
+        const total = typeof result.data.total_lines === "number" ? result.data.total_lines : end;
+        const lines = result.data.lines;
         const note = typeof result.data._note === "string" ? result.data._note : "";
 
-        return [
+        const resultLines: string[] = [
             `Peeked ${filePath}`,
             `Lines ${start}-${end} of ${total}`,
             "",
-            ...lines,
-            "",
-            note ? note : "",
-        ]
-            .filter((line, index, all) => line.length > 0 || (index > 0 && all[index - 1].length > 0))
+        ];
+        if (Array.isArray(lines)) {
+            for (const line of lines) {
+                if (typeof line === "string") {
+                    resultLines.push(line);
+                }
+            }
+        }
+        resultLines.push("");
+        if (note) {
+            resultLines.push(note);
+        }
+        return resultLines
+            .filter((line, index, all) => {
+                const lineNonEmpty = line.length > 0;
+                const prevLineExists = index > 0;
+                const prevLineNonEmpty = prevLineExists && all[index - 1].length > 0;
+                return lineNonEmpty || prevLineNonEmpty;
+            })
             .join("\n");
     }
 }

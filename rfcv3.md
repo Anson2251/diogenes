@@ -10,13 +10,12 @@ Anson
 
 ## Revision History
 
-| Version | Date | Changes |
-|---------|------|---------|
-| v1 | - | Initial draft |
-| v2 | - | Unified JSON tool protocol, restructured file edit system |
-| v3 | - | Add task end tool, ReAct structure |
-| v4 | - | Add explanation to message list structure, add notepad tools, and modify namespace format |
-
+| Version | Date | Changes                                                                                   |
+| ------- | ---- | ----------------------------------------------------------------------------------------- |
+| v1      | -    | Initial draft                                                                             |
+| v2      | -    | Unified JSON tool protocol, restructured file edit system                                 |
+| v3      | -    | Add task end tool, ReAct structure                                                        |
+| v4      | -    | Add explanation to message list structure, add notepad tools, and modify namespace format |
 
 ---
 
@@ -26,14 +25,14 @@ Current agent frameworks tend to over‑engineer context management through exte
 
 This RFC proposes a **minimal agent framework** that instead:
 
-* Treats the LLM as the primary controller of its own context window
-* Exposes context manipulation explicitly through tools
-* Avoids implicit memory, embeddings, or hidden caches
-* Pushes complexity to tools, not orchestration logic
+- Treats the LLM as the primary controller of its own context window
+- Exposes context manipulation explicitly through tools
+- Avoids implicit memory, embeddings, or hidden caches
+- Pushes complexity to tools, not orchestration logic
 
 The core belief is:
 
-> *LLMs should explicitly decide what information stays in context. The framework should only provide safe, inspectable mechanisms to do so.*
+> _LLMs should explicitly decide what information stays in context. The framework should only provide safe, inspectable mechanisms to do so._
 
 ---
 
@@ -76,12 +75,12 @@ The LLM context window is composed of the following ordered sections:
 
 A **Context Manager** (outside the LLM) is responsible only for:
 
-* Injecting these sections into the prompt
-* Executing tool calls
-* Updating workspace sections based on tool results
-* Reporting context pressure metrics
+- Injecting these sections into the prompt
+- Executing tool calls
+- Updating workspace sections based on tool results
+- Reporting context pressure metrics
 
-The Context Manager **does not** decide *what* to load or unload.
+The Context Manager **does not** decide _what_ to load or unload.
 
 ---
 
@@ -111,9 +110,9 @@ File Workspace: 5 files, 847 lines loaded
 
 ### Semantics
 
-* Updated after each tool execution
-* Provides optional soft warnings at configurable thresholds (e.g., 70%, 90%)
-* LLM may use this information to decide when to unload content
+- Updated after each tool execution
+- Provides optional soft warnings at configurable thresholds (e.g., 70%, 90%)
+- LLM may use this information to decide when to unload content
 
 ---
 
@@ -164,9 +163,9 @@ FILE | index.ts
 
 #### Semantics
 
-* Directory contents persist until explicitly unloaded
-* Listing a directory adds it to the directory workspace
-* Unloading removes it entirely from context
+- Directory contents persist until explicitly unloaded
+- Listing a directory adds it to the directory workspace
+- Unloading removes it entirely from context
 
 ---
 
@@ -215,9 +214,9 @@ Represents file contents or partial file contents explicitly loaded by the LLM.
    3 |
    4 | const config: Config = {
    5 |   debug: true,
-   
+
    [UNLOADED]
-   
+
   45 | }
 ---------
 
@@ -226,9 +225,9 @@ Represents file contents or partial file contents explicitly loaded by the LLM.
   20 | export function formatDate(date: Date): string {
   21 |   return date.toISOString().split('T')[0];
   22 | }
-  
+
   [UNLOADED]
-  
+
   80 | }
 ---------
 =========
@@ -236,9 +235,9 @@ Represents file contents or partial file contents explicitly loaded by the LLM.
 
 #### Semantics
 
-* Files may be partially loaded using line number ranges
-* Multiple ranges from the same file appear as separate entries
-* File contents persist until explicitly unloaded or modified
+- Files may be partially loaded using line number ranges
+- Multiple ranges from the same file appear as separate entries
+- File contents persist until explicitly unloaded or modified
 
 ---
 
@@ -355,11 +354,11 @@ Message: <error_message>
 
 Supported data types:
 
-* `string`
-* `number`
-* `bool`
-* `array<T>`
-* `object`
+- `string`
+- `number`
+- `bool`
+- `array<T>`
+- `object`
 
 ---
 
@@ -400,14 +399,14 @@ dir
       path: string - Directory path
     RETURNS:
       success: bool
-  
+
   dir.create:
     DESCRIPTION: Create a directory in the file system. Parent directories can be created as needed.
     PARAMS:
       path: string - Directory path
     RETURNS:
       success: bool
-  
+
   dir.delete:
     DESCRIPTION: Delete a directory in the file system
     PARAMS:
@@ -469,32 +468,32 @@ file
 
 ```typescript
 interface Edit {
-  mode: "replace" | "delete" | "insert_before" | "insert_after"
-  anchor: Anchor
-  content?: string[]  // Required for replace, insert_before, insert_after
+  mode: "replace" | "delete" | "insert_before" | "insert_after";
+  anchor: Anchor;
+  content?: string[]; // Required for replace, insert_before, insert_after
 }
 
 interface Anchor {
-  start: LineAnchor
-  end?: LineAnchor    // Required for replace and delete with range
+  start: LineAnchor;
+  end?: LineAnchor; // Required for replace and delete with range
 }
 
 interface LineAnchor {
-  line: number        // Target line number (hint, not strict)
-  text: string        // Target line content
-  before: string[]    // 2 lines of context before
-  after: string[]     // 2 lines of context after
+  line: number; // Target line number (hint, not strict)
+  text: string; // Target line content
+  before: string[]; // 2 lines of context before
+  after: string[]; // 2 lines of context after
 }
 ```
 
 #### Edit Modes
 
-| Mode | Description | Requires `end` | Requires `content` |
-|------|-------------|----------------|-------------------|
-| `replace` | Replace line(s) with new content | For ranges | Yes |
-| `delete` | Remove line(s) | For ranges | No |
-| `insert_before` | Insert content before anchor | No | Yes |
-| `insert_after` | Insert content after anchor | No | Yes |
+| Mode            | Description                      | Requires `end` | Requires `content` |
+| --------------- | -------------------------------- | -------------- | ------------------ |
+| `replace`       | Replace line(s) with new content | For ranges     | Yes                |
+| `delete`        | Remove line(s)                   | For ranges     | No                 |
+| `insert_before` | Insert content before anchor     | No             | Yes                |
+| `insert_after`  | Insert content after anchor      | No             | Yes                |
 
 #### Example: Replace Function
 
@@ -686,28 +685,29 @@ When `end` is omitted, it defaults to `start`:
 
 #### Whitespace Handling
 
-| File Type | Indentation | Trailing Whitespace | Blank Lines |
-|-----------|-------------|---------------------|-------------|
-| Python, YAML, Makefile | Strict | Ignore | Ignore |
-| Other languages | Ignore | Ignore | Ignore |
+| File Type              | Indentation | Trailing Whitespace | Blank Lines |
+| ---------------------- | ----------- | ------------------- | ----------- |
+| Python, YAML, Makefile | Strict      | Ignore              | Ignore      |
+| Other languages        | Ignore      | Ignore              | Ignore      |
 
 #### Atomicity
 
-* **Default (atomic: true)**: All edits validate → all apply; any failure → none apply
-* **Non-atomic (atomic: false)**: Apply successful edits, report failures
+- **Default (atomic: true)**: All edits validate → all apply; any failure → none apply
+- **Non-atomic (atomic: false)**: Apply successful edits, report failures
 
 #### Error Types
 
-| Error Code | Meaning | Suggested Action |
-|------------|---------|------------------|
-| `NO_MATCH` | Anchor not found | Reload file, verify content |
-| `AMBIGUOUS_MATCH` | Multiple possible matches | Add more context lines |
-| `OVERLAP_CONFLICT` | Edit ranges overlap | Merge edits or separate calls |
-| `CONTENT_CHANGED` | File modified externally | Reload file |
+| Error Code         | Meaning                   | Suggested Action              |
+| ------------------ | ------------------------- | ----------------------------- |
+| `NO_MATCH`         | Anchor not found          | Reload file, verify content   |
+| `AMBIGUOUS_MATCH`  | Multiple possible matches | Add more context lines        |
+| `OVERLAP_CONFLICT` | Edit ranges overlap       | Merge edits or separate calls |
+| `CONTENT_CHANGED`  | File modified externally  | Reload file                   |
 
 #### Response Structure
 
 Success:
+
 ```json
 {
   "success": true,
@@ -728,6 +728,7 @@ Success:
 ```
 
 Partial failure:
+
 ```json
 {
   "success": false,
@@ -738,8 +739,8 @@ Partial failure:
       "error": "AMBIGUOUS_MATCH",
       "message": "Found 2 matches at lines 45, 89",
       "candidates": [
-        {"line": 45, "preview": "def process(data):"},
-        {"line": 89, "preview": "def process(items):"}
+        { "line": 45, "preview": "def process(data):" },
+        { "line": 89, "preview": "def process(items):" }
       ]
     }
   ],
@@ -933,23 +934,23 @@ Reserved namespace for Model Context Protocol integration.
 
 ## Context Management Philosophy
 
-* No external KV cache manipulation
-* No forced eviction policies
-* No summarization without explicit LLM instruction
+- No external KV cache manipulation
+- No forced eviction policies
+- No summarization without explicit LLM instruction
 
 The LLM is expected to:
 
-* Monitor context usage via the status section
-* Load only necessary directories and files
-* Unload unused context to conserve tokens
-* Manage its own working memory
+- Monitor context usage via the status section
+- Load only necessary directories and files
+- Unload unused context to conserve tokens
+- Manage its own working memory
 
 The framework **trusts** the LLM's reasoning capacity while ensuring:
 
-* All state changes are explicit
-* All side effects are tool‑mediated
-* All context remains inspectable
-* Context pressure is visible
+- All state changes are explicit
+- All side effects are tool‑mediated
+- All context remains inspectable
+- Context pressure is visible
 
 ---
 
@@ -957,11 +958,11 @@ The framework **trusts** the LLM's reasoning capacity while ensuring:
 
 ### Framework Responsibilities
 
-* Validate JSON syntax before execution
-* Validate required parameters
-* Match validation for file edits
-* Report execution failures with actionable details
-* Provide partial success indicators when applicable
+- Validate JSON syntax before execution
+- Validate required parameters
+- Match validation for file edits
+- Report execution failures with actionable details
+- Provide partial success indicators when applicable
 
 ### Error Response Format
 
@@ -978,16 +979,16 @@ All errors return structured information:
 
 ### Common Error Codes
 
-| Code | Meaning |
-|------|---------|
-| `PARSE_ERROR` | Invalid JSON in tool-call |
-| `UNKNOWN_TOOL` | Tool name not recognized |
-| `MISSING_PARAM` | Required parameter missing |
-| `INVALID_PARAM` | Parameter type or value invalid |
-| `PATH_NOT_FOUND` | File or directory doesn't exist |
-| `PERMISSION_DENIED` | Insufficient permissions |
-| `EXECUTION_TIMEOUT` | Operation timed out |
-| `MATCH_FAILED` | Edit anchor matching failed |
+| Code                | Meaning                         |
+| ------------------- | ------------------------------- |
+| `PARSE_ERROR`       | Invalid JSON in tool-call       |
+| `UNKNOWN_TOOL`      | Tool name not recognized        |
+| `MISSING_PARAM`     | Required parameter missing      |
+| `INVALID_PARAM`     | Parameter type or value invalid |
+| `PATH_NOT_FOUND`    | File or directory doesn't exist |
+| `PERMISSION_DENIED` | Insufficient permissions        |
+| `EXECUTION_TIMEOUT` | Operation timed out             |
+| `MATCH_FAILED`      | Edit anchor matching failed     |
 
 ---
 
@@ -995,16 +996,16 @@ All errors return structured information:
 
 ### Shell Command Execution
 
-* Shell command execution should be confirmed before execution
-* Configurable command allowlist/blocklist
-* Timeout enforcement (default: 30 seconds)
-* Working directory restrictions
+- Shell command execution should be confirmed before execution
+- Configurable command allowlist/blocklist
+- Timeout enforcement (default: 30 seconds)
+- Working directory restrictions
 
 ### File System Access
 
-* Configurable workspace root boundary
-* Path traversal prevention
-* Optional read-only mode
+- Configurable workspace root boundary
+- Path traversal prevention
+- Optional read-only mode
 
 ---
 
@@ -1078,12 +1079,12 @@ Interleaved reasoning means LLM would call tools while reasoning. Reasoning proc
 
 ## Non‑Goals
 
-* Automatic planning or decomposition
-* Embedding‑based retrieval
-* Multi‑agent coordination
-* Hidden memory layers
-* Model fine‑tuning
-* Implicit context eviction
+- Automatic planning or decomposition
+- Embedding‑based retrieval
+- Multi‑agent coordination
+- Hidden memory layers
+- Model fine‑tuning
+- Implicit context eviction
 
 ---
 

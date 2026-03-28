@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import { handleSessionCommand, parseArgs } from "../src/cli";
 import * as appPaths from "../src/utils/app-paths";
 
@@ -64,37 +65,45 @@ describe("CLI session commands", () => {
         await fs.mkdir(path.join(sessionDir, "snapshots"), { recursive: true });
         await fs.writeFile(
             path.join(sessionDir, "metadata.json"),
-            JSON.stringify({
-                sessionId,
-                cwd: "/tmp/workspace",
-                createdAt: "2026-03-27T00:00:00.000Z",
-                updatedAt: "2026-03-27T00:00:01.000Z",
-                title: "Session title",
-                description: "Session description",
-                state: "active",
-                hasActiveRun: false,
-                availableCommands: [],
-                snapshotEnabled: true,
-            }, null, 2),
+            JSON.stringify(
+                {
+                    sessionId,
+                    cwd: "/tmp/workspace",
+                    createdAt: "2026-03-27T00:00:00.000Z",
+                    updatedAt: "2026-03-27T00:00:01.000Z",
+                    title: "Session title",
+                    description: "Session description",
+                    state: "active",
+                    hasActiveRun: false,
+                    availableCommands: [],
+                    snapshotEnabled: true,
+                },
+                null,
+                2,
+            ),
             "utf8",
         );
         await fs.writeFile(
             path.join(sessionDir, "snapshots", "manifest.json"),
-            JSON.stringify({
-                sessionId,
-                cwd: "/tmp/workspace",
-                createdAt: "2026-03-27T00:00:00.000Z",
-                snapshots: [
-                    {
-                        snapshotId: "snapshot-1",
-                        createdAt: "2026-03-27T00:00:02.000Z",
-                        trigger: "system_manual",
-                        turn: 1,
-                        label: "before risky change",
-                        resticSnapshotId: "restic-1",
-                    },
-                ],
-            }, null, 2),
+            JSON.stringify(
+                {
+                    sessionId,
+                    cwd: "/tmp/workspace",
+                    createdAt: "2026-03-27T00:00:00.000Z",
+                    snapshots: [
+                        {
+                            snapshotId: "snapshot-1",
+                            createdAt: "2026-03-27T00:00:02.000Z",
+                            trigger: "system_manual",
+                            turn: 1,
+                            label: "before risky change",
+                            resticSnapshotId: "restic-1",
+                        },
+                    ],
+                },
+                null,
+                2,
+            ),
             "utf8",
         );
 
@@ -134,14 +143,22 @@ describe("CLI session commands", () => {
         const dataDir = path.join(root, "data");
         const sessionsDir = path.join(dataDir, "sessions");
         await fs.mkdir(path.join(sessionsDir, "broken"), { recursive: true });
-        await fs.writeFile(path.join(sessionsDir, "broken", "metadata.json"), JSON.stringify({ sessionId: "broken" }), "utf8");
+        await fs.writeFile(
+            path.join(sessionsDir, "broken", "metadata.json"),
+            JSON.stringify({ sessionId: "broken" }),
+            "utf8",
+        );
         await fs.mkdir(path.join(sessionsDir, "snapshot-only", "snapshots"), { recursive: true });
-        await fs.writeFile(path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"), JSON.stringify({
-            sessionId: "snapshot-only",
-            cwd: "/tmp/workspace",
-            createdAt: "2026-03-27T00:00:00.000Z",
-            snapshots: [],
-        }), "utf8");
+        await fs.writeFile(
+            path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"),
+            JSON.stringify({
+                sessionId: "snapshot-only",
+                cwd: "/tmp/workspace",
+                createdAt: "2026-03-27T00:00:00.000Z",
+                snapshots: [],
+            }),
+            "utf8",
+        );
 
         vi.spyOn(appPaths, "resolveDiogenesAppPaths").mockReturnValue({
             homeDir: root,
@@ -156,14 +173,16 @@ describe("CLI session commands", () => {
         await handleSessionCommand({ kind: "sessions.prune", dryRun: false });
 
         const output = JSON.parse(consoleSpy.mock.calls[0]?.[0] ?? "{}");
-        expect(output).toEqual(expect.objectContaining({
-            deletedSessionIds: ["broken", "snapshot-only"],
-            reasonsBySessionId: {
-                broken: "missing_state",
-                "snapshot-only": "orphaned_snapshot_artifacts",
-            },
-            dryRun: false,
-        }));
+        expect(output).toEqual(
+            expect.objectContaining({
+                deletedSessionIds: ["broken", "snapshot-only"],
+                reasonsBySessionId: {
+                    broken: "missing_state",
+                    "snapshot-only": "orphaned_snapshot_artifacts",
+                },
+                dryRun: false,
+            }),
+        );
         await expect(fs.access(path.join(sessionsDir, "broken"))).rejects.toThrow();
         await expect(fs.access(path.join(sessionsDir, "snapshot-only"))).rejects.toThrow();
     });

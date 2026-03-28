@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
+import { afterEach, describe, expect, it } from "vitest";
+
 import { ResticClient, ResticCommandError, ResticParseError } from "../src/utils/restic";
 
 async function createTempDir(): Promise<string> {
@@ -210,13 +211,18 @@ describe("ResticClient", () => {
             FAKE_RESTIC_MALFORMED_SUBCOMMAND: "backup",
         });
 
-        await expect(client.backup({ paths: ["/workspace"] })).rejects.toBeInstanceOf(ResticParseError);
+        await expect(client.backup({ paths: ["/workspace"] })).rejects.toBeInstanceOf(
+            ResticParseError,
+        );
     });
 
     it("rejects conflicting password sources early", async () => {
-        expect(() => new ResticClient({
-            password: "secret",
-            passwordFile: "/tmp/password.txt",
-        })).toThrow("Only one restic password source can be configured at a time");
+        expect(
+            () =>
+                new ResticClient({
+                    password: "secret",
+                    passwordFile: "/tmp/password.txt",
+                }),
+        ).toThrow("Only one restic password source can be configured at a time");
     });
 });

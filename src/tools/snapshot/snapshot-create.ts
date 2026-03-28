@@ -1,8 +1,20 @@
-import { BaseTool } from "../base-tool";
-import type { ToolCall, ToolResult } from "../../types";
-import type { SnapshotManager } from "../../snapshot/manager";
+import { z } from "zod";
 
-export class SnapshotCreateTool extends BaseTool {
+import type { SnapshotManager } from "../../snapshot/manager";
+import type { ToolCall, ToolResult } from "../../types";
+
+import { BaseTool } from "../base-tool";
+
+const snapshotCreateSchema = z.object({
+    label: z.string().optional(),
+    reason: z.string().optional(),
+});
+
+type SnapshotCreateParams = z.infer<typeof snapshotCreateSchema>;
+
+export class SnapshotCreateTool extends BaseTool<typeof snapshotCreateSchema> {
+    protected schema = snapshotCreateSchema;
+
     constructor(
         private readonly getSnapshotManager: () => SnapshotManager | null,
         private readonly getTurn: () => number,
@@ -31,33 +43,18 @@ export class SnapshotCreateTool extends BaseTool {
         });
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for snapshot.create",
-                { errors: validation.errors },
-                "Check the label and reason fields",
-            );
-        }
-
+    async run(params: SnapshotCreateParams): Promise<ToolResult> {
         const snapshotManager = this.getSnapshotManager();
         if (!snapshotManager) {
-            return this.error(
-                "SNAPSHOT_DISABLED",
-                "Session snapshots are not enabled",
-            );
+            return this.error("SNAPSHOT_DISABLED", "Session snapshots are not enabled");
         }
-
-        const input = (validation.data || {}) as { label?: string; reason?: string };
 
         try {
             const result = await snapshotManager.createSnapshot({
                 trigger: "llm_manual",
                 turn: this.getTurn(),
-                label: input.label,
-                reason: input.reason,
+                label: params.label,
+                reason: params.reason,
             });
 
             return this.success({
@@ -79,9 +76,12 @@ export class SnapshotCreateTool extends BaseTool {
             return undefined;
         }
 
-        const snapshotId = typeof result.data?.snapshot_id === "string" ? result.data.snapshot_id : "unknown";
+        const snapshotId =
+            typeof result.data?.snapshot_id === "string" ? result.data.snapshot_id : "unknown";
         const label = typeof result.data?.label === "string" ? result.data.label : undefined;
-        return label ? `Created snapshot ${snapshotId} (${label})` : `Created snapshot ${snapshotId}`;
+        return label
+            ? `Created snapshot ${snapshotId} (${label})`
+            : `Created snapshot ${snapshotId}`;
     }
 
     formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {

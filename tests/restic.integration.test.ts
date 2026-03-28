@@ -1,13 +1,15 @@
-import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "child_process";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
+import { afterAll, describe, expect, it } from "vitest";
+
 import { ResticClient } from "../src/utils/restic";
 
-const hasRestic = spawnSync("restic", ["version"], {
-    stdio: "ignore",
-}).status === 0;
+const hasRestic =
+    spawnSync("restic", ["version"], {
+        stdio: "ignore",
+    }).status === 0;
 
 const describeRestic = hasRestic ? describe : describe.skip;
 
@@ -36,7 +38,11 @@ describeRestic("ResticClient integration", () => {
         await fs.mkdir(path.join(workspaceDir, "nested"), { recursive: true });
         await fs.writeFile(passwordFile, "integration-secret\n", "utf8");
         await fs.writeFile(path.join(workspaceDir, "hello.txt"), "hello restic\n", "utf8");
-        await fs.writeFile(path.join(workspaceDir, "nested", "data.json"), JSON.stringify({ ok: true }), "utf8");
+        await fs.writeFile(
+            path.join(workspaceDir, "nested", "data.json"),
+            JSON.stringify({ ok: true }),
+            "utf8",
+        );
 
         const client = new ResticClient({
             repository: repoDir,
@@ -67,8 +73,14 @@ describeRestic("ResticClient integration", () => {
             target: restoreDir,
         });
 
-        const restoredHello = await fs.readFile(path.join(restoreDir, "workspace", "hello.txt"), "utf8");
-        const restoredJson = await fs.readFile(path.join(restoreDir, "workspace", "nested", "data.json"), "utf8");
+        const restoredHello = await fs.readFile(
+            path.join(restoreDir, "workspace", "hello.txt"),
+            "utf8",
+        );
+        const restoredJson = await fs.readFile(
+            path.join(restoreDir, "workspace", "nested", "data.json"),
+            "utf8",
+        );
 
         expect(restoredHello).toBe("hello restic\n");
         expect(JSON.parse(restoredJson)).toEqual({ ok: true });

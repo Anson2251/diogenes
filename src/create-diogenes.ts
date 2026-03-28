@@ -1,22 +1,24 @@
-import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { createInterface } from "node:readline/promises";
+
 import type { DiogenesConfig } from "./types";
+
 import { DiogenesContextManager } from "./context";
 import { DirListTool } from "./tools/dir/dir-list";
 import { DirUnloadTool } from "./tools/dir/dir-unload";
-import { FileLoadTool } from "./tools/file/file-load";
-import { FileUnloadTool } from "./tools/file/file-unload";
-import { FileEditTool } from "./tools/file/file-edit";
-import { FilePeekTool } from "./tools/file/file-peek";
 import { FileCreateTool } from "./tools/file/file-create";
+import { FileEditTool } from "./tools/file/file-edit";
+import { FileLoadTool } from "./tools/file/file-load";
 import { FileOverwriteTool } from "./tools/file/file-overwrite";
-import { TodoSetTool } from "./tools/todo/todo-set";
-import { TodoUpdateTool } from "./tools/todo/todo-update";
+import { FilePeekTool } from "./tools/file/file-peek";
+import { FileUnloadTool } from "./tools/file/file-unload";
+import { ShellExecTool } from "./tools/shell/shell-exec";
 import { TaskAskTool } from "./tools/task/task-ask";
 import { TaskChooseTool } from "./tools/task/task-choose";
-import { TaskNotepadTool } from "./tools/task/task-notepad";
 import { TaskEndTool } from "./tools/task/task-end";
-import { ShellExecTool } from "./tools/shell/shell-exec";
+import { TaskNotepadTool } from "./tools/task/task-notepad";
+import { TodoSetTool } from "./tools/todo/todo-set";
+import { TodoUpdateTool } from "./tools/todo/todo-update";
 
 export function createDiogenes(config?: DiogenesConfig) {
     const contextManager = new DiogenesContextManager(config);
@@ -36,9 +38,7 @@ export function createDiogenes(config?: DiogenesConfig) {
     contextManager.registerTool(new TaskNotepadTool(workspace));
     if (configObj.security.interaction?.enabled ?? true) {
         contextManager.registerTool(
-            new TaskAskTool(
-                config?.interactionHandlers?.ask ?? createTerminalAskHandler(),
-            ),
+            new TaskAskTool(config?.interactionHandlers?.ask ?? createTerminalAskHandler()),
         );
         contextManager.registerTool(
             new TaskChooseTool(

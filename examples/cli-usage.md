@@ -45,6 +45,7 @@ node ./bundle/cli.cjs --interactive
 ```
 
 In interactive mode, you can:
+
 - Type tasks directly
 - Use `help` to see available commands
 - Use `config` to see current configuration
@@ -61,6 +62,7 @@ node ./bundle/cli.cjs --socratic "Debug the CLI input flow"
 ```
 
 In socratic mode, you can:
+
 - Type single-line tool calls directly
 - Use `tool` or `/tool` to enter multi-line tool-call mode
 - Use `paste` or `/paste` to paste arbitrary multi-line text
@@ -135,6 +137,7 @@ node ./bundle/cli.cjs "Set up ESLint configuration for this project"
 ## Troubleshooting
 
 ### API Key Issues
+
 ```bash
 # Error: OpenAI API key is required
 # Solution: Set the API key
@@ -144,6 +147,7 @@ node ./bundle/cli.cjs --api-key sk-... "Your task"
 ```
 
 ### Workspace Access Issues
+
 ```bash
 # Error: Workspace directory not accessible
 # Solution: Check permissions or specify a different workspace
@@ -151,6 +155,7 @@ node ./bundle/cli.cjs --workspace ./ "Your task"
 ```
 
 ### Verbose Output
+
 If a task is taking too long or seems stuck, use verbose mode to see what's happening:
 
 ```bash
@@ -158,6 +163,7 @@ node ./bundle/cli.cjs --verbose "Your complex task"
 ```
 
 ### Memory/Token Management
+
 For complex tasks, you might need to adjust the max iterations:
 
 ```bash

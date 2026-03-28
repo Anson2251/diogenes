@@ -2,6 +2,8 @@ import type { ConversationMessage, TaskRunResult } from "../../runtime/task-runn
 import type { SnapshotCreateResult, SnapshotSummary } from "../../snapshot/types";
 import type { AvailableCommand, SessionMetadata } from "../types";
 
+export type { SnapshotSummary } from "../../snapshot/types";
+
 export interface ParsedSlashCommand {
     name: string;
     argumentsText: string;
@@ -19,7 +21,11 @@ export interface SlashCommandDefinition {
     command: AvailableCommand;
     aliases?: string[];
     skipAutoBeforePromptSnapshot?: boolean;
-    execute: (context: SlashCommandContext, parsed: ParsedSlashCommand, turn: number) => Promise<TaskRunResult>;
+    execute: (
+        context: SlashCommandContext,
+        parsed: ParsedSlashCommand,
+        turn: number,
+    ) => Promise<TaskRunResult>;
 }
 
 export interface SlashCommandContext {
@@ -34,11 +40,20 @@ export interface SlashCommandContext {
     };
     getTodoItemCount(): number;
     listSnapshots(): Promise<SnapshotSummary[]>;
-    createSnapshot(input: { turn: number; label?: string; reason?: string }): Promise<SnapshotCreateResult>;
-    restoreSnapshotWithNotifications(snapshotId: string): Promise<{ safetySnapshotId: string | null }>;
+    createSnapshot(input: {
+        turn: number;
+        label?: string;
+        reason?: string;
+    }): Promise<SnapshotCreateResult>;
+    restoreSnapshotWithNotifications(
+        snapshotId: string,
+    ): Promise<{ safetySnapshotId: string | null }>;
     runLocalCommand(
         parsed: ParsedSlashCommand,
-        action: (historyBeforeCommand: ConversationMessage[], userMessage: ConversationMessage) => Promise<TaskRunResult>,
+        action: (
+            historyBeforeCommand: ConversationMessage[],
+            userMessage: ConversationMessage,
+        ) => Promise<TaskRunResult>,
     ): Promise<TaskRunResult>;
     completeLocalCommand(
         historyBeforeCommand: ConversationMessage[],

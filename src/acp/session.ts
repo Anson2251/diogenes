@@ -1,15 +1,33 @@
 import * as path from "path";
-import { createDiogenes } from "../create-diogenes";
-import type { TodoItem, ToolCall, ToolResult } from "../types";
-import type { DiogenesConfig } from "../types";
-import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "../runtime/task-runner";
+
 import type { SnapshotManager } from "../snapshot/manager";
 import type { SnapshotStateProvider, SnapshotStateRestorer } from "../snapshot/state-serializer";
 import type { PersistedACPUpdate, PersistedDiogenesState } from "../snapshot/types";
-import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
-import { createBaseSlashCommandRegistry, createSnapshotSlashCommands, type MarkdownSection, type ParsedSlashCommand, type SlashCommandContext } from "./slash-commands";
+import type { TodoItem, ToolCall, ToolResult } from "../types";
+import type { DiogenesConfig } from "../types";
 import type { PromptBlock } from "./types";
-import type { AvailableCommand, SessionLifecycleState, SessionMetadata, StoredSessionMetadata } from "./types";
+import type {
+    AvailableCommand,
+    SessionLifecycleState,
+    SessionMetadata,
+    StoredSessionMetadata,
+} from "./types";
+
+import { createDiogenes } from "../create-diogenes";
+import {
+    runTaskLoop,
+    type ConversationMessage,
+    type TaskRunEvent,
+    type TaskRunResult,
+} from "../runtime/task-runner";
+import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
+import {
+    createBaseSlashCommandRegistry,
+    createSnapshotSlashCommands,
+    type MarkdownSection,
+    type ParsedSlashCommand,
+    type SlashCommandContext,
+} from "./slash-commands";
 
 export interface ACPNotificationSink {
     (method: string, params: any): void;
@@ -86,21 +104,33 @@ function createACPToolResultContent(
     params: Record<string, any> | undefined,
     result: ToolResult,
     formattedText?: string,
-) {
-    const content: any[] = createToolResultContent(
+): Array<Record<string, unknown>> {
+    const content: Array<Record<string, unknown>> = createToolResultContent(
         formattedText ?? formatToolResultFallback(toolName, result, params),
-    );
+    ) as Array<Record<string, unknown>>;
 
-    const diffData = result.success ? result.data?._diff : undefined;
+    const rawDiffData: unknown = result.success ? result.data?._diff : undefined;
+    const diffData:
+        | { path: string; oldText?: string; newText: string; hunks?: unknown[] }
+        | undefined =
+        rawDiffData && typeof rawDiffData === "object" && "path" in rawDiffData
+            ? (() => {
+                  const rawDiffObj = rawDiffData as Record<string, unknown>;
+                  return {
+                      path: String(rawDiffObj.path),
+                      oldText:
+                          typeof rawDiffObj.oldText === "string" ? rawDiffObj.oldText : undefined,
+                      newText: String(rawDiffObj.newText),
+                      hunks: Array.isArray(rawDiffObj.hunks) ? rawDiffObj.hunks : undefined,
+                  };
+              })()
+            : undefined;
     if (
-        (toolName === "file.edit" || toolName === "file.create" || toolName === "file.overwrite")
-        && diffData
-        && typeof diffData.path === "string"
-        && typeof diffData.newText === "string"
-        && (
-            toolName === "file.create"
-            || (Array.isArray(diffData.hunks) && diffData.hunks.length > 0)
-        )
+        (toolName === "file.edit" || toolName === "file.create" || toolName === "file.overwrite") &&
+        diffData &&
+        typeof diffData.path === "string" &&
+        typeof diffData.newText === "string" &&
+        (toolName === "file.create" || (Array.isArray(diffData.hunks) && diffData.hunks.length > 0))
     ) {
         content.push({
             type: "diff",
@@ -119,7 +149,7 @@ function mapTodoStatus(state: TodoItem["state"]): "pending" | "in_progress" | "c
             return "in_progress";
         case "done":
             return "completed";
-        default:
+        case "pending":
             return "pending";
     }
 }
@@ -130,7 +160,7 @@ function mapTodoPriority(state: TodoItem["state"]): "high" | "medium" | "low" {
             return "high";
         case "done":
             return "low";
-        default:
+        case "pending":
             return "medium";
     }
 }
@@ -194,7 +224,11 @@ function getVisibleAssistantText(content: string): string {
     let reservedSuffixLength = 0;
     for (const marker of TOOL_CALL_BLOCK_MARKERS) {
         const maxPrefixLength = Math.min(marker.length - 1, visibleText.length);
-        for (let prefixLength = maxPrefixLength; prefixLength > reservedSuffixLength; prefixLength--) {
+        for (
+            let prefixLength = maxPrefixLength;
+            prefixLength > reservedSuffixLength;
+            prefixLength--
+        ) {
             if (visibleText.endsWith(marker.slice(0, prefixLength))) {
                 reservedSuffixLength = prefixLength;
                 break;
@@ -235,9 +269,7 @@ function promptBlocksToText(prompt: PromptBlock[]): string {
 
         if (block.type === "resource") {
             if (typeof block.resource.text === "string") {
-                parts.push(
-                    `[Embedded Resource] ${block.resource.uri}\n${block.resource.text}`,
-                );
+                parts.push(`[Embedded Resource] ${block.resource.uri}\n${block.resource.text}`);
             } else {
                 parts.push(`[Embedded Resource] ${block.resource.uri}`);
             }
@@ -270,24 +302,53 @@ function createACPToolCallResultUpdate(
     content?: any,
     rawOutput?: ToolResult,
 ) {
-    return {
+    const result: Record<string, unknown> = {
         sessionUpdate: "tool_call_update",
         toolCallId,
         status,
-        ...(content ? { content } : {}),
-        ...(rawOutput ? { rawOutput } : {}),
     };
+    if (content) {
+        result.content = content;
+    }
+    if (rawOutput) {
+        result.rawOutput = rawOutput;
+    }
+    return result;
+}
+
+function parsePersistedACPUpdate(value: unknown): PersistedACPUpdate {
+    if (typeof value !== "object" || value === null) {
+        return {};
+    }
+    // Build the result without type assertions
+    const result: Record<string, unknown> = {};
+    const keys = Object.keys(value);
+    for (const key of keys) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (descriptor && "value" in descriptor) {
+            result[key] = descriptor.value;
+        }
+    }
+    return result;
 }
 
 function cloneACPUpdate(update: PersistedACPUpdate): PersistedACPUpdate {
-    return JSON.parse(JSON.stringify(update)) as PersistedACPUpdate;
+    return parsePersistedACPUpdate(JSON.parse(JSON.stringify(update)));
 }
 
 function mapToolKind(toolName: string): string {
-    if (toolName.startsWith("file.load") || toolName.startsWith("file.peek") || toolName.startsWith("dir.list")) {
+    if (
+        toolName.startsWith("file.load") ||
+        toolName.startsWith("file.peek") ||
+        toolName.startsWith("dir.list")
+    ) {
         return "read";
     }
-    if (toolName.startsWith("file.edit") || toolName.startsWith("file.create") || toolName.startsWith("file.overwrite")) {
+    if (
+        toolName.startsWith("file.edit") ||
+        toolName.startsWith("file.create") ||
+        toolName.startsWith("file.overwrite")
+    ) {
         return "edit";
     }
     if (toolName.startsWith("todo.") || toolName.startsWith("task.notepad")) {
@@ -305,7 +366,9 @@ function mapToolKind(toolName: string): string {
     return "other";
 }
 
-function extractLocations(params: Record<string, any> | undefined): Array<{ path: string }> | undefined {
+function extractLocations(
+    params: Record<string, any> | undefined,
+): Array<{ path: string }> | undefined {
     const filePath = typeof params?.path === "string" ? params.path : undefined;
     if (!filePath) {
         return undefined;
@@ -318,14 +381,72 @@ function formatFileEditResult(pathName: string, result: ToolResult): string | nu
         return null;
     }
 
-    const applied = Array.isArray(result.data.applied) ? result.data.applied : [];
-    const errors = Array.isArray(result.data.errors) ? result.data.errors : [];
-    const totalLines = typeof result.data.file_state?.total_lines === "number"
-        ? result.data.file_state.total_lines
-        : undefined;
+    const resultData = result.data;
+    const appliedRaw: unknown[] = Array.isArray(resultData.applied) ? resultData.applied : [];
+    const errorsRaw: unknown[] = Array.isArray(resultData.errors) ? resultData.errors : [];
+    let fileState: Record<string, unknown> | undefined;
+    // Safely extract file_state with proper type narrowing
+    const fileStateInput: unknown = resultData.file_state;
+    if (typeof fileStateInput === "object" && fileStateInput !== null) {
+        fileState = {};
+        const keys = Object.keys(fileStateInput);
+        for (const key of keys) {
+            const descriptor = Object.getOwnPropertyDescriptor(fileStateInput, key);
+            if (descriptor && "value" in descriptor) {
+                fileState[key] = descriptor.value;
+            }
+        }
+    }
+    const totalLines: number | undefined =
+        typeof fileState?.total_lines === "number" ? fileState.total_lines : undefined;
+
+    interface FileEdit {
+        mode: string;
+        matchedRange: [number, number];
+        newRange: [number, number];
+    }
+
+    interface EditError {
+        index: number;
+        message: string;
+    }
+
+    const applied: FileEdit[] = appliedRaw.filter((edit: unknown): edit is FileEdit => {
+        if (typeof edit !== "object" || edit === null) {
+            return false;
+        }
+        // Use property descriptors to avoid type assertions
+        const modeDescriptor = Object.getOwnPropertyDescriptor(edit, "mode");
+        const matchedRangeDescriptor = Object.getOwnPropertyDescriptor(edit, "matchedRange");
+        const newRangeDescriptor = Object.getOwnPropertyDescriptor(edit, "newRange");
+        return (
+            modeDescriptor !== undefined &&
+            typeof modeDescriptor.value === "string" &&
+            matchedRangeDescriptor !== undefined &&
+            Array.isArray(matchedRangeDescriptor.value) &&
+            newRangeDescriptor !== undefined &&
+            Array.isArray(newRangeDescriptor.value)
+        );
+    });
+
+    const errors: EditError[] = errorsRaw.filter((err: unknown): err is EditError => {
+        if (typeof err !== "object" || err === null) {
+            return false;
+        }
+        const indexDescriptor = Object.getOwnPropertyDescriptor(err, "index");
+        const messageDescriptor = Object.getOwnPropertyDescriptor(err, "message");
+        return (
+            indexDescriptor !== undefined &&
+            typeof indexDescriptor.value === "number" &&
+            messageDescriptor !== undefined &&
+            typeof messageDescriptor.value === "string"
+        );
+    });
 
     const lines: string[] = [];
-    const summary = [`Updated ${pathName}: ${applied.length} edit${applied.length === 1 ? "" : "s"} applied`];
+    const summary = [
+        `Updated ${pathName}: ${applied.length} edit${applied.length === 1 ? "" : "s"} applied`,
+    ];
     if (errors.length > 0) {
         summary.push(`${errors.length} failed`);
     }
@@ -359,7 +480,11 @@ function formatToolResultFallback(
     params?: Record<string, any>,
 ): string {
     if (result.success) {
-        if (toolName === "task.end" && typeof result.data?.summary === "string" && result.data.summary.length > 0) {
+        if (
+            toolName === "task.end" &&
+            typeof result.data?.summary === "string" &&
+            result.data.summary.length > 0
+        ) {
             return result.data.summary;
         }
 
@@ -372,22 +497,43 @@ function formatToolResultFallback(
 
         if (toolName === "file.load") {
             const ranges = Array.isArray(result.data?.loaded_range)
-                ? result.data.loaded_range.map((range) => `${range[0]}-${range[1]}`).join(", ")
+                ? result.data.loaded_range
+                      .filter(
+                          (range): range is [number, number] =>
+                              Array.isArray(range) &&
+                              range.length >= 2 &&
+                              typeof range[0] === "number" &&
+                              typeof range[1] === "number",
+                      )
+                      .map((range) => `${range[0]}-${range[1]}`)
+                      .join(", ")
                 : "requested range";
-            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            const totalLines =
+                typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
             return `Loaded lines ${ranges} (${totalLines} total lines in file)`;
         }
 
         if (toolName === "file.peek") {
             const filePath = typeof params?.path === "string" ? params.path : "unknown file";
-            const previewRange = Array.isArray(result.data?.preview_range)
-                ? result.data.preview_range as [number, number]
-                : [1, 1];
-            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
-            const lines = Array.isArray(result.data?.lines)
-                ? result.data.lines.filter((line): line is string => typeof line === "string")
+            const peekData: Record<string, unknown> =
+                typeof result.data === "object" && result.data !== null
+                    ? (result.data as Record<string, unknown>)
+                    : {};
+            const rawPreviewRange = peekData?.preview_range;
+            const previewRange: [number, number] =
+                Array.isArray(rawPreviewRange) &&
+                rawPreviewRange.length >= 2 &&
+                typeof rawPreviewRange[0] === "number" &&
+                typeof rawPreviewRange[1] === "number"
+                    ? [rawPreviewRange[0], rawPreviewRange[1]]
+                    : [1, 1];
+            const totalLines = typeof peekData?.total_lines === "number" ? peekData.total_lines : 0;
+            const lines = Array.isArray(peekData?.lines)
+                ? (peekData.lines as unknown[]).filter(
+                      (line): line is string => typeof line === "string",
+                  )
                 : [];
-            const note = typeof result.data?._note === "string" ? result.data._note : "";
+            const note = typeof peekData?._note === "string" ? peekData._note : "";
 
             return [
                 `Peeked ${filePath}`,
@@ -399,7 +545,10 @@ function formatToolResultFallback(
                 "",
                 note,
             ]
-                .filter((line, index, all) => line.length > 0 || (index > 0 && all[index - 1].length > 0))
+                .filter(
+                    (line, index, all) =>
+                        line.length > 0 || (index > 0 && all[index - 1].length > 0),
+                )
                 .join("\n");
         }
 
@@ -412,30 +561,34 @@ function formatToolResultFallback(
         }
 
         if (toolName === "file.unload") {
-            const targetPath = typeof result.data?.path === "string"
-                ? result.data.path
-                : typeof params?.path === "string"
-                    ? params.path
-                    : "file";
+            const targetPath =
+                typeof result.data?.path === "string"
+                    ? result.data.path
+                    : typeof params?.path === "string"
+                      ? params.path
+                      : "file";
             return `Removed ${targetPath} from workspace context`;
         }
 
         if (toolName === "dir.unload") {
-            const targetPath = typeof result.data?.path === "string"
-                ? result.data.path
-                : typeof params?.path === "string"
-                    ? params.path
-                    : "directory";
+            const targetPath =
+                typeof result.data?.path === "string"
+                    ? result.data.path
+                    : typeof params?.path === "string"
+                      ? params.path
+                      : "directory";
             return `Removed ${targetPath} from workspace context`;
         }
 
         if (toolName === "file.create") {
-            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            const totalLines =
+                typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
             return `Created file (${totalLines} line${totalLines === 1 ? "" : "s"})`;
         }
 
         if (toolName === "file.overwrite") {
-            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            const totalLines =
+                typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
             return `Rewrote file (${totalLines} line${totalLines === 1 ? "" : "s"})`;
         }
 
@@ -452,7 +605,8 @@ function formatToolResultFallback(
 
         if (toolName === "task.notepad") {
             const mode = typeof result.data?.mode === "string" ? result.data.mode : "append";
-            const totalLines = typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
+            const totalLines =
+                typeof result.data?.total_lines === "number" ? result.data.total_lines : 0;
             const noteLines = Array.isArray(result.data?.lines)
                 ? result.data.lines.filter((line): line is string => typeof line === "string")
                 : [];
@@ -480,7 +634,8 @@ function formatToolResultFallback(
         }
 
         if (toolName === "shell.exec") {
-            const exitCode = result.data?.exit_code;
+            const exitCode: number | undefined =
+                typeof result.data?.exit_code === "number" ? result.data.exit_code : undefined;
             const stdout = typeof result.data?.stdout === "string" ? result.data.stdout.trim() : "";
             const stderr = typeof result.data?.stderr === "string" ? result.data.stderr.trim() : "";
             const parts = [`Command finished with exit code ${exitCode}`];
@@ -496,9 +651,12 @@ function formatToolResultFallback(
         }
 
         if (toolName === "snapshot.create") {
-            const snapshotId = typeof result.data?.snapshot_id === "string" ? result.data.snapshot_id : "snapshot";
+            const snapshotId =
+                typeof result.data?.snapshot_id === "string" ? result.data.snapshot_id : "snapshot";
             const label = typeof result.data?.label === "string" ? result.data.label : undefined;
-            return label ? `Created snapshot ${snapshotId} (${label})` : `Created snapshot ${snapshotId}`;
+            return label
+                ? `Created snapshot ${snapshotId} (${label})`
+                : `Created snapshot ${snapshotId}`;
         }
 
         if (result.data && Object.keys(result.data).length > 0) {
@@ -521,7 +679,9 @@ function formatToolResultFallback(
     }
 
     const code = result.error?.code ? `[${result.error.code}] ` : "";
-    const details = result.error?.details ? `\n${JSON.stringify(result.error.details, null, 2)}` : "";
+    const details = result.error?.details
+        ? `\n${JSON.stringify(result.error.details, null, 2)}`
+        : "";
     return `${code}${message}${details}`;
 }
 
@@ -611,7 +771,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     }
 
     getMessageHistory(): ConversationMessage[] {
-        const source = this.currentMessageHistory.length > 0 ? this.currentMessageHistory : this.messageHistory;
+        const source =
+            this.currentMessageHistory.length > 0
+                ? this.currentMessageHistory
+                : this.messageHistory;
         return source.map((message) => ({ ...message }));
     }
 
@@ -735,7 +898,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         await this.persistence.writeState(this.sessionId, state);
     }
 
-    async restorePersistedState(state: PersistedDiogenesState, options: RestorePersistedStateOptions = {}): Promise<void> {
+    async restorePersistedState(
+        state: PersistedDiogenesState,
+        options: RestorePersistedStateOptions = {},
+    ): Promise<void> {
         const workspace = this.diogenes.getWorkspaceManager();
         workspace.clearLoadedState();
         workspace.setTodoItems(state.workspace.todo.map((item) => ({ ...item })));
@@ -882,7 +1048,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return this.slashCommands.list().map((definition) => definition.command);
     }
 
-    private emitSessionUpdate(update: Record<string, unknown>, options: EmitSessionUpdateOptions = {}): void {
+    private emitSessionUpdate(
+        update: Record<string, unknown>,
+        options: EmitSessionUpdateOptions = {},
+    ): void {
         if (options.record ?? true) {
             this.acpReplayLog.push(cloneACPUpdate(update));
         }
@@ -901,10 +1070,13 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     }
 
     private recordUserPromptForReplay(promptText: string): void {
-        this.emitSessionUpdate({
-            sessionUpdate: "user_message_chunk",
-            content: createTextContent(promptText),
-        }, { notify: false });
+        this.emitSessionUpdate(
+            {
+                sessionUpdate: "user_message_chunk",
+                content: createTextContent(promptText),
+            },
+            { notify: false },
+        );
     }
 
     emitAvailableCommandsUpdate(options: EmitSessionUpdateOptions = {}): void {
@@ -913,26 +1085,32 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             return;
         }
 
-        this.emitSessionUpdate({
-            sessionUpdate: "available_commands_update",
-            availableCommands,
-        }, options);
+        this.emitSessionUpdate(
+            {
+                sessionUpdate: "available_commands_update",
+                availableCommands,
+            },
+            options,
+        );
     }
 
     emitHydratedStateUpdates(options: EmitSessionUpdateOptions = {}): void {
-        this.emitSessionUpdate({
-            sessionUpdate: "session_info_update",
-            title: this.title,
-            updatedAt: this.updatedAt,
-            _meta: {
-                diogenes: {
-                    description: this.description,
-                    state: this.lifecycleState,
-                    hasActiveRun: this.activeRun !== null,
-                    hydratedState: this.getHydratedStateMeta(),
+        this.emitSessionUpdate(
+            {
+                sessionUpdate: "session_info_update",
+                title: this.title,
+                updatedAt: this.updatedAt,
+                _meta: {
+                    diogenes: {
+                        description: this.description,
+                        state: this.lifecycleState,
+                        hasActiveRun: this.activeRun !== null,
+                        hydratedState: this.getHydratedStateMeta(),
+                    },
                 },
             },
-        }, options);
+            options,
+        );
         this.emitTodoPlanUpdate(options);
         this.emitAvailableCommandsUpdate(options);
     }
@@ -960,9 +1138,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.recordUserPromptForReplay(promptText);
 
         if (
-            this.snapshotManager
-            && this.snapshotManager.isAutoBeforePromptEnabled()
-            && !this.shouldSkipAutoBeforePromptSnapshot(parsedSlashCommand)
+            this.snapshotManager &&
+            this.snapshotManager.isAutoBeforePromptEnabled() &&
+            !this.shouldSkipAutoBeforePromptSnapshot(parsedSlashCommand)
         ) {
             await this.snapshotManager.createSnapshot({
                 trigger: "before_prompt",
@@ -970,7 +1148,11 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             });
         }
 
-        const slashCommandResult = await this.tryHandleSlashCommand(prompt, turn, parsedSlashCommand);
+        const slashCommandResult = await this.tryHandleSlashCommand(
+            prompt,
+            turn,
+            parsedSlashCommand,
+        );
         if (slashCommandResult) {
             return slashCommandResult;
         }
@@ -1052,8 +1234,11 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         const result = await runTaskLoop(this.diogenes, promptText, {
             maxIterations: this.maxIterations ?? Number.POSITIVE_INFINITY,
             messageHistory: this.messageHistory,
-            shouldCancel: () => this.activeRun?.cancelled === true,
-            onEvent: (event) => this.handleEvent(event),
+            shouldCancel: () => Boolean(this.activeRun?.cancelled),
+            onEvent: (event) => {
+                this.handleEvent(event);
+                return undefined;
+            },
             onMessageHistoryUpdate: (messageHistory) => {
                 this.currentMessageHistory = messageHistory;
             },
@@ -1103,7 +1288,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     }
 
     private parseSlashCommand(prompt: PromptBlock[]): ParsedSlashCommand | null {
-        const commandBlock = prompt.find((block) => block.type === "text" && block.text.trim().startsWith("/"));
+        const commandBlock = prompt.find(
+            (block) => block.type === "text" && block.text.trim().startsWith("/"),
+        );
         if (!commandBlock || commandBlock.type !== "text") {
             return null;
         }
@@ -1140,29 +1327,38 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
     private async handleUnknownSlashCommand(parsed: ParsedSlashCommand): Promise<TaskRunResult> {
         return this.runLocalSlashCommand(parsed, async (historyBeforeCommand, userMessage) => {
-            const availableCommands = this.getAvailableCommands().map((command) => `/${command.name}`);
-            const summary = availableCommands.length > 0
-                ? this.renderMarkdownSections([
-                    {
-                        title: "Unknown Command",
-                        bullets: [
-                            `Command: \`${parsed.commandText}\``,
-                            `Available: ${availableCommands.map((command) => `\`${command}\``).join(", ")}`,
-                            "Use `/help` for details.",
-                        ],
-                    },
-                ])
-                : this.renderMarkdownSections([
-                    {
-                        title: "Unknown Command",
-                        bullets: [
-                            `Command: \`${parsed.commandText}\``,
-                            "No ACP slash commands are currently available.",
-                        ],
-                    },
-                ]);
+            await Promise.resolve();
+            const availableCommands = this.getAvailableCommands().map(
+                (command) => `/${command.name}`,
+            );
+            const summary =
+                availableCommands.length > 0
+                    ? this.renderMarkdownSections([
+                          {
+                              title: "Unknown Command",
+                              bullets: [
+                                  `Command: \`${parsed.commandText}\``,
+                                  `Available: ${availableCommands.map((command) => `\`${command}\``).join(", ")}`,
+                                  "Use `/help` for details.",
+                              ],
+                          },
+                      ])
+                    : this.renderMarkdownSections([
+                          {
+                              title: "Unknown Command",
+                              bullets: [
+                                  `Command: \`${parsed.commandText}\``,
+                                  "No ACP slash commands are currently available.",
+                              ],
+                          },
+                      ]);
 
-            return this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, false);
+            return this.completeLocalSlashCommand(
+                historyBeforeCommand,
+                userMessage,
+                summary,
+                false,
+            );
         });
     }
 
@@ -1173,7 +1369,8 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             getAvailableCommands: () => this.getAvailableCommands(),
             getMetadata: () => this.getMetadata(),
             getHydratedStateMeta: () => this.getHydratedStateMeta(),
-            getTodoItemCount: () => this.diogenes.getWorkspaceManager().getTodoWorkspace().items.length,
+            getTodoItemCount: () =>
+                this.diogenes.getWorkspaceManager().getTodoWorkspace().items.length,
             listSnapshots: async () => this.listSnapshots(),
             createSnapshot: async ({ turn, label, reason }) => {
                 if (!this.snapshotManager) {
@@ -1186,23 +1383,30 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                     reason,
                 });
             },
-            restoreSnapshotWithNotifications: async (snapshotId) => this.restoreSnapshotWithNotifications(snapshotId, { emitAgentMessage: false }),
+            restoreSnapshotWithNotifications: async (snapshotId) =>
+                this.restoreSnapshotWithNotifications(snapshotId, { emitAgentMessage: false }),
             runLocalCommand: async (parsed, action) => this.runLocalSlashCommand(parsed, action),
-            completeLocalCommand: (historyBeforeCommand, userMessage, summary, success) => this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, success),
+            completeLocalCommand: (historyBeforeCommand, userMessage, summary, success) =>
+                this.completeLocalSlashCommand(historyBeforeCommand, userMessage, summary, success),
             renderMarkdownSections: (sections) => this.renderMarkdownSections(sections),
         };
     }
 
     private async runLocalSlashCommand(
         parsed: ParsedSlashCommand,
-        action: (historyBeforeCommand: ConversationMessage[], userMessage: ConversationMessage) => Promise<TaskRunResult>,
+        action: (
+            historyBeforeCommand: ConversationMessage[],
+            userMessage: ConversationMessage,
+        ) => Promise<TaskRunResult>,
     ): Promise<TaskRunResult> {
         this.lifecycleState = "running";
         this.updatedAt = new Date().toISOString();
         await this.persistMetadata();
 
         try {
-            const { historyBeforeCommand, userMessage } = this.appendLocalSlashUserMessage(parsed.promptText);
+            const { historyBeforeCommand, userMessage } = this.appendLocalSlashUserMessage(
+                parsed.promptText,
+            );
             return await action(historyBeforeCommand, userMessage);
         } finally {
             if (this.lifecycleState === "running") {
@@ -1213,7 +1417,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         }
     }
 
-    private appendLocalSlashUserMessage(promptText: string): { historyBeforeCommand: ConversationMessage[]; userMessage: ConversationMessage } {
+    private appendLocalSlashUserMessage(promptText: string): {
+        historyBeforeCommand: ConversationMessage[];
+        userMessage: ConversationMessage;
+    } {
         const historyBeforeCommand = this.messageHistory.map((message) => ({ ...message }));
         const userMessage: ConversationMessage = {
             role: "user",
@@ -1291,7 +1498,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return parts.join("\n");
     }
 
-    private extractLocations(params: Record<string, any> | undefined): Array<{ path: string }> | undefined {
+    private extractLocations(
+        params: Record<string, any> | undefined,
+    ): Array<{ path: string }> | undefined {
         const locations = extractLocations(params);
         if (!locations) {
             return undefined;
@@ -1336,14 +1545,17 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     private emitTodoPlanUpdate(options: EmitSessionUpdateOptions = {}): void {
         const items = this.diogenes.getWorkspaceManager().getTodoWorkspace().items;
 
-        this.emitSessionUpdate({
-            sessionUpdate: "plan",
-            entries: items.map((item) => ({
-                content: item.text,
-                priority: mapTodoPriority(item.state),
-                status: mapTodoStatus(item.state),
-            })),
-        }, options);
+        this.emitSessionUpdate(
+            {
+                sessionUpdate: "plan",
+                entries: items.map((item) => ({
+                    content: item.text,
+                    priority: mapTodoPriority(item.state),
+                    status: mapTodoStatus(item.state),
+                })),
+            },
+            options,
+        );
     }
 
     private emitSessionMetadataUpdate(): void {
@@ -1420,62 +1632,73 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
         if (event.type === "tool.calls.parsed") {
             event.toolCalls.forEach((toolCall, index) => {
-                this.emitSessionUpdate(createACPToolCallUpdate(
-                    this.registerToolCallId(event.iteration, index),
-                    toolCall,
-                    "pending",
-                    this.extractLocations(toolCall.params),
-                ));
+                this.emitSessionUpdate(
+                    createACPToolCallUpdate(
+                        this.registerToolCallId(event.iteration, index),
+                        toolCall,
+                        "pending",
+                        this.extractLocations(toolCall.params),
+                    ),
+                );
             });
             return;
         }
 
         if (event.type === "tool.execution.started") {
-            this.emitSessionUpdate(createACPToolCallResultUpdate(
-                this.getToolCallId(event.iteration, event.index),
-                "in_progress",
-            ));
+            this.emitSessionUpdate(
+                createACPToolCallResultUpdate(
+                    this.getToolCallId(event.iteration, event.index),
+                    "in_progress",
+                ),
+            );
             return;
         }
 
         if (event.type === "tool.execution.completed") {
             const tool = this.diogenes.getTool(event.toolCall.tool);
-            const formattedACPText = event.toolCall.tool === "file.edit" && !event.result.success
-                ? tool?.formatResultForLLM(event.toolCall, event.result)
-                : undefined;
+            const formattedACPText =
+                event.toolCall.tool === "file.edit" && !event.result.success
+                    ? tool?.formatResultForLLM(event.toolCall, event.result)
+                    : undefined;
 
-            this.emitSessionUpdate(createACPToolCallResultUpdate(
-                this.getToolCallId(event.iteration, event.index),
-                event.result.success ? "completed" : "failed",
-                createACPToolResultContent(
-                    event.toolCall.tool,
-                    event.toolCall.params,
+            this.emitSessionUpdate(
+                createACPToolCallResultUpdate(
+                    this.getToolCallId(event.iteration, event.index),
+                    event.result.success ? "completed" : "failed",
+                    createACPToolResultContent(
+                        event.toolCall.tool,
+                        event.toolCall.params,
+                        event.result,
+                        formattedACPText,
+                    ),
                     event.result,
-                    formattedACPText,
                 ),
-                event.result,
-            ));
+            );
 
             if (
-                event.result.success
-                && (event.toolCall.tool === "todo.set" || event.toolCall.tool === "todo.update")
+                event.result.success &&
+                (event.toolCall.tool === "todo.set" || event.toolCall.tool === "todo.update")
             ) {
                 this.emitTodoPlanUpdate();
             }
 
             if (event.result.success && event.toolCall.tool === "task.end") {
-                const title = typeof event.result.data?.title === "string"
-                    ? event.result.data.title.trim()
-                    : "";
-                const description = typeof event.result.data?.description === "string"
-                    ? event.result.data.description.trim()
-                    : "";
-                const reason = typeof event.result.data?.reason === "string"
-                    ? event.result.data.reason.trim()
-                    : "";
-                const summary = typeof event.result.data?.summary === "string"
-                    ? event.result.data.summary.trim()
-                    : "";
+                const title =
+                    typeof event.result.data?.title === "string"
+                        ? event.result.data.title.trim()
+                        : "";
+                const description =
+                    typeof event.result.data?.description === "string"
+                        ? event.result.data.description.trim()
+                        : "";
+                const reason =
+                    typeof event.result.data?.reason === "string"
+                        ? event.result.data.reason.trim()
+                        : "";
+                const summary =
+                    typeof event.result.data?.summary === "string"
+                        ? event.result.data.summary.trim()
+                        : "";
 
                 this.title = title || reason || this.title;
                 this.description = description || summary || this.description;
@@ -1490,14 +1713,14 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         if (event.type === "context.warning") {
             for (const index of event.skippedIndexes) {
                 const skippedResult = createSkippedToolResult(event.warning);
-                this.emitSessionUpdate(createACPToolCallResultUpdate(
-                    this.getToolCallId(event.iteration, index),
-                    "failed",
-                    createToolResultContent(
-                        formatToolResultFallback("tool", skippedResult),
+                this.emitSessionUpdate(
+                    createACPToolCallResultUpdate(
+                        this.getToolCallId(event.iteration, index),
+                        "failed",
+                        createToolResultContent(formatToolResultFallback("tool", skippedResult)),
+                        skippedResult,
                     ),
-                    skippedResult,
-                ));
+                );
             }
 
             this.emitSessionUpdate({
@@ -1527,8 +1750,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 }
 
 function isNotFoundError(error: unknown): boolean {
-    return typeof error === "object"
-        && error !== null
-        && "code" in error
-        && (error as NodeJS.ErrnoException).code === "ENOENT";
+    if (typeof error !== "object" || error === null) {
+        return false;
+    }
+    const errorWithCode = error as { code?: unknown };
+    return typeof errorWithCode.code === "string" && errorWithCode.code === "ENOENT";
 }

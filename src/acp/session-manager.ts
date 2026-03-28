@@ -1,10 +1,18 @@
 import { randomUUID } from "crypto";
 import * as path from "path";
+import { z } from "zod";
+
 import type { DiogenesConfig } from "../types";
+import type { LoadSessionParams, StoredSessionMetadata } from "./types";
+
 import { getDefaultSessionsStorageRoot, SessionSnapshotManager } from "../snapshot/manager";
 import { ACPSession, type ACPNotificationSink } from "./session";
 import { SessionStore } from "./session-store";
-import type { LoadSessionParams, StoredSessionMetadata } from "./types";
+
+const SessionListCursorSchema = z.object({
+    updatedAt: z.string(),
+    sessionId: z.string(),
+});
 
 const DEFAULT_SESSION_LIST_PAGE_SIZE = 20;
 const MAX_SESSION_LIST_PAGE_SIZE = 100;
@@ -119,14 +127,17 @@ export class SessionManager {
             session.attachSnapshotManager(snapshotManager);
         }
 
-        await session.restorePersistedState({
-            ...state,
-            cwd: resolvedCwd,
-        }, {
-            persist: false,
-            emitPlanUpdate: false,
-            preserveTimestamps: true,
-        });
+        await session.restorePersistedState(
+            {
+                ...state,
+                cwd: resolvedCwd,
+            },
+            {
+                persist: false,
+                emitPlanUpdate: false,
+                preserveTimestamps: true,
+            },
+        );
         this.sessions.set(params.sessionId, session);
         return session;
     }
@@ -192,8 +203,20 @@ export class SessionManager {
         return Array.from(this.sessions.values());
     }
 
-    async listSessionMetadata(options: { cwd?: string; includeSnapshots?: boolean; cursor?: string; pageSize?: number } = {}): Promise<{
-        sessions: Array<StoredSessionMetadata & { snapshotCount: number; snapshots?: Awaited<ReturnType<ACPSession["listSnapshots"]>> }>;
+    async listSessionMetadata(
+        options: {
+            cwd?: string;
+            includeSnapshots?: boolean;
+            cursor?: string;
+            pageSize?: number;
+        } = {},
+    ): Promise<{
+        sessions: Array<
+            StoredSessionMetadata & {
+                snapshotCount: number;
+                snapshots?: Awaited<ReturnType<ACPSession["listSnapshots"]>>;
+            }
+        >;
         nextCursor: string | null;
         pageSize: number;
     }> {
@@ -209,9 +232,9 @@ export class SessionManager {
             merged.set(session.sessionId, session.getStoredMetadata());
         }
 
-        const filteredSessions = Array.from(merged.values()).filter((session) => (
-            options.cwd ? session.cwd === options.cwd : true
-        )).sort((left, right) => compareSessionOrdering(left, right));
+        const filteredSessions = Array.from(merged.values())
+            .filter((session) => (options.cwd ? session.cwd === options.cwd : true))
+            .sort((left, right) => compareSessionOrdering(left, right));
 
         const cursor = decodeSessionListCursor(options.cursor);
         const pageSize = normalizePageSize(options.pageSize);
@@ -220,28 +243,41 @@ export class SessionManager {
             : filteredSessions;
         const page = pagedSessions.slice(0, pageSize);
 
-        const sessions = await Promise.all(page.map(async (session) => {
-            const snapshots = await this.sessionStore.listSnapshots(session.sessionId);
-            return {
-                ...session,
-                snapshotCount: snapshots.length,
-                ...(options.includeSnapshots ? { snapshots } : {}),
-            };
-        }));
+        const sessions = await Promise.all(
+            page.map(async (session) => {
+                const snapshots = await this.sessionStore.listSnapshots(session.sessionId);
+                return {
+                    ...session,
+                    snapshotCount: snapshots.length,
+                    ...(options.includeSnapshots ? { snapshots } : {}),
+                };
+            }),
+        );
 
         const lastSession = page.at(-1);
         return {
             sessions,
-            nextCursor: pagedSessions.length > pageSize && lastSession
-                ? encodeSessionListCursor({ updatedAt: lastSession.updatedAt, sessionId: lastSession.sessionId })
-                : null,
+            nextCursor:
+                pagedSessions.length > pageSize && lastSession
+                    ? encodeSessionListCursor({
+                          updatedAt: lastSession.updatedAt,
+                          sessionId: lastSession.sessionId,
+                      })
+                    : null,
             pageSize,
         };
     }
 
-    async getSessionMetadata(sessionId: string, options: { includeSnapshots?: boolean } = {}): Promise<(StoredSessionMetadata & { snapshots?: Awaited<ReturnType<ACPSession["listSnapshots"]>> }) | null> {
+    async getSessionMetadata(
+        sessionId: string,
+        options: { includeSnapshots?: boolean } = {},
+    ): Promise<
+        | (StoredSessionMetadata & { snapshots?: Awaited<ReturnType<ACPSession["listSnapshots"]>> })
+        | null
+    > {
         const liveSession = this.sessions.get(sessionId);
-        const metadata = liveSession?.getStoredMetadata() ?? await this.sessionStore.readMetadata(sessionId);
+        const metadata =
+            liveSession?.getStoredMetadata() ?? (await this.sessionStore.readMetadata(sessionId));
 
         if (!metadata) {
             return null;
@@ -249,11 +285,15 @@ export class SessionManager {
 
         return {
             ...metadata,
-            ...(options.includeSnapshots ? { snapshots: await this.sessionStore.listSnapshots(sessionId) } : {}),
+            ...(options.includeSnapshots
+                ? { snapshots: await this.sessionStore.listSnapshots(sessionId) }
+                : {}),
         };
     }
 
-    async listSnapshots(sessionId: string): Promise<Awaited<ReturnType<ACPSession["listSnapshots"]>> | null> {
+    async listSnapshots(
+        sessionId: string,
+    ): Promise<Awaited<ReturnType<ACPSession["listSnapshots"]>> | null> {
         const metadata = await this.sessionStore.readMetadata(sessionId);
         if (!metadata && !this.sessions.has(sessionId)) {
             return null;
@@ -262,7 +302,9 @@ export class SessionManager {
         return this.sessionStore.listSnapshots(sessionId);
     }
 
-    async pruneSessions(options: { dryRun?: boolean } = {}): Promise<import("./session-store").SessionPruneResult> {
+    async pruneSessions(
+        options: { dryRun?: boolean } = {},
+    ): Promise<import("./session-store").SessionPruneResult> {
         return this.sessionStore.pruneSessions(options);
     }
 }
@@ -285,11 +327,12 @@ function decodeSessionListCursor(cursor: string | undefined): SessionListCursor 
     }
 
     try {
-        const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as SessionListCursor;
-        if (typeof decoded.updatedAt !== "string" || typeof decoded.sessionId !== "string") {
-            return null;
+        const parsed: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+        const result = SessionListCursorSchema.safeParse(parsed);
+        if (result.success) {
+            return result.data;
         }
-        return decoded;
+        return null;
     } catch {
         return null;
     }

@@ -7,10 +7,7 @@ import { createSnapshotsSlashCommand } from "./snapshots";
 
 export function createBaseSlashCommandRegistry(): SlashCommandRegistry {
     const registry = new SlashCommandRegistry();
-    registry.registerAll([
-        createHelpSlashCommand(),
-        createSessionSlashCommand(),
-    ]);
+    registry.registerAll([createHelpSlashCommand(), createSessionSlashCommand()]);
     return registry;
 }
 
@@ -23,4 +20,9 @@ export function createSnapshotSlashCommands() {
 }
 
 export { SlashCommandRegistry } from "./registry";
-export type { MarkdownSection, ParsedSlashCommand, SlashCommandContext, SlashCommandDefinition } from "./types";
+export type {
+    MarkdownSection,
+    ParsedSlashCommand,
+    SlashCommandContext,
+    SlashCommandDefinition,
+} from "./types";

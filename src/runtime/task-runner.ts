@@ -1,6 +1,7 @@
 import type { DiogenesContextManager } from "../context";
 import type { StreamChunk } from "../llm/openai-client";
 import type { ToolCall, ToolResult } from "../types";
+
 import { formatParseError, formatToolResults, parseToolCalls } from "../utils/tool-parser";
 
 export interface ConversationMessage {
@@ -8,11 +9,7 @@ export interface ConversationMessage {
     content: string;
 }
 
-export type TaskStopReason =
-    | "end_turn"
-    | "cancelled"
-    | "max_turn_requests"
-    | "failed";
+export type TaskStopReason = "end_turn" | "cancelled" | "max_turn_requests" | "failed";
 
 export interface TaskRunResult {
     success: boolean;
@@ -32,9 +29,21 @@ export type TaskRunEvent =
     | { type: "llm.stream.completed"; iteration: number; response: string; reasoning: string }
     | { type: "tool.calls.parsed"; iteration: number; toolCalls: ToolCall[] }
     | { type: "tool.execution.started"; iteration: number; index: number; toolCall: ToolCall }
-    | { type: "tool.execution.completed"; iteration: number; index: number; toolCall: ToolCall; result: ToolResult }
+    | {
+          type: "tool.execution.completed";
+          iteration: number;
+          index: number;
+          toolCall: ToolCall;
+          result: ToolResult;
+      }
     | { type: "parse.error"; iteration: number; message: string }
-    | { type: "context.warning"; iteration: number; warning: string; skippedTools: string[]; skippedIndexes: number[] }
+    | {
+          type: "context.warning";
+          iteration: number;
+          warning: string;
+          skippedTools: string[];
+          skippedIndexes: number[];
+      }
     | { type: "run.completed"; result: TaskRunResult }
     | { type: "run.failed"; error: string; iterations: number }
     | { type: "run.cancelled"; iterations: number };
@@ -63,10 +72,7 @@ function emitMessageHistory(options: TaskRunOptions, messageHistory: Conversatio
     options.onMessageHistoryUpdate?.(messageHistory.map((message) => ({ ...message })));
 }
 
-function cancelledResult(
-    iterations: number,
-    messageHistory: ConversationMessage[],
-): TaskRunResult {
+function cancelledResult(iterations: number, messageHistory: ConversationMessage[]): TaskRunResult {
     return {
         success: false,
         error: "Request cancelled",
@@ -92,9 +98,7 @@ export async function runTaskLoop(
     emitMessageHistory(options, messageHistory);
 
     if (!diogenes.hasLLMClient()) {
-        throw new Error(
-            "LLM client not configured. Please provide API key in config.llm.apiKey",
-        );
+        throw new Error("LLM client not configured. Please provide API key in config.llm.apiKey");
     }
 
     let iterations = 0;
@@ -215,35 +219,57 @@ export async function runTaskLoop(
                     return cancelledResult(iterations, messageHistory);
                 }
 
-                let contextWarningData: { warning: string; skippedTools?: string[]; skippedIndexes?: number[] } | null = null;
+                let contextWarningData: {
+                    warning: string;
+                    skippedTools?: string[];
+                    skippedIndexes?: number[];
+                } | null = null;
 
                 for (let i = 0; i < results.length; i++) {
                     const toolCall = toolCalls[i];
                     const result = results[i];
 
                     if (result.data?._contextWarning) {
+                        const contextWarningValue: unknown = result.data._contextWarning;
+                        const contextWarning: string =
+                            typeof contextWarningValue === "string"
+                                ? contextWarningValue
+                                : String(contextWarningValue);
                         contextWarningData = {
-                            warning: result.data._contextWarning,
+                            warning: contextWarning,
                             skippedTools: toolCalls.slice(i + 1).map((t) => t.tool),
-                            skippedIndexes: toolCalls.slice(i + 1).map((_, offset) => i + 1 + offset),
+                            skippedIndexes: toolCalls
+                                .slice(i + 1)
+                                .map((_, offset) => i + 1 + offset),
                         };
                     }
 
                     if (toolCall.tool === "task.end" && result?.success) {
                         taskEnded = true;
+                        const dataSummary: unknown = result.data?.summary;
+                        const dataReason: unknown = result.data?.reason;
+                        const paramsReason: unknown = toolCall.params?.reason;
                         finalResult =
-                            typeof result.data?.summary === "string" && result.data.summary.length > 0
-                                ? result.data.summary
-                                : result.data?.reason || toolCall.params?.reason || "No reason provided";
+                            typeof dataSummary === "string" && dataSummary.length > 0
+                                ? dataSummary
+                                : typeof dataReason === "string"
+                                  ? dataReason
+                                  : typeof paramsReason === "string"
+                                    ? paramsReason
+                                    : "No reason provided";
                     }
                 }
 
                 let resultContent = formatToolResults(
                     toolCalls,
                     results,
-                    (toolCall, result) =>
-                        diogenes.getTool(toolCall.tool)?.formatResultForLLM(toolCall, result)
-                        ?? JSON.stringify(result, null, 2),
+                    (toolCall: ToolCall, result: ToolResult): string => {
+                        const tool = diogenes.getTool(toolCall.tool);
+                        if (tool) {
+                            return tool.formatResultForLLM(toolCall, result);
+                        }
+                        return JSON.stringify(result, null, 2);
+                    },
                 );
 
                 if (contextWarningData) {
@@ -255,7 +281,10 @@ export async function runTaskLoop(
                         skippedIndexes: contextWarningData.skippedIndexes || [],
                     });
                     resultContent += `\n\n[CONTEXT WARNING]\n${contextWarningData.warning}\n`;
-                    if (contextWarningData.skippedTools && contextWarningData.skippedTools.length > 0) {
+                    if (
+                        contextWarningData.skippedTools &&
+                        contextWarningData.skippedTools.length > 0
+                    ) {
                         resultContent += `Skipped tools: ${contextWarningData.skippedTools.join(", ")}\n`;
                     }
                     resultContent += `\nYour context is nearly full. To continue:\n`;
@@ -276,9 +305,10 @@ export async function runTaskLoop(
             }
 
             if (toolCalls.length === 0) {
-                const feedback = iterations > 3
-                    ? `[SYSTEM]\nNo tool calls received for ${iterations} iterations.\n\nIf you believe the task is complete, use task.end:\n\`\`\`tool-call\n[{"tool": "task.end", "params": {"reason": "brief summary of why task is done", "summary": "what was accomplished"}}]\n\`\`\`\n\nIf the task is not complete, continue with your next tool call.`
-                    : `[SYSTEM]\nNo tool calls received. Please either:\n1. Continue with tool calls to make progress\n2. Use task.end if you believe the task is complete`;
+                const feedback =
+                    iterations > 3
+                        ? `[SYSTEM]\nNo tool calls received for ${iterations} iterations.\n\nIf you believe the task is complete, use task.end:\n\`\`\`tool-call\n[{"tool": "task.end", "params": {"reason": "brief summary of why task is done", "summary": "what was accomplished"}}]\n\`\`\`\n\nIf the task is not complete, continue with your next tool call.`
+                        : `[SYSTEM]\nNo tool calls received. Please either:\n1. Continue with tool calls to make progress\n2. Use task.end if you believe the task is complete`;
 
                 messageHistory.push({
                     role: "user",

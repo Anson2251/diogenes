@@ -1,17 +1,27 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { ToolRegistry } from "../src/tools/index";
+import { z } from "zod";
+
 import { BaseTool } from "../src/tools/base-tool";
+import { ToolRegistry } from "../src/tools/index";
 import { ToolDefinition, ToolResult } from "../src/types";
 
-class MockTool extends BaseTool {
+// Mock tool that can optionally enforce schema validation
+class MockTool extends BaseTool<z.ZodType> {
+    protected schema: z.ZodType;
     private executeFn: (params: unknown) => Promise<ToolResult>;
 
-    constructor(definition: ToolDefinition, executeFn: (params: unknown) => Promise<ToolResult>) {
+    constructor(
+        definition: ToolDefinition,
+        executeFn: (params: unknown) => Promise<ToolResult>,
+        schema?: z.ZodType,
+    ) {
         super(definition);
         this.executeFn = executeFn;
+        // Use provided schema or default to passthrough
+        this.schema = schema ?? z.object({}).passthrough();
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
+    async run(params: z.infer<z.ZodType>): Promise<ToolResult> {
         return this.executeFn(params);
     }
 }
@@ -143,8 +153,8 @@ describe("ToolRegistry", () => {
 
             const result = registry.getAllDefinitions();
             expect(result).toHaveLength(2);
-            expect(result.find(d => d.name === "tool1")).toBeDefined();
-            expect(result.find(d => d.name === "tool2")).toBeDefined();
+            expect(result.find((d) => d.name === "tool1")).toBeDefined();
+            expect(result.find((d) => d.name === "tool2")).toBeDefined();
         });
     });
 
@@ -160,10 +170,10 @@ describe("ToolRegistry", () => {
                 returns: { result: "The result" },
             };
 
-            const tool = new MockTool(
-                definition,
-                async (params) => ({ success: true, data: { result: params.value } }),
-            );
+            const tool = new MockTool(definition, async (params) => ({
+                success: true,
+                data: { result: (params as { value: string }).value },
+            }));
             registry.register(tool);
 
             const result = await registry.executeToolCall({
@@ -197,7 +207,12 @@ describe("ToolRegistry", () => {
                 returns: {},
             };
 
-            const tool = new MockTool(definition, async () => ({ success: true }));
+            // Create a schema that validates the value parameter
+            const schema = z.object({
+                value: z.string(),
+            });
+
+            const tool = new MockTool(definition, async () => ({ success: true }), schema);
             registry.register(tool);
 
             const result = await registry.executeToolCall({
@@ -206,7 +221,7 @@ describe("ToolRegistry", () => {
             });
 
             expect(result.success).toBe(false);
-            expect(result.error?.code).toBe("INVALID_PARAM");
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
         it("should return error when tool throws exception", async () => {
@@ -288,7 +303,10 @@ describe("ToolRegistry", () => {
 
             registry.register(new MockTool(def1, async () => ({ success: true })));
             registry.register(
-                new MockTool(def2, async () => ({ success: false, error: { code: "ERROR", message: "Error" } })),
+                new MockTool(def2, async () => ({
+                    success: false,
+                    error: { code: "ERROR", message: "Error" },
+                })),
             );
 
             const results = await registry.executeToolCalls([

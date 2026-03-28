@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 import { config as loadDotenv } from "dotenv";
-
 import * as fs from "fs";
 import * as path from "path";
 import { PassThrough, Writable } from "stream";
 import * as yaml from "yaml";
-import { startACPServer } from "./index";
+
 import type { DiogenesConfig } from "./types";
+
+import { startACPServer } from "./index";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
 import { ensureDefaultConfigFileSync } from "./utils/config-bootstrap";
 
@@ -83,11 +84,10 @@ function loadConfig(configPath: string): Partial<DiogenesConfig> {
     const content = fs.readFileSync(configPath, "utf-8");
     const ext = path.extname(configPath).toLowerCase();
 
-    if (ext === ".yaml" || ext === ".yml") {
-        return yaml.parse(content) as Partial<DiogenesConfig>;
-    }
-
-    return JSON.parse(content) as Partial<DiogenesConfig>;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const parsed: Partial<DiogenesConfig> =
+        ext === ".yaml" || ext === ".yml" ? yaml.parse(content) : JSON.parse(content);
+    return parsed;
 }
 
 function mergeConfig(
@@ -111,32 +111,33 @@ function mergeConfig(
             ...(base.security || {}),
             ...(override.security || {}),
         };
+        const security = merged.security;
         if (base.security?.interaction || override.security?.interaction) {
-            (merged.security as any).interaction = {
+            security.interaction = {
                 ...(base.security?.interaction || {}),
                 ...(override.security?.interaction || {}),
             };
         }
         if (base.security?.watch || override.security?.watch) {
-            (merged.security as any).watch = {
+            security.watch = {
                 ...(base.security?.watch || {}),
                 ...(override.security?.watch || {}),
             };
         }
         if (base.security?.shell || override.security?.shell) {
-            (merged.security as any).shell = {
+            security.shell = {
                 ...(base.security?.shell || {}),
                 ...(override.security?.shell || {}),
             };
         }
         if (base.security?.file || override.security?.file) {
-            (merged.security as any).file = {
+            security.file = {
                 ...(base.security?.file || {}),
                 ...(override.security?.file || {}),
             };
         }
         if (base.security?.snapshot || override.security?.snapshot) {
-            (merged.security as any).snapshot = {
+            security.snapshot = {
                 ...(base.security?.snapshot || {}),
                 ...(override.security?.snapshot || {}),
             };
@@ -178,13 +179,14 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
     }
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
+    const snapshotConfig = merged.security?.snapshot;
     merged.security = {
         ...(merged.security || {}),
         interaction: {
             enabled: false,
         },
         snapshot: {
-            ...((merged.security as any)?.snapshot || {}),
+            ...(snapshotConfig || {}),
             storageRoot: appPaths.sessionsDir,
         },
     };
@@ -192,15 +194,15 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
     return merged as DiogenesConfig;
 }
 
-function formatDebugChunk(streamName: "stdin" | "stdout" | "stderr", chunk: string | Buffer): string {
+function formatDebugChunk(
+    streamName: "stdin" | "stdout" | "stderr",
+    chunk: string | Buffer,
+): string {
     const content = Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : chunk;
     return `[${new Date().toISOString()}] ${streamName}\n${content}${content.endsWith("\n") ? "" : "\n"}`;
 }
 
-function createDebugInput(
-    input: NodeJS.ReadStream,
-    debugLog: fs.WriteStream,
-): NodeJS.ReadStream {
+function createDebugInput(input: NodeJS.ReadStream, debugLog: fs.WriteStream): PassThrough {
     const mirroredInput = new PassThrough();
 
     input.on("data", (chunk: string | Buffer) => {
@@ -210,17 +212,22 @@ function createDebugInput(
     input.on("end", () => mirroredInput.end());
     input.on("error", (error) => mirroredInput.destroy(error));
 
-    return mirroredInput as unknown as NodeJS.ReadStream;
+    return mirroredInput;
 }
 
 function createDebugOutput(
     output: NodeJS.WriteStream,
     debugLog: fs.WriteStream,
     streamName: "stdout" | "stderr",
-): NodeJS.WriteStream {
+): Writable {
     const mirroredOutput = new Writable({
-        write(chunk, encoding, callback) {
-            debugLog.write(formatDebugChunk(streamName, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding)));
+        write(chunk: Uint8Array | string, encoding: BufferEncoding, callback) {
+            const bufferChunk = Buffer.isBuffer(chunk)
+                ? chunk
+                : typeof chunk === "string"
+                  ? Buffer.from(chunk, encoding)
+                  : Buffer.from(chunk);
+            debugLog.write(formatDebugChunk(streamName, bufferChunk));
 
             output.write(chunk, encoding, (error) => {
                 if (error) {
@@ -232,7 +239,7 @@ function createDebugOutput(
         },
     });
 
-    return mirroredOutput as unknown as NodeJS.WriteStream;
+    return mirroredOutput;
 }
 
 export function createDebugStdio(
@@ -241,9 +248,9 @@ export function createDebugStdio(
     output: NodeJS.WriteStream,
     error: NodeJS.WriteStream,
 ): {
-    input: NodeJS.ReadStream;
-    output: NodeJS.WriteStream;
-    error: NodeJS.WriteStream;
+    input: PassThrough;
+    output: Writable;
+    error: Writable;
     debugLog: fs.WriteStream;
 } {
     const resolvedPath = path.resolve(filePath);
@@ -264,12 +271,17 @@ function main(): void {
     loadDotenv(options.envFile ? { path: options.envFile } : undefined);
     const config = createConfig(options);
 
-    let input: NodeJS.ReadStream = process.stdin;
-    let output: NodeJS.WriteStream = process.stdout;
-    let error: NodeJS.WriteStream = process.stderr;
+    let input: NodeJS.ReadStream | PassThrough = process.stdin;
+    let output: NodeJS.WriteStream | Writable = process.stdout;
+    let error: NodeJS.WriteStream | Writable = process.stderr;
 
     if (options.debugStdioFile) {
-        const debugStdio = createDebugStdio(options.debugStdioFile, input, output, error);
+        const debugStdio = createDebugStdio(
+            options.debugStdioFile,
+            process.stdin,
+            process.stdout,
+            process.stderr,
+        );
         input = debugStdio.input;
         output = debugStdio.output;
         error = debugStdio.error;

@@ -43,19 +43,21 @@ export type {
 // Types
 export * from "./types";
 import type { DiogenesConfig } from "./types";
+
 import { DiogenesContextManager } from "./context";
+import {
+    runTaskLoop,
+    type ConversationMessage,
+    type TaskRunEvent,
+    type TaskRunResult,
+} from "./runtime/task-runner";
 import { Logger, ConsoleLogger, ToolResultData } from "./utils/logger";
-import { runTaskLoop, type ConversationMessage, type TaskRunEvent, type TaskRunResult } from "./runtime/task-runner";
 export { createDiogenes } from "./create-diogenes";
 import { createDiogenes } from "./create-diogenes";
 
 // Re-export utility functions
 export { parseToolCalls, formatToolResults } from "./utils/tool-parser";
-export {
-    ResticClient,
-    ResticCommandError,
-    ResticParseError,
-} from "./utils/restic";
+export { ResticClient, ResticCommandError, ResticParseError } from "./utils/restic";
 export {
     resolveDiogenesAppPaths,
     ensureDiogenesAppDirs,
@@ -77,18 +79,10 @@ export type {
     ResticSnapshot,
     ResticCommandResult,
 } from "./utils/restic";
-export {
-    SessionSnapshotManager,
-    getDefaultSessionsStorageRoot,
-} from "./snapshot/manager";
+export { SessionSnapshotManager, getDefaultSessionsStorageRoot } from "./snapshot/manager";
 export { SnapshotManifestStore } from "./snapshot/manifest-store";
-export {
-    DiogenesStateSerializer,
-} from "./snapshot/state-serializer";
-export type {
-    SnapshotManager,
-    SnapshotManagerOptions,
-} from "./snapshot/manager";
+export { DiogenesStateSerializer } from "./snapshot/state-serializer";
+export type { SnapshotManager, SnapshotManagerOptions } from "./snapshot/manager";
 export type {
     SnapshotStateProvider,
     SnapshotStateRestorer,
@@ -163,7 +157,9 @@ export async function executeTask(
     const result = await runTaskLoop(diogenes, taskDescription, {
         maxIterations: options.maxIterations || 20,
         messageHistory: options.messageHistory,
-        onEvent: (event) => handleLoggerEvent(diogenes, logger, startTime, event),
+        onEvent: (event) => {
+            handleLoggerEvent(diogenes, logger, startTime, event);
+        },
     });
 
     return {
@@ -179,7 +175,7 @@ export async function executeTask(
 /**
  * Simple synchronous task execution with minimal logging
  */
-export function executeTaskSimple(
+export async function executeTaskSimple(
     taskDescription: string,
     config?: DiogenesConfig,
     logger?: Logger,
@@ -222,19 +218,28 @@ function handleLoggerEvent(
             }
             break;
         case "tool.execution.completed": {
-            if (event.result.data?._skipped) {
+            if (
+                event.result.data &&
+                typeof event.result.data === "object" &&
+                "_skipped" in event.result.data &&
+                event.result.data._skipped
+            ) {
                 break;
             }
+
+            const toolResult: ToolResultData = {
+                ...event.result,
+            };
 
             const tool = diogenes.getTool(event.toolCall.tool);
             if (tool) {
                 const formattedOutput = tool.formatResult(event.result);
                 if (formattedOutput !== undefined) {
-                    (event.result as ToolResultData).formattedOutput = formattedOutput;
+                    toolResult.formattedOutput = formattedOutput;
                 }
             }
 
-            logger.toolResult(event.toolCall.tool, event.result);
+            logger.toolResult(event.toolCall.tool, toolResult);
             break;
         }
         case "parse.error":
@@ -265,7 +270,11 @@ function handleLoggerEvent(
                 Date.now() - startTime,
             );
             break;
-        default:
+        case "tool.execution.started":
+            // No-op: Tool execution start is logged when it completes
+            break;
+        case "context.warning":
+            logger.warn(`Context warning: ${event.warning}`);
             break;
     }
 }

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
+
+import type {
+    ContextStatus,
+    DirectoryWorkspace,
+    FileWorkspace,
+    TodoWorkspace,
+    NotepadWorkspace,
+} from "../src/types";
+
 import { PromptBuilder } from "../src/context/prompt-builder";
-import type { ContextStatus, DirectoryWorkspace, FileWorkspace, TodoWorkspace, NotepadWorkspace } from "../src/types";
 
 describe("PromptBuilder", () => {
     const builder = new PromptBuilder("system prompt", 1000);

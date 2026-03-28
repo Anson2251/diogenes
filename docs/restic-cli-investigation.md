@@ -5,6 +5,7 @@ Date: 2026-03-26
 ## Overview
 
 Restic is a modern backup program that provides:
+
 - Encrypted, deduplicated backups
 - Incremental snapshots
 - Cross-platform support (Linux, BSD, macOS, Windows)
@@ -36,6 +37,7 @@ restic init --repo /path/to/repo --insecure-no-password
 ```
 
 **Important Notes:**
+
 - Password is required for all subsequent operations
 - Losing the password means data is irrecoverable
 - Repository is created with encryption by default
@@ -74,6 +76,7 @@ restic backup --json /path/to/backup
 ```
 
 **Output Example:**
+
 ```
 repository a14e5863 opened (version 2, compression level auto)
 using parent snapshot 40dc1520
@@ -88,6 +91,7 @@ snapshot 79766175 saved
 ```
 
 **Key Features:**
+
 - Deduplication: only stores new/changed data
 - Incremental: uses parent snapshot for change detection
 - Compression: automatic compression (repo version 2)
@@ -121,6 +125,7 @@ restic snapshots --compact
 ```
 
 **JSON Output Example:**
+
 ```json
 [
   {
@@ -171,6 +176,7 @@ restic restore <snapshot-id> --target /path/to/restore --verbose=2
 ```
 
 **Important Notes:**
+
 - Default behavior: overwrites existing files at target
 - `--delete`: removes files not in snapshot (dangerous!)
 - `--dry-run`: preview changes without writing
@@ -215,6 +221,7 @@ Understanding exit codes is important for error handling:
 - `3`: Partial success (incomplete snapshot created)
 
 **Example handling:**
+
 ```bash
 restic backup /path/to/backup
 EXIT_CODE=$?
@@ -303,6 +310,7 @@ rm -rf "/tmp/diogenes-snapshots/$SESSION_ID"
 ### 1. Password Management
 
 **Option A: Random Password (Recommended for Sessions)**
+
 ```bash
 # Generate random password
 PASSWORD=$(openssl rand -base64 32)
@@ -313,6 +321,7 @@ export RESTIC_PASSWORD="$PASSWORD"
 ```
 
 **Option B: Empty Password (Insecure but Simple)**
+
 ```bash
 # Use --insecure-no-password flag
 restic init --insecure-no-password
@@ -389,43 +398,43 @@ interface ResticClient {
 class ResticClientImpl implements ResticClient {
   private repoPath: string;
   private passwordFile: string;
-  
+
   constructor(repoPath: string, passwordFile: string) {
     this.repoPath = repoPath;
     this.passwordFile = passwordFile;
   }
-  
+
   async initRepo(): Promise<void> {
     await exec(`restic init --repo "${this.repoPath}" --password-file "${this.passwordFile}"`);
   }
-  
+
   async backup(params: BackupParams): Promise<{ snapshotId: string }> {
-    const tags = params.tags?.map(t => `--tag "${t}"`).join(' ') || '';
-    const excludes = params.exclude?.map(e => `--exclude "${e}"`).join(' ') || '';
-    const skip = params.skipIfUnchanged ? '--skip-if-unchanged' : '';
-    
+    const tags = params.tags?.map((t) => `--tag "${t}"`).join(" ") || "";
+    const excludes = params.exclude?.map((e) => `--exclude "${e}"`).join(" ") || "";
+    const skip = params.skipIfUnchanged ? "--skip-if-unchanged" : "";
+
     const output = await exec(
       `restic backup --repo "${this.repoPath}" --password-file "${this.passwordFile}" ` +
-      `--json --quiet ${tags} ${excludes} ${skip} ${params.paths.join(' ')}`
+        `--json --quiet ${tags} ${excludes} ${skip} ${params.paths.join(" ")}`,
     );
-    
+
     const result = JSON.parse(output);
     return { snapshotId: result.snapshot_id };
   }
-  
+
   async snapshots(params?: SnapshotParams): Promise<SnapshotInfo[]> {
     const cmd = `restic snapshots --repo "${this.repoPath}" --password-file "${this.passwordFile}" --json`;
     const output = await exec(cmd);
     return JSON.parse(output);
   }
-  
+
   async restore(params: RestoreParams): Promise<void> {
-    const includes = params.include?.map(i => `--include "${i}"`).join(' ') || '';
-    const excludes = params.exclude?.map(e => `--exclude "${e}"`).join(' ') || '';
-    
+    const includes = params.include?.map((i) => `--include "${i}"`).join(" ") || "";
+    const excludes = params.exclude?.map((e) => `--exclude "${e}"`).join(" ") || "";
+
     await exec(
       `restic restore --repo "${this.repoPath}" --password-file "${this.passwordFile}" ` +
-      `"${params.snapshotId}" --target "${params.target}" ${includes} ${excludes}`
+        `"${params.snapshotId}" --target "${params.target}" ${includes} ${excludes}`,
     );
   }
 }
@@ -438,7 +447,7 @@ class ResticError extends Error {
   constructor(
     public exitCode: number,
     public stderr: string,
-    public command: string
+    public command: string,
   ) {
     super(`Restic command failed: ${command}`);
   }
@@ -451,10 +460,10 @@ async function safeBackup(backupFn: () => Promise<void>): Promise<void> {
     if (error instanceof ResticError) {
       if (error.exitCode === 1) {
         // Fatal error - reject the prompt
-        throw new Error('Snapshot creation failed - prompt rejected for safety');
+        throw new Error("Snapshot creation failed - prompt rejected for safety");
       } else if (error.exitCode === 3) {
         // Partial success - log warning but continue
-        console.warn('Snapshot created with warnings - some files unreadable');
+        console.warn("Snapshot created with warnings - some files unreadable");
       }
     }
     throw error;

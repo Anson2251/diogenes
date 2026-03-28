@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
 import { WorkspaceManager } from "../src/context/workspace";
 import { FilePeekTool } from "../src/tools/file/file-peek";
 
@@ -23,11 +24,7 @@ describe("FilePeekTool", () => {
         );
         fs.writeFileSync(ignoredFilePath, "top secret", "utf-8");
         fs.writeFileSync(ignoredNestedFilePath, "hidden content", "utf-8");
-        fs.writeFileSync(
-            path.join(testDir, ".gitignore"),
-            "secret.txt\nignored-dir/\n",
-            "utf-8",
-        );
+        fs.writeFileSync(path.join(testDir, ".gitignore"), "secret.txt\nignored-dir/\n", "utf-8");
         workspace = new WorkspaceManager(testDir);
         tool = new FilePeekTool(workspace);
     });

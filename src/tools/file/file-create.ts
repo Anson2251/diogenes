@@ -1,15 +1,20 @@
 import * as fs from "fs";
 import * as path from "path";
-import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { z } from "zod";
+
 import { WorkspaceManager } from "../../context/workspace";
+import { ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
 
-interface FileCreateParams {
-    path: string;
-    content: string | string[];
-}
+const fileCreateSchema = z.object({
+    path: z.string(),
+    content: z.union([z.string(), z.array(z.string())]),
+});
 
-export class FileCreateTool extends BaseTool {
+type FileCreateParams = z.infer<typeof fileCreateSchema>;
+
+export class FileCreateTool extends BaseTool<typeof fileCreateSchema> {
+    protected schema = fileCreateSchema;
     private workspace: WorkspaceManager;
     private workspaceRoot: string;
 
@@ -26,8 +31,9 @@ Use this when the file does not exist yet.
             params: {
                 path: { type: "string", description: "New file path" },
                 content: {
-                    type: "content",
-                    description: "Full file content. Prefer {\"$heredoc\":\"EOF\"} for multi-line content.",
+                    type: "string",
+                    description:
+                        'Full file content. Prefer {"$heredoc":"EOF"} for multi-line content.',
                 },
             },
             returns: {
@@ -40,18 +46,8 @@ Use this when the file does not exist yet.
         this.workspaceRoot = workspace.getWorkspaceRoot();
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for file.create",
-                { errors: validation.errors },
-                "Provide a path and file content",
-            );
-        }
-
-        const { path: filePath, content } = validation.data as FileCreateParams;
+    async run(params: FileCreateParams): Promise<ToolResult> {
+        const { path: filePath, content } = params;
 
         try {
             const absolutePath = this.resolvePath(filePath);
@@ -79,19 +75,52 @@ Use this when the file does not exist yet.
             const serialized = lines.join("\n");
             await fs.promises.writeFile(absolutePath, serialized, "utf-8");
 
-            const workspaceUpdate = existingEntry
-                ? await this.workspace.reloadFileWithRangesContent(filePath, serialized, existingEntry.ranges)
-                : undefined;
+            let workspaceUpdateResult = undefined;
+            if (
+                existingEntry !== undefined &&
+                existingEntry !== null &&
+                typeof existingEntry === "object"
+            ) {
+                if ("ranges" in existingEntry && Array.isArray(existingEntry.ranges)) {
+                    const rangesSchema = z.array(z.object({ start: z.number(), end: z.number() }));
+                    const rangesParsed = rangesSchema.safeParse(existingEntry.ranges);
+                    if (rangesParsed.success) {
+                        workspaceUpdateResult = this.workspace.reloadFileWithRangesContent(
+                            filePath,
+                            serialized,
+                            rangesParsed.data,
+                        );
+                    }
+                }
+            }
+
+            let workspaceUpdate = undefined;
+            if (
+                workspaceUpdateResult !== undefined &&
+                workspaceUpdateResult !== null &&
+                typeof workspaceUpdateResult === "object"
+            ) {
+                const wsResult = workspaceUpdateResult;
+                const rangesValue = "ranges" in wsResult ? wsResult.ranges : undefined;
+                const contentValue = "content" in wsResult ? wsResult.content : undefined;
+                const rangesArray = Array.isArray(rangesValue) ? rangesValue : [];
+                const contentIsObj = contentValue !== null && typeof contentValue === "object";
+                const contentObj = contentIsObj ? contentValue : undefined;
+                const lengthValue =
+                    contentObj !== undefined && "length" in contentObj
+                        ? contentObj.length
+                        : undefined;
+                const lengthNum = typeof lengthValue === "number" ? lengthValue : 0;
+                workspaceUpdate = {
+                    loaded_ranges: rangesArray,
+                    total_lines_in_workspace: lengthNum,
+                };
+            }
 
             return this.success({
                 path: filePath,
                 total_lines: lines.length,
-                workspace_update: workspaceUpdate
-                    ? {
-                        loaded_ranges: workspaceUpdate.ranges,
-                        total_lines_in_workspace: workspaceUpdate.content.length,
-                    }
-                    : undefined,
+                workspace_update: workspaceUpdate,
                 _diff: {
                     path: absolutePath,
                     oldText: null,
@@ -109,41 +138,28 @@ Use this when the file does not exist yet.
     }
 
     formatResult(result: ToolResult): string | undefined {
-        if (result.success && result.data) {
+        if (
+            result.success &&
+            result.data &&
+            typeof result.data.path === "string" &&
+            typeof result.data.total_lines === "number"
+        ) {
             return `\x1b[32m\x1b[1m✓\x1b[0m Created ${result.data.path} (${result.data.total_lines} lines)`;
         }
         return undefined;
-    }
-
-    validateParams(params: unknown): { valid: boolean; errors: string[]; data?: unknown } {
-        const base = super.validateParams(params);
-        if (!base.valid || !base.data) {
-            return base;
-        }
-
-        const data = base.data as FileCreateParams;
-        const errors: string[] = [];
-
-        if (!this.isSupportedContent(data.content)) {
-            errors.push("content: Expected string or array of strings");
-        }
-
-        if (errors.length > 0) {
-            return { valid: false, errors };
-        }
-
-        return { valid: true, errors: [], data };
-    }
-
-    private isSupportedContent(content: unknown): content is string | string[] {
-        return typeof content === "string" ||
-            (Array.isArray(content) && content.every((line) => typeof line === "string"));
     }
 
     private validateContent(content: unknown): asserts content is string | string[] {
         if (!this.isSupportedContent(content)) {
             throw new Error("Content must be a string or array of strings");
         }
+    }
+
+    private isSupportedContent(content: unknown): content is string | string[] {
+        return (
+            typeof content === "string" ||
+            (Array.isArray(content) && content.every((line) => typeof line === "string"))
+        );
     }
 
     private normalizeContent(content: string | string[]): string[] {
@@ -156,9 +172,7 @@ Use this when the file does not exist yet.
             : path.resolve(this.workspaceRoot, inputPath);
         const relative = path.relative(this.workspaceRoot, resolved);
         if (relative.startsWith("..") || relative === "..") {
-            throw new Error(
-                `Path ${resolved} is outside workspace root ${this.workspaceRoot}`,
-            );
+            throw new Error(`Path ${resolved} is outside workspace root ${this.workspaceRoot}`);
         }
         return resolved;
     }

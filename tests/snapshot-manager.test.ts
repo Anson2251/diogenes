@@ -2,12 +2,13 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ACPServer } from "../src/acp/server";
 import { SessionManager } from "../src/acp/session-manager";
+import { createDiogenes } from "../src/create-diogenes";
 import { OpenAIClient } from "../src/llm/openai-client";
 import { SessionSnapshotManager } from "../src/snapshot/manager";
-import { ACPServer } from "../src/acp/server";
 import * as appPaths from "../src/utils/app-paths";
-import { createDiogenes } from "../src/create-diogenes";
 
 async function createTempDir(): Promise<string> {
     return fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-"));
@@ -41,10 +42,18 @@ describe("SessionSnapshotManager", () => {
 
         await fs.mkdir(workspaceDir, { recursive: true });
         await fs.writeFile(path.join(workspaceDir, "hello.txt"), "hello\n", "utf8");
-        await fs.writeFile(path.join(workspaceDir, ".gitignore"), "secret.txt\nignored-dir/\n", "utf8");
+        await fs.writeFile(
+            path.join(workspaceDir, ".gitignore"),
+            "secret.txt\nignored-dir/\n",
+            "utf8",
+        );
         await fs.writeFile(path.join(workspaceDir, "secret.txt"), "hidden\n", "utf8");
         await fs.mkdir(path.join(workspaceDir, "ignored-dir"), { recursive: true });
-        await fs.writeFile(path.join(workspaceDir, "ignored-dir", "hidden.txt"), "hidden\n", "utf8");
+        await fs.writeFile(
+            path.join(workspaceDir, "ignored-dir", "hidden.txt"),
+            "hidden\n",
+            "utf8",
+        );
 
         return {
             rootDir,
@@ -67,8 +76,8 @@ describe("SessionSnapshotManager", () => {
         await workspace.loadFile("hello.txt", 1, 1);
         workspace.setTodoItems([{ text: "Inspect snapshot", state: "active" }]);
         workspace.setNotepadLines(["remember this"]);
-            const manager = new SessionSnapshotManager({
-                sessionId: "session-1",
+        const manager = new SessionSnapshotManager({
+            sessionId: "session-1",
             cwd: fixture.workspaceDir,
             config: {
                 enabled: true,
@@ -109,21 +118,32 @@ describe("SessionSnapshotManager", () => {
             ]);
 
             const manifest = JSON.parse(
-                await fs.readFile(path.join(fixture.storageRoot, "session-1", "snapshots", "manifest.json"), "utf8"),
+                await fs.readFile(
+                    path.join(fixture.storageRoot, "session-1", "snapshots", "manifest.json"),
+                    "utf8",
+                ),
             );
             expect(manifest.snapshots).toHaveLength(1);
-            expect(manifest.snapshots[0].diogenesStatePath).toContain(path.join("state", `${snapshot.snapshotId}.json`));
+            expect(manifest.snapshots[0].diogenesStatePath).toContain(
+                path.join("state", `${snapshot.snapshotId}.json`),
+            );
 
-            const state = JSON.parse(await fs.readFile(manifest.snapshots[0].diogenesStatePath, "utf8"));
-            expect(state).toEqual(expect.objectContaining({
-                kind: "diogenes_state",
-                sessionId: "session-1",
-                cwd: fixture.workspaceDir,
-                acpReplayLog: [],
-                messageHistory: [{ role: "assistant", content: "Earlier summary" }],
-            }));
+            const state = JSON.parse(
+                await fs.readFile(manifest.snapshots[0].diogenesStatePath, "utf8"),
+            );
+            expect(state).toEqual(
+                expect.objectContaining({
+                    kind: "diogenes_state",
+                    sessionId: "session-1",
+                    cwd: fixture.workspaceDir,
+                    acpReplayLog: [],
+                    messageHistory: [{ role: "assistant", content: "Earlier summary" }],
+                }),
+            );
             expect(state.workspace.loadedDirectories).toEqual(["."]);
-            expect(state.workspace.loadedFiles).toEqual([{ path: "hello.txt", ranges: [{ start: 1, end: 1 }] }]);
+            expect(state.workspace.loadedFiles).toEqual([
+                { path: "hello.txt", ranges: [{ start: 1, end: 1 }] },
+            ]);
             expect(state.workspace.todo).toEqual([{ text: "Inspect snapshot", state: "active" }]);
             expect(state.workspace.notepad).toEqual(["remember this"]);
 
@@ -131,15 +151,19 @@ describe("SessionSnapshotManager", () => {
             expect(entries[0].args).toEqual(["init"]);
             expect(entries[1].args).toContain("backup");
             expect(entries[1].args).toContain("workspace");
-            expect(entries[1].args).toEqual(expect.arrayContaining([
-                "--exclude",
-                "workspace/secret.txt",
-                "--exclude",
-                "workspace/ignored-dir",
-            ]));
+            expect(entries[1].args).toEqual(
+                expect.arrayContaining([
+                    "--exclude",
+                    "workspace/secret.txt",
+                    "--exclude",
+                    "workspace/ignored-dir",
+                ]),
+            );
 
             await manager.cleanup();
-            await expect(fs.access(path.join(fixture.storageRoot, "session-1", "snapshots"))).rejects.toThrow();
+            await expect(
+                fs.access(path.join(fixture.storageRoot, "session-1", "snapshots")),
+            ).rejects.toThrow();
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }
@@ -178,7 +202,9 @@ describe("SessionSnapshotManager", () => {
             },
             stateProvider: {
                 getWorkspaceManager: () => workspace,
-                getMessageHistory: () => [{ role: "assistant", content: "captured before restore" }],
+                getMessageHistory: () => [
+                    { role: "assistant", content: "captured before restore" },
+                ],
                 getCreatedAt: () => "2026-03-26T00:00:00.000Z",
                 getUpdatedAt: () => "2026-03-26T00:01:00.000Z",
                 getSnapshotMetadata: () => sessionState,
@@ -204,14 +230,20 @@ describe("SessionSnapshotManager", () => {
             await fs.writeFile(path.join(fixture.workspaceDir, "hello.txt"), "mutated\n", "utf8");
             await manager.restoreSnapshot({ snapshotId: snapshot.snapshotId });
 
-            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe("restored from snapshot\n");
-            expect(restoredState).toEqual(expect.objectContaining({
-                kind: "diogenes_state",
-                metadata: sessionState,
-                acpReplayLog: [],
-                messageHistory: [{ role: "assistant", content: "captured before restore" }],
-            }));
-            expect(restoredState.workspace.todo).toEqual([{ text: "before restore", state: "active" }]);
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe(
+                "restored from snapshot\n",
+            );
+            expect(restoredState).toEqual(
+                expect.objectContaining({
+                    kind: "diogenes_state",
+                    metadata: sessionState,
+                    acpReplayLog: [],
+                    messageHistory: [{ role: "assistant", content: "captured before restore" }],
+                }),
+            );
+            expect(restoredState.workspace.todo).toEqual([
+                { text: "before restore", state: "active" },
+            ]);
             expect(restoredState.workspace.notepad).toEqual(["keep me"]);
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
@@ -235,7 +267,10 @@ describe("SessionSnapshotManager", () => {
                 timeoutMs: 5_000,
             },
             stateProvider: {
-                getWorkspaceManager: () => createDiogenes({ security: { workspaceRoot: fixture.workspaceDir } }).getWorkspaceManager(),
+                getWorkspaceManager: () =>
+                    createDiogenes({
+                        security: { workspaceRoot: fixture.workspaceDir },
+                    }).getWorkspaceManager(),
                 getMessageHistory: () => [],
                 getCreatedAt: () => "2026-03-26T00:00:00.000Z",
                 getUpdatedAt: () => "2026-03-26T00:01:00.000Z",
@@ -258,9 +293,17 @@ describe("SessionSnapshotManager", () => {
                 label: "rollback-point",
             });
 
-            await fs.writeFile(path.join(fixture.workspaceDir, "hello.txt"), "local mutation\n", "utf8");
-            await expect(manager.restoreSnapshot({ snapshotId: snapshot.snapshotId })).rejects.toThrow("rehydrate failed");
-            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe("local mutation\n");
+            await fs.writeFile(
+                path.join(fixture.workspaceDir, "hello.txt"),
+                "local mutation\n",
+                "utf8",
+            );
+            await expect(
+                manager.restoreSnapshot({ snapshotId: snapshot.snapshotId }),
+            ).rejects.toThrow("rehydrate failed");
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe(
+                "local mutation\n",
+            );
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;
@@ -292,7 +335,8 @@ describe("SessionSnapshotManager", () => {
         );
 
         vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
-            content: '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"ok"}}]\n```',
+            content:
+                '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"ok"}}]\n```',
             reasoning: "",
         });
 
@@ -302,7 +346,12 @@ describe("SessionSnapshotManager", () => {
             expect(session.sessionId).toMatch(/^[0-9a-f-]{36}$/i);
             await session.prompt([{ type: "text", text: "Take a snapshot first" }]);
 
-            const manifestPath = path.join(fixture.storageRoot, session.sessionId, "snapshots", "manifest.json");
+            const manifestPath = path.join(
+                fixture.storageRoot,
+                session.sessionId,
+                "snapshots",
+                "manifest.json",
+            );
             const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
             expect(manifest.snapshots).toHaveLength(1);
             expect(manifest.snapshots[0]).toEqual(
@@ -315,10 +364,16 @@ describe("SessionSnapshotManager", () => {
 
             const entries = await readInvocationLog(fixture.logPath);
             expect(entries.map((entry) => entry.args[0])).toEqual(["init", "backup"]);
-            await expect(fs.access(path.join(maliciousStorageRoot, session.sessionId))).rejects.toThrow();
+            await expect(
+                fs.access(path.join(maliciousStorageRoot, session.sessionId)),
+            ).rejects.toThrow();
 
             await manager.closeSession(session.sessionId);
-            await expect(fs.access(path.join(fixture.storageRoot, session.sessionId, "snapshots", "manifest.json"))).resolves.toBeUndefined();
+            await expect(
+                fs.access(
+                    path.join(fixture.storageRoot, session.sessionId, "snapshots", "manifest.json"),
+                ),
+            ).resolves.toBeUndefined();
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }
@@ -347,7 +402,8 @@ describe("SessionSnapshotManager", () => {
         );
 
         vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
-            content: '```tool-call\n[{"tool":"snapshot.create","params":{"label":"before-risky-edit","reason":"checkpoint"}},{"tool":"task.end","params":{"reason":"done","summary":"ok"}}]\n```',
+            content:
+                '```tool-call\n[{"tool":"snapshot.create","params":{"label":"before-risky-edit","reason":"checkpoint"}},{"tool":"task.end","params":{"reason":"done","summary":"ok"}}]\n```',
             reasoning: "",
         });
 
@@ -357,7 +413,12 @@ describe("SessionSnapshotManager", () => {
             expect((session as any).diogenes.getTool("snapshot.create")).toBeDefined();
             await session.prompt([{ type: "text", text: "Create a checkpoint" }]);
 
-            const manifestPath = path.join(fixture.storageRoot, session.sessionId, "snapshots", "manifest.json");
+            const manifestPath = path.join(
+                fixture.storageRoot,
+                session.sessionId,
+                "snapshots",
+                "manifest.json",
+            );
             const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
             expect(manifest.snapshots).toHaveLength(2);
             expect(manifest.snapshots[0].trigger).toBe("before_prompt");
@@ -369,15 +430,25 @@ describe("SessionSnapshotManager", () => {
                 }),
             );
 
-            const manualState = JSON.parse(await fs.readFile(manifest.snapshots[1].diogenesStatePath, "utf8"));
+            const manualState = JSON.parse(
+                await fs.readFile(manifest.snapshots[1].diogenesStatePath, "utf8"),
+            );
             expect(manualState.messageHistory).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({ role: "user" }),
                     expect.objectContaining({ role: "assistant" }),
                 ]),
             );
-            expect(manualState.messageHistory.some((message: any) => String(message.content).includes("Create a checkpoint"))).toBe(true);
-            expect(manualState.messageHistory.some((message: any) => String(message.content).includes("snapshot.create"))).toBe(true);
+            expect(
+                manualState.messageHistory.some((message: any) =>
+                    String(message.content).includes("Create a checkpoint"),
+                ),
+            ).toBe(true);
+            expect(
+                manualState.messageHistory.some((message: any) =>
+                    String(message.content).includes("snapshot.create"),
+                ),
+            ).toBe(true);
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }
@@ -420,16 +491,19 @@ describe("SessionSnapshotManager", () => {
                 params: { cwd: fixture.workspaceDir },
             });
 
-            const sessionId = sessionNew && "result" in sessionNew ? sessionNew.result.sessionId as string : "";
+            const sessionId =
+                sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
 
             await new Promise((resolve) => setTimeout(resolve, 20));
 
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "available_commands_update"
-                        && item.params.update.availableCommands.some(
-                            (command: any) => command.name === "snapshot"
-                                && command._meta?.diogenes?.example === "/snapshot before-risky-edit",
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "available_commands_update" &&
+                        item.params.update.availableCommands.some(
+                            (command: any) =>
+                                command.name === "snapshot" &&
+                                command._meta?.diogenes?.example === "/snapshot before-risky-edit",
                         ),
                 ),
             ).toBe(true);
@@ -451,17 +525,23 @@ describe("SessionSnapshotManager", () => {
                 },
             });
 
-            expect(response && "result" in response ? response.result.stopReason : null).toBe("end_turn");
+            expect(response && "result" in response ? response.result.stopReason : null).toBe(
+                "end_turn",
+            );
             expect(
                 notifications.some(
-                    (item) => item.params?.update?.sessionUpdate === "agent_message_chunk"
-                        && typeof item.params.update.content?.text === "string"
-                        && item.params.update.content.text.includes("manual-checkpoint"),
+                    (item) =>
+                        item.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                        typeof item.params.update.content?.text === "string" &&
+                        item.params.update.content.text.includes("manual-checkpoint"),
                 ),
             ).toBe(true);
 
             const manifest = JSON.parse(
-                await fs.readFile(path.join(fixture.storageRoot, sessionId, "snapshots", "manifest.json"), "utf8"),
+                await fs.readFile(
+                    path.join(fixture.storageRoot, sessionId, "snapshots", "manifest.json"),
+                    "utf8",
+                ),
             );
             expect(manifest.snapshots).toHaveLength(1);
             expect(manifest.snapshots[0]).toEqual(
@@ -472,9 +552,19 @@ describe("SessionSnapshotManager", () => {
                 }),
             );
 
-            const slashState = JSON.parse(await fs.readFile(manifest.snapshots[0].diogenesStatePath, "utf8"));
-            expect(slashState.messageHistory.some((message: any) => String(message.content).includes("/snapshot manual-checkpoint"))).toBe(true);
-            expect(slashState.messageHistory.some((message: any) => String(message.content).includes("file:///tmp/example.txt"))).toBe(true);
+            const slashState = JSON.parse(
+                await fs.readFile(manifest.snapshots[0].diogenesStatePath, "utf8"),
+            );
+            expect(
+                slashState.messageHistory.some((message: any) =>
+                    String(message.content).includes("/snapshot manual-checkpoint"),
+                ),
+            ).toBe(true);
+            expect(
+                slashState.messageHistory.some((message: any) =>
+                    String(message.content).includes("file:///tmp/example.txt"),
+                ),
+            ).toBe(true);
 
             const entries = await readInvocationLog(fixture.logPath);
             expect(entries.filter((entry) => entry.args.includes("backup"))).toHaveLength(1);
@@ -520,11 +610,9 @@ describe("SessionSnapshotManager", () => {
             const backupEntries = entries.filter((entry) => entry.args.includes("backup"));
             expect(backupEntries).toHaveLength(2);
             expect(backupEntries[0].args).toContain("--skip-if-unchanged");
-            expect(backupEntries[1].args).toEqual(expect.arrayContaining([
-                "--parent",
-                "abc123def456",
-                "--skip-if-unchanged",
-            ]));
+            expect(backupEntries[1].args).toEqual(
+                expect.arrayContaining(["--parent", "abc123def456", "--skip-if-unchanged"]),
+            );
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
         }
@@ -559,9 +647,17 @@ describe("SessionSnapshotManager", () => {
         });
 
         // Create additional gitignored files that should be preserved
-        await fs.writeFile(path.join(fixture.workspaceDir, "secret.txt"), "original-secret\n", "utf8");
+        await fs.writeFile(
+            path.join(fixture.workspaceDir, "secret.txt"),
+            "original-secret\n",
+            "utf8",
+        );
         await fs.mkdir(path.join(fixture.workspaceDir, "ignored-dir"), { recursive: true });
-        await fs.writeFile(path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"), "original-hidden\n", "utf8");
+        await fs.writeFile(
+            path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"),
+            "original-hidden\n",
+            "utf8",
+        );
 
         process.env.FAKE_RESTIC_LOG = fixture.logPath;
         process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(fixture.workspaceDir);
@@ -578,20 +674,39 @@ describe("SessionSnapshotManager", () => {
             await fs.writeFile(path.join(fixture.workspaceDir, "hello.txt"), "mutated\n", "utf8");
 
             // Mutate gitignored file (should be preserved during restore)
-            await fs.writeFile(path.join(fixture.workspaceDir, "secret.txt"), "modified-secret\n", "utf8");
-            await fs.writeFile(path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"), "modified-hidden\n", "utf8");
+            await fs.writeFile(
+                path.join(fixture.workspaceDir, "secret.txt"),
+                "modified-secret\n",
+                "utf8",
+            );
+            await fs.writeFile(
+                path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"),
+                "modified-hidden\n",
+                "utf8",
+            );
 
             await manager.restoreSnapshot({ snapshotId: snapshot.snapshotId });
 
             // Non-gitignored file should be restored
-            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe("restored from snapshot\n");
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "hello.txt"), "utf8")).toBe(
+                "restored from snapshot\n",
+            );
 
             // Gitignored files should be preserved (not restored, not deleted)
-            expect(await fs.readFile(path.join(fixture.workspaceDir, "secret.txt"), "utf8")).toBe("modified-secret\n");
-            expect(await fs.readFile(path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"), "utf8")).toBe("modified-hidden\n");
+            expect(await fs.readFile(path.join(fixture.workspaceDir, "secret.txt"), "utf8")).toBe(
+                "modified-secret\n",
+            );
+            expect(
+                await fs.readFile(
+                    path.join(fixture.workspaceDir, "ignored-dir", "hidden.txt"),
+                    "utf8",
+                ),
+            ).toBe("modified-hidden\n");
 
             // Gitignored directory should still exist
-            await expect(fs.access(path.join(fixture.workspaceDir, "ignored-dir"))).resolves.toBeUndefined();
+            await expect(
+                fs.access(path.join(fixture.workspaceDir, "ignored-dir")),
+            ).resolves.toBeUndefined();
         } finally {
             delete process.env.FAKE_RESTIC_LOG;
             delete process.env.FAKE_RESTIC_RESTORE_ROOTNAME;

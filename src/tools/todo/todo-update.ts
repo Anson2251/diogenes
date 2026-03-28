@@ -2,13 +2,25 @@
  * Todo update tool
  */
 
-import { BaseTool } from "../base-tool";
+import { z } from "zod";
+
+import type { WorkspaceManager } from "../../context/workspace";
+
 import { ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
 
-export class TodoUpdateTool extends BaseTool {
-    private workspace: any;
+const todoUpdateSchema = z.object({
+    text: z.string(),
+    state: z.enum(["done", "active", "pending"]),
+});
 
-    constructor(workspace: any) {
+type TodoUpdateParams = z.infer<typeof todoUpdateSchema>;
+
+export class TodoUpdateTool extends BaseTool<typeof todoUpdateSchema> {
+    protected schema = todoUpdateSchema;
+    private workspace: WorkspaceManager;
+
+    constructor(workspace: WorkspaceManager) {
         super({
             namespace: "todo",
             name: "update",
@@ -30,32 +42,10 @@ export class TodoUpdateTool extends BaseTool {
         this.workspace = workspace;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for todo.update",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
+    run(params: TodoUpdateParams): ToolResult {
+        const { text, state } = params;
 
-        const { text, state } = validation.data as {
-            text: string;
-            state: string;
-        };
-
-        if (!["done", "active", "pending"].includes(state)) {
-            return this.error(
-                "INVALID_STATE",
-                `Invalid state: ${state}`,
-                { state },
-                'State must be "done", "active", or "pending"',
-            );
-        }
-
-        const success = this.workspace.updateTodoItem(text, state as any);
+        const success = this.workspace.updateTodoItem(text, state);
 
         if (success) {
             return this.success({ success: true, text, state });
@@ -70,8 +60,14 @@ export class TodoUpdateTool extends BaseTool {
     }
 
     formatResult(result: ToolResult): string | undefined {
-        if (result.success && result.data) {
-            const { text, state } = result.data as { text: string; state: string };
+        if (
+            result.success &&
+            result.data &&
+            typeof result.data.text === "string" &&
+            typeof result.data.state === "string"
+        ) {
+            const text = result.data.text;
+            const state = result.data.state;
             const stateIcon = state === "done" ? "✓" : state === "active" ? "→" : "○";
             return `\x1b[32m\x1b[1m${stateIcon}\x1b[0m "${text}" → ${state}`;
         }

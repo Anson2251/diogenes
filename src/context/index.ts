@@ -2,12 +2,19 @@
  * Main context manager for Diogenes framework
  */
 
-import { WorkspaceManager } from "./workspace";
-import { PromptBuilder } from "./prompt-builder";
+import { z } from "zod";
+
+import {
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_SECURITY_CONFIG,
+    DEFAULT_LLM_CONFIG,
+    DEFAULT_LOGGER_CONFIG,
+    DEFAULT_TOKEN_LIMIT,
+    getContextWindowForModel,
+} from "../config/default-prompts";
+import { OpenAIClient, StreamChunk } from "../llm/openai-client";
 import { ToolRegistry } from "../tools";
 import { BaseTool } from "../tools/base-tool";
-import { OpenAIClient, StreamChunk } from "../llm/openai-client";
-
 import {
     DiogenesConfig,
     DiogenesState,
@@ -17,14 +24,8 @@ import {
     LLMConfig,
 } from "../types";
 import { parseToolCalls, formatToolResults } from "../utils/tool-parser";
-import {
-    DEFAULT_SYSTEM_PROMPT,
-    DEFAULT_SECURITY_CONFIG,
-    DEFAULT_LLM_CONFIG,
-    DEFAULT_LOGGER_CONFIG,
-    DEFAULT_TOKEN_LIMIT,
-    getContextWindowForModel,
-} from "../config/default-prompts";
+import { PromptBuilder } from "./prompt-builder";
+import { WorkspaceManager } from "./workspace";
 
 export class DiogenesContextManager {
     private config: Required<DiogenesConfig>;
@@ -33,24 +34,19 @@ export class DiogenesContextManager {
     private toolRegistry: ToolRegistry;
     private state: DiogenesState;
     private llmClient: OpenAIClient | null = null;
-    private task: string = ""
+    private task: string = "";
 
     constructor(config: DiogenesConfig = {}) {
         this.config = this.mergeWithDefaults(config);
         if (!this.config.security.workspaceRoot) {
             throw new Error("Workspace root cannot be empty");
         }
-        this.workspace = new WorkspaceManager(
-            this.config.security.workspaceRoot,
-            {
-                enabled: this.config.security.watch?.enabled ?? DEFAULT_SECURITY_CONFIG.watch.enabled,
-                debounceMs: this.config.security.watch?.debounceMs ?? DEFAULT_SECURITY_CONFIG.watch.debounceMs,
-            },
-        );
-        this.promptBuilder = new PromptBuilder(
-            this.config.systemPrompt,
-            this.config.tokenLimit,
-        );
+        this.workspace = new WorkspaceManager(this.config.security.workspaceRoot, {
+            enabled: this.config.security.watch?.enabled ?? DEFAULT_SECURITY_CONFIG.watch.enabled,
+            debounceMs:
+                this.config.security.watch?.debounceMs ?? DEFAULT_SECURITY_CONFIG.watch.debounceMs,
+        });
+        this.promptBuilder = new PromptBuilder(this.config.systemPrompt, this.config.tokenLimit);
         this.toolRegistry = new ToolRegistry();
         this.state = this.initializeState();
 
@@ -65,13 +61,16 @@ export class DiogenesContextManager {
         }
     }
 
-    private mergeWithDefaults(
-        config: DiogenesConfig,
-    ): Required<DiogenesConfig> {
+    private mergeWithDefaults(config: DiogenesConfig): Required<DiogenesConfig> {
         const model = config.llm?.model || DEFAULT_LLM_CONFIG.model;
         const modelContextWindow = getContextWindowForModel(model);
         const tokenLimit = config.tokenLimit || modelContextWindow || DEFAULT_TOKEN_LIMIT;
-        
+
+        const llmConfig: LLMConfig = {
+            ...DEFAULT_LLM_CONFIG,
+            ...config.llm,
+        };
+
         return {
             systemPrompt: config.systemPrompt || DEFAULT_SYSTEM_PROMPT,
             tokenLimit,
@@ -98,13 +97,11 @@ export class DiogenesContextManager {
                     ...DEFAULT_SECURITY_CONFIG.snapshot,
                     ...config.security?.snapshot,
                 },
-                workspaceRoot: config.security?.workspaceRoot || DEFAULT_SECURITY_CONFIG.workspaceRoot,
+                workspaceRoot:
+                    config.security?.workspaceRoot || DEFAULT_SECURITY_CONFIG.workspaceRoot,
             },
             tools: config.tools || [],
-            llm: {
-                ...DEFAULT_LLM_CONFIG,
-                ...config.llm,
-            },
+            llm: llmConfig,
             logger: {
                 ...DEFAULT_LOGGER_CONFIG,
                 ...config.logger,
@@ -146,15 +143,15 @@ export class DiogenesContextManager {
 
     // ==================== Tool Management ====================
 
-    registerTool(tool: BaseTool): void {
+    registerTool(tool: BaseTool<z.ZodType>): void {
         this.toolRegistry.register(tool);
     }
 
     getTaskPrompt(): string {
-        return `## Task\n${this.task}\n--`
+        return `## Task\n${this.task}\n--`;
     }
 
-    getTool(name: string): BaseTool | undefined {
+    getTool(name: string): BaseTool<z.ZodType> | undefined {
         return this.toolRegistry.getTool(name);
     }
 
@@ -277,9 +274,10 @@ export class DiogenesContextManager {
 
     private estimateContextUsage(): number {
         const stats = this.workspace.getStatistics();
-        const estimatedTokens = this.promptBuilder.getCurrentTokens() +
-            (stats.totalLines * 10) +
-            (this.state.toolResults.length * 100);
+        const estimatedTokens =
+            this.promptBuilder.getCurrentTokens() +
+            stats.totalLines * 10 +
+            this.state.toolResults.length * 100;
         return (estimatedTokens / this.config.tokenLimit) * 100;
     }
 
@@ -364,8 +362,6 @@ export class DiogenesContextManager {
         return this.promptBuilder.assembleContextSections(sections);
     }
 
-
-
     // ==================== State Accessors ====================
 
     getWorkspaceManager(): WorkspaceManager {
@@ -402,7 +398,7 @@ export class DiogenesContextManager {
     /**
      * Set LLM API configuration
      */
-    setLLMConfig(config: Partial<DiogenesConfig['llm']>): void {
+    setLLMConfig(config: Partial<DiogenesConfig["llm"]>): void {
         this.config.llm = {
             ...this.config.llm,
             ...config,
@@ -425,9 +421,15 @@ export class DiogenesContextManager {
      * Get LLM configuration
      */
     getLLMConfig(): LLMConfig {
-        // this.config.llm is always defined due to mergeWithDefaults
-        // Cast to LLMConfig since all required fields have defaults
-        return this.config.llm as LLMConfig;
+        const llm = this.config.llm;
+        return {
+            apiKey: llm.apiKey ?? "",
+            baseURL: llm.baseURL,
+            model: llm.model,
+            timeout: llm.timeout,
+            temperature: llm.temperature,
+            maxTokens: llm.maxTokens,
+        };
     }
 
     /**
@@ -456,14 +458,14 @@ export class DiogenesContextManager {
      */
     async runLLMCycle(onStreamChunk?: (chunk: StreamChunk) => void): Promise<string> {
         if (!this.llmClient) {
-            throw new Error('LLM client not configured. Please set LLM API key.');
+            throw new Error("LLM client not configured. Please set LLM API key.");
         }
 
         const prompt = this.buildPrompt();
 
         const messages = [
             {
-                role: 'user' as const,
+                role: "user" as const,
                 content: prompt,
             },
         ];
@@ -491,7 +493,7 @@ export class DiogenesContextManager {
 
         if (!parseResult.success) {
             this.state.toolResults.push(
-                `## Parse Error\n${parseResult.error?.message}\nSuggestion: ${parseResult.error?.suggestion}\n--`
+                `## Parse Error\n${parseResult.error?.message}\nSuggestion: ${parseResult.error?.suggestion}\n--`,
             );
             return response;
         }
@@ -504,9 +506,13 @@ export class DiogenesContextManager {
             const formattedResults = formatToolResults(
                 toolCalls,
                 results,
-                (toolCall, result) =>
-                    this.getTool(toolCall.tool)?.formatResultForLLM(toolCall, result)
-                    ?? JSON.stringify(result, null, 2),
+                (toolCall: ToolCall, result: ToolResult): string => {
+                    const tool: BaseTool<z.ZodType> | undefined = this.getTool(toolCall.tool);
+                    return (
+                        tool?.formatResultForLLM(toolCall, result) ??
+                        JSON.stringify(result, null, 2)
+                    );
+                },
             );
             this.state.toolResults.push(formattedResults);
 

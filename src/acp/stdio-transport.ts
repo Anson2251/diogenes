@@ -1,10 +1,14 @@
+import { Readable, Writable } from "stream";
+
+import type { ACPServerOptions } from "./types";
+
 import { ACPServer } from "./server";
-import type { ACPServerOptions, JsonRpcRequest } from "./types";
+import { JsonRpcRequestSchema } from "./types";
 
 export interface ACPStdioOptions extends ACPServerOptions {
-    input?: NodeJS.ReadStream;
-    output?: NodeJS.WriteStream;
-    error?: NodeJS.WriteStream;
+    input?: NodeJS.ReadStream | Readable;
+    output?: NodeJS.WriteStream | Writable;
+    error?: NodeJS.WriteStream | Writable;
 }
 
 export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
@@ -15,7 +19,9 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
     const server = new ACPServer({
         ...options,
         notify: (method, params) => {
-            output.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+            output.write(
+                `${JSON.stringify({ jsonrpc: "2.0", method, params: params as unknown })}\n`,
+            );
         },
         respond: (response) => {
             output.write(`${JSON.stringify(response)}\n`);
@@ -31,7 +37,7 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
         }
 
         disposeStarted = true;
-        void server.dispose().catch((disposeError) => {
+        void server.dispose().catch((disposeError: unknown) => {
             error.write(
                 `ACP transport dispose error: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}\n`,
             );
@@ -39,7 +45,7 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
     };
 
     input.setEncoding("utf-8");
-    input.on("data", async (chunk: string) => {
+    input.on("data", (chunk: string) => {
         buffer += chunk;
 
         let newlineIndex = buffer.indexOf("\n");
@@ -52,17 +58,24 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
                 continue;
             }
 
-            try {
-                const message = JSON.parse(rawLine) as JsonRpcRequest;
-                const response = await server.handleMessage(message);
-                if (response) {
-                    output.write(`${JSON.stringify(response)}\n`);
+            void (async () => {
+                try {
+                    const rawMessage: unknown = JSON.parse(rawLine);
+                    const parseResult = JsonRpcRequestSchema.safeParse(rawMessage);
+                    if (!parseResult.success) {
+                        error.write(`ACP transport parse error: Invalid JSON-RPC message format\n`);
+                        return;
+                    }
+                    const response = await server.handleMessage(parseResult.data);
+                    if (response) {
+                        output.write(`${JSON.stringify(response)}\n`);
+                    }
+                } catch (parseError: unknown) {
+                    error.write(
+                        `ACP transport parse error: ${parseError instanceof Error ? parseError.message : String(parseError)}\n`,
+                    );
                 }
-            } catch (parseError) {
-                error.write(
-                    `ACP transport parse error: ${parseError instanceof Error ? parseError.message : String(parseError)}\n`,
-                );
-            }
+            })();
 
             newlineIndex = buffer.indexOf("\n");
         }

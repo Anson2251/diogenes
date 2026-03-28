@@ -2,11 +2,22 @@
  * File load tool
  */
 
-import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
-import { WorkspaceManager } from "../../context/workspace";
+import { z } from "zod";
 
-export class FileLoadTool extends BaseTool {
+import { WorkspaceManager } from "../../context/workspace";
+import { ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
+
+const fileLoadSchema = z.object({
+    path: z.string(),
+    start: z.number().optional(),
+    end: z.number().optional(),
+});
+
+type FileLoadParams = z.infer<typeof fileLoadSchema>;
+
+export class FileLoadTool extends BaseTool<typeof fileLoadSchema> {
+    protected schema = fileLoadSchema;
     private workspace: WorkspaceManager;
 
     constructor(workspace: WorkspaceManager) {
@@ -35,32 +46,15 @@ export class FileLoadTool extends BaseTool {
         this.workspace = workspace;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for file.load",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
-
-        const { path, start, end } = validation.data as {
-            path: string;
-            start?: number;
-            end?: number;
-        };
+    async run(params: FileLoadParams): Promise<ToolResult> {
+        const { path, start, end } = params;
 
         try {
             const entry = await this.workspace.loadFile(path, start, end);
 
             return this.success({
                 total_lines: entry.totalLines,
-                loaded_range: entry.ranges.map((range) => [
-                    range.start,
-                    range.end,
-                ]),
+                loaded_range: entry.ranges.map((range) => [range.start, range.end]),
             });
         } catch (error) {
             return this.error(
@@ -73,8 +67,20 @@ export class FileLoadTool extends BaseTool {
     }
 
     formatResult(result: ToolResult): string | undefined {
-        if (result.success && result.data?.loaded_range) {
-            const ranges = result.data.loaded_range as [number, number][];
+        if (
+            result.success &&
+            result.data &&
+            typeof result.data.total_lines === "number" &&
+            Array.isArray(result.data.loaded_range)
+        ) {
+            const ranges = result.data.loaded_range.filter((r): r is [number, number] => {
+                return (
+                    Array.isArray(r) &&
+                    r.length >= 2 &&
+                    typeof r[0] === "number" &&
+                    typeof r[1] === "number"
+                );
+            });
             const total = result.data.total_lines;
             const totalLoaded = ranges.reduce((sum, r) => sum + (r[1] - r[0] + 1), 0);
             const rangeStr = ranges.map((r) => `${r[0]}-${r[1]}`).join(", ");

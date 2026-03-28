@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+
 import { TaskEndTool } from "../src/tools/task/task-end";
 
 describe("TaskEndTool", () => {
@@ -105,58 +106,62 @@ describe("TaskEndTool", () => {
         });
     });
 
-    describe("validateParams", () => {
-        it("should validate missing reason parameter", () => {
-            const result = tool.validateParams({
+    describe("parameter validation via execute", () => {
+        it("should validate missing reason parameter", async () => {
+            const result = await tool.execute({
                 summary: "Task summary",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate missing summary parameter", () => {
-            const result = tool.validateParams({
+        it("should validate missing summary parameter", async () => {
+            const result = await tool.execute({
                 reason: "Task reason",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate non-string reason parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-string reason parameter", async () => {
+            const result = await tool.execute({
                 reason: 123,
                 summary: "Task summary",
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should accept summary as an array of strings", () => {
-            const result = tool.validateParams({
+        it("should accept summary as an array of strings", async () => {
+            const result = await tool.execute({
                 reason: "Task reason",
                 summary: ["line 1", "line 2"],
             });
 
-            expect(result.valid).toBe(true);
-            expect((result.data as { summary: string }).summary).toBe("line 1\nline 2");
+            expect(result.success).toBe(true);
+            expect(result.data?.summary).toBe("line 1\nline 2");
         });
 
-        it("should validate non-string summary parameter", () => {
-            const result = tool.validateParams({
+        it("should validate non-string summary parameter", async () => {
+            const result = await tool.execute({
                 reason: "Task reason",
                 summary: { text: "summary" },
             });
 
-            expect(result.valid).toBe(false);
+            expect(result.success).toBe(false);
+            expect(result.error?.code).toBe("INVALID_PARAMS");
         });
 
-        it("should validate valid parameters", () => {
-            const result = tool.validateParams({
+        it("should validate valid parameters", async () => {
+            const result = await tool.execute({
                 reason: "Task reason",
                 summary: "Task summary",
             });
 
-            expect(result.valid).toBe(true);
+            expect(result.success).toBe(true);
         });
     });
 

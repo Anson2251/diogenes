@@ -2,40 +2,36 @@
  * Shell execution tool
  */
 
-import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
 import { exec } from "child_process";
-import { promisify } from "util";
 import * as path from "path";
+import { promisify } from "util";
+import { z } from "zod";
+
+import { ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
 
 const execAsync = promisify(exec);
 
-interface ShellExecParams {
-    command: string;
-    cwd?: string;
-    timeout?: number;
-}
+const shellExecSchema = z.object({
+    command: z.string(),
+    cwd: z.string().optional(),
+    timeout: z.number().optional(),
+});
+
+type ShellExecParams = z.infer<typeof shellExecSchema>;
 
 interface SecurityConfig {
-    enabled: boolean;
-    timeout: number;
-    blockedCommands: string[];
+    enabled?: boolean;
+    timeout?: number;
+    blockedCommands?: string[];
 }
 
-interface ExecError extends Error {
-    code?: string | number;
-    stdout?: string;
-    stderr?: string;
-}
-
-export class ShellExecTool extends BaseTool {
+export class ShellExecTool extends BaseTool<typeof shellExecSchema> {
+    protected schema = shellExecSchema;
     private workspaceRoot: string;
     private securityConfig: SecurityConfig;
 
-    constructor(
-        workspaceRoot: string,
-        securityConfig: SecurityConfig,
-    ) {
+    constructor(workspaceRoot: string, securityConfig: SecurityConfig) {
         super({
             namespace: "shell",
             name: "exec",
@@ -63,21 +59,11 @@ export class ShellExecTool extends BaseTool {
         this.securityConfig = securityConfig;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validated = this.validateParams(params);
-        if (!validated.valid || !validated.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for shell.exec",
-                { errors: validated.errors },
-                "Check parameter types and values",
-            );
-        }
-
-        const { command, cwd, timeout } = validated.data as ShellExecParams;
+    async run(params: ShellExecParams): Promise<ToolResult> {
+        const { command, cwd, timeout } = params;
 
         // Check if shell execution is enabled
-        if (!this.securityConfig.enabled) {
+        if (!(this.securityConfig.enabled ?? true)) {
             return this.error(
                 "SHELL_DISABLED",
                 "Shell execution is disabled by security configuration",
@@ -88,52 +74,49 @@ export class ShellExecTool extends BaseTool {
 
         // Check for blocked commands using tokenization to bypass evasion attempts
         const tokens = this.tokenizeCommand(command);
-        for (const blocked of this.securityConfig.blockedCommands) {
-          // Check original command for direct matches (catches obvious attempts)
-          if (command.includes(blocked)) {
-            return this.error(
-              "COMMAND_BLOCKED",
-              `Command contains blocked pattern: ${blocked}`,
-              { command, blocked_pattern: blocked },
-              "Remove the blocked pattern from the command",
-            );
-          }
-          // Check normalized tokens (removes escape characters)
-          for (const token of tokens) {
-            const normalizedToken = token.replace(/\\/g, ""); // Remove escape characters
-            if (
-              normalizedToken === blocked ||
-              normalizedToken.startsWith(blocked + " ")
-            ) {
-              return this.error(
-                "COMMAND_BLOCKED",
-                `Command contains blocked pattern: ${blocked}`,
-                { command, blocked_pattern: blocked },
-                "Remove the blocked pattern from the command",
-              );
+        for (const blocked of this.securityConfig.blockedCommands ?? []) {
+            // Check original command for direct matches (catches obvious attempts)
+            if (command.includes(blocked)) {
+                return this.error(
+                    "COMMAND_BLOCKED",
+                    `Command contains blocked pattern: ${blocked}`,
+                    { command, blocked_pattern: blocked },
+                    "Remove the blocked pattern from the command",
+                );
             }
-          }
+            // Check normalized tokens (removes escape characters)
+            for (const token of tokens) {
+                const normalizedToken = token.replace(/\\/g, ""); // Remove escape characters
+                if (normalizedToken === blocked || normalizedToken.startsWith(blocked + " ")) {
+                    return this.error(
+                        "COMMAND_BLOCKED",
+                        `Command contains blocked pattern: ${blocked}`,
+                        { command, blocked_pattern: blocked },
+                        "Remove the blocked pattern from the command",
+                    );
+                }
+            }
         }
 
         // Determine working directory
         let workingDir = this.workspaceRoot;
         if (cwd) {
-          // Resolve relative to workspace root
-          workingDir = path.resolve(this.workspaceRoot, cwd);
-          // Ensure cwd is within workspace using path.relative for security
-          const relative = path.relative(this.workspaceRoot, workingDir);
-          if (relative.startsWith("..") || relative === "..") {
-            return this.error(
-              "PATH_OUTSIDE_WORKSPACE",
-              `Working directory ${workingDir} is outside workspace root ${this.workspaceRoot}`,
-              { cwd, workspace_root: this.workspaceRoot },
-              "Use a working directory within the workspace",
-            );
-          }
+            // Resolve relative to workspace root
+            workingDir = path.resolve(this.workspaceRoot, cwd);
+            // Ensure cwd is within workspace using path.relative for security
+            const relative = path.relative(this.workspaceRoot, workingDir);
+            if (relative.startsWith("..") || relative === "..") {
+                return this.error(
+                    "PATH_OUTSIDE_WORKSPACE",
+                    `Working directory ${workingDir} is outside workspace root ${this.workspaceRoot}`,
+                    { cwd, workspace_root: this.workspaceRoot },
+                    "Use a working directory within the workspace",
+                );
+            }
         }
 
         // Determine timeout
-        const execTimeout = timeout || this.securityConfig.timeout;
+        const execTimeout = timeout || this.securityConfig.timeout || 30;
 
         try {
             const { stdout, stderr } = await execAsync(command, {
@@ -148,10 +131,13 @@ export class ShellExecTool extends BaseTool {
                 exit_code: 0, // execAsync doesn't provide exit code on success
             });
         } catch (error) {
-            const execError = error as ExecError;
+            const execError = error instanceof Error ? error : new Error(String(error));
+            const execCode = "code" in execError ? execError.code : undefined;
+            const execStdout = "stdout" in execError ? execError.stdout : undefined;
+            const execStderr = "stderr" in execError ? execError.stderr : undefined;
 
             // execAsync throws an error on non-zero exit code
-            if (execError.code === "ETIMEDOUT") {
+            if (execCode === "ETIMEDOUT") {
                 return this.error(
                     "EXECUTION_TIMEOUT",
                     `Command timed out after ${execTimeout} seconds`,
@@ -161,11 +147,11 @@ export class ShellExecTool extends BaseTool {
             }
 
             // Check if it's a command execution error
-            if (execError.code !== undefined && execError.stderr !== undefined) {
+            if (execCode !== undefined && execStderr !== undefined) {
                 return this.success({
-                    stdout: execError.stdout || "",
-                    stderr: execError.stderr || "",
-                    exit_code: execError.code,
+                    stdout: typeof execStdout === "string" ? execStdout : "",
+                    stderr: typeof execStderr === "string" ? execStderr : "",
+                    exit_code: execCode,
                 });
             }
 
@@ -187,7 +173,7 @@ export class ShellExecTool extends BaseTool {
     private tokenizeCommand(command: string): string[] {
         const tokens: string[] = [];
 
-        let current = '';
+        let current = "";
         let escaped = false;
 
         for (let i = 0; i < command.length; i++) {
@@ -199,31 +185,31 @@ export class ShellExecTool extends BaseTool {
                 continue;
             }
 
-            if (char === '\\') {
+            if (char === "\\") {
                 escaped = true;
                 current += char;
                 continue;
             }
 
-            if (char === ' ' || char === '\t') {
+            if (char === " " || char === "\t") {
                 if (current) {
                     tokens.push(current);
-                    current = '';
+                    current = "";
                 }
                 continue;
             }
 
             // Start of a quoted string
-            if (char === '"' || char === "'" || char === '`') {
+            if (char === '"' || char === "'" || char === "`") {
                 if (current) {
                     tokens.push(current);
-                    current = '';
+                    current = "";
                 }
                 const quote = char;
                 i++; // skip opening quote
-                let quoted = '';
+                let quoted = "";
                 while (i < command.length && command[i] !== quote) {
-                    if (command[i] === '\\' && i + 1 < command.length) {
+                    if (command[i] === "\\" && i + 1 < command.length) {
                         quoted += command[i + 1];
                         i += 2;
                     } else {
@@ -247,14 +233,18 @@ export class ShellExecTool extends BaseTool {
 
     formatResult(result: ToolResult): string | undefined {
         if (result.success && result.data) {
-            const { stdout, stderr, exit_code } = result.data as {
-                stdout: string;
-                stderr: string;
-                exit_code: number | string;
-            };
+            const stdout = typeof result.data.stdout === "string" ? result.data.stdout : "";
+            const stderr = typeof result.data.stderr === "string" ? result.data.stderr : "";
+            const exitCodeRaw =
+                typeof result.data.exit_code === "number"
+                    ? result.data.exit_code
+                    : typeof result.data.exit_code === "string"
+                      ? Number(result.data.exit_code)
+                      : 0;
+            const exitCodeNum = exitCodeRaw;
             const parts: string[] = [];
-            if (exit_code !== 0) {
-                parts.push(`\x1b[31mexit: ${exit_code}\x1b[0m`);
+            if (exitCodeNum !== 0) {
+                parts.push(`\x1b[31mexit: ${exitCodeNum}\x1b[0m`);
             }
             if (stdout) {
                 parts.push(stdout.trim());

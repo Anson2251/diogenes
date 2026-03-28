@@ -1,15 +1,19 @@
-import { BaseTool } from "../base-tool";
-import { ToolCall, ToolResult } from "../../types";
+import { z } from "zod";
+
 import { WorkspaceManager } from "../../context/workspace";
+import { ToolCall, ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
 
-type NotepadMode = "append" | "replace" | "clear";
+const taskNotepadSchema = z.object({
+    mode: z.enum(["append", "replace", "clear"]).optional(),
+    content: z.union([z.string(), z.array(z.string())]).optional(),
+});
 
-interface TaskNotepadParams {
-    mode?: NotepadMode;
-    content?: string | string[];
-}
+type TaskNotepadParams = z.infer<typeof taskNotepadSchema>;
 
-export class TaskNotepadTool extends BaseTool {
+export class TaskNotepadTool extends BaseTool<typeof taskNotepadSchema> {
+    protected schema = taskNotepadSchema;
+
     constructor(private readonly workspace: WorkspaceManager) {
         super({
             namespace: "task",
@@ -27,9 +31,10 @@ Use this to preserve summaries, decisions, or facts you still need after calling
                     description: "One of: append, replace, clear. Default: append",
                 },
                 content: {
-                    type: "content",
+                    type: "string",
                     optional: true,
-                    description: "Note text as a string or array of strings. Omit only when mode is clear.",
+                    description:
+                        "Note text as a string or array of strings. Omit only when mode is clear.",
                 },
             },
             returns: {
@@ -39,33 +44,15 @@ Use this to preserve summaries, decisions, or facts you still need after calling
         });
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for task.notepad",
-                { errors: validation.errors },
-                "Provide mode and note content. Use clear with no content when you want to reset the notepad.",
-            );
-        }
-
-        const { mode = "append", content } = validation.data as TaskNotepadParams;
-        if (!["append", "replace", "clear"].includes(mode)) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for task.notepad",
-                { mode },
-                "Mode must be one of: append, replace, clear",
-            );
-        }
+    run(params: TaskNotepadParams): ToolResult {
+        const { mode = "append", content } = params;
 
         if (mode === "clear") {
             this.workspace.clearNotepad();
             return this.success({ mode, total_lines: 0 });
         }
 
-        if (!this.isSupportedContent(content)) {
+        if (content === undefined) {
             return this.error(
                 "INVALID_PARAM",
                 "Invalid parameters for task.notepad",
@@ -98,8 +85,12 @@ Use this to preserve summaries, decisions, or facts you still need after calling
 
     formatResultForLLM(toolCall: ToolCall, result: ToolResult): string {
         if (result.success && result.data) {
-            const mode = typeof result.data.mode === "string" ? result.data.mode : toolCall.params.mode || "append";
-            const totalLines = typeof result.data.total_lines === "number" ? result.data.total_lines : 0;
+            const resultMode = typeof result.data.mode === "string" ? result.data.mode : undefined;
+            const toolMode =
+                typeof toolCall.params.mode === "string" ? toolCall.params.mode : undefined;
+            const mode = resultMode ?? toolMode ?? "append";
+            const totalLines =
+                typeof result.data.total_lines === "number" ? result.data.total_lines : 0;
             return [
                 `[OK] ${toolCall.tool}`,
                 "---",
@@ -109,36 +100,6 @@ Use this to preserve summaries, decisions, or facts you still need after calling
         }
 
         return super.formatResultForLLM(toolCall, result);
-    }
-
-    validateParams(params: unknown): { valid: boolean; errors: string[]; data?: unknown } {
-        const base = super.validateParams(params ?? {});
-        if (!base.valid || !base.data) {
-            return base;
-        }
-
-        const data = base.data as TaskNotepadParams;
-        const errors: string[] = [];
-        if (data.mode !== undefined && !["append", "replace", "clear"].includes(data.mode)) {
-            errors.push("mode: Must be one of append, replace, clear");
-        }
-        if (data.mode !== "clear" && data.content !== undefined && !this.isSupportedContent(data.content)) {
-            errors.push("content: Expected string or array of strings");
-        }
-        if (data.mode !== "clear" && data.content === undefined) {
-            errors.push("content: Required unless mode is clear");
-        }
-
-        if (errors.length > 0) {
-            return { valid: false, errors };
-        }
-
-        return { valid: true, errors: [], data };
-    }
-
-    private isSupportedContent(content: unknown): content is string | string[] {
-        return typeof content === "string" ||
-            (Array.isArray(content) && content.every((line) => typeof line === "string"));
     }
 
     private normalizeContent(content: string | string[]): string[] {

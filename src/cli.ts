@@ -8,16 +8,28 @@
 import { config } from "dotenv";
 config();
 
-import { executeTask, DiogenesConfig, TUILogger, Logger, LogLevel, createDiogenes, formatToolResults, startACPServer, type ConversationMessage, type DiogenesContextManager } from "./index";
-import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
-import * as yaml from "yaml"
+import * as readline from "readline";
+import * as yaml from "yaml";
+
+import { SessionStore } from "./acp/session-store";
 import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
-import { parseSocraticToolInput } from "./utils/socratic-parser";
+import {
+    executeTask,
+    DiogenesConfig,
+    TUILogger,
+    Logger,
+    LogLevel,
+    createDiogenes,
+    formatToolResults,
+    startACPServer,
+    type ConversationMessage,
+    type DiogenesContextManager,
+} from "./index";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
 import { ensureDefaultConfigFileSync } from "./utils/config-bootstrap";
-import { SessionStore } from "./acp/session-store";
+import { parseSocraticToolInput } from "./utils/socratic-parser";
 
 // ANSI color codes for terminal output
 const colors = {
@@ -74,30 +86,41 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
                 return { options, command: { kind: "sessions.list" } };
             case "get":
                 if (!sessionId) {
-                    console.error(`${colors.red}Error: sessions get requires <sessionId>${colors.reset}`);
+                    console.error(
+                        `${colors.red}Error: sessions get requires <sessionId>${colors.reset}`,
+                    );
                     showHelp();
                     process.exit(1);
                 }
                 return { options, command: { kind: "sessions.get", sessionId } };
             case "snapshots":
                 if (!sessionId) {
-                    console.error(`${colors.red}Error: sessions snapshots requires <sessionId>${colors.reset}`);
+                    console.error(
+                        `${colors.red}Error: sessions snapshots requires <sessionId>${colors.reset}`,
+                    );
                     showHelp();
                     process.exit(1);
                 }
                 return { options, command: { kind: "sessions.snapshots", sessionId } };
             case "prune":
-                return { options, command: { kind: "sessions.prune", dryRun: args.includes("--dry-run") } };
+                return {
+                    options,
+                    command: { kind: "sessions.prune", dryRun: args.includes("--dry-run") },
+                };
             case "delete":
             case "remove":
                 if (!sessionId) {
-                    console.error(`${colors.red}Error: sessions ${subcommand} requires <sessionId>${colors.reset}`);
+                    console.error(
+                        `${colors.red}Error: sessions ${subcommand} requires <sessionId>${colors.reset}`,
+                    );
                     showHelp();
                     process.exit(1);
                 }
                 return { options, command: { kind: "sessions.delete", sessionId } };
             default:
-                console.error(`${colors.red}Error: Unknown sessions command ${subcommand || ""}${colors.reset}`);
+                console.error(
+                    `${colors.red}Error: Unknown sessions command ${subcommand || ""}${colors.reset}`,
+                );
                 showHelp();
                 process.exit(1);
         }
@@ -133,9 +156,7 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
         } else if (arg === "--max-iterations" || arg === "-i") {
             options.maxIterations = parseInt(args[++i], 10);
         } else if (arg.startsWith("-")) {
-            console.error(
-                `${colors.red}Error: Unknown option ${arg}${colors.reset}`,
-            );
+            console.error(`${colors.red}Error: Unknown option ${arg}${colors.reset}`);
             showHelp();
             process.exit(1);
         } else {
@@ -220,13 +241,10 @@ ${colors.bright}Configuration:${colors.reset}
  */
 function showVersion(): void {
     try {
-        const packageJson = JSON.parse(
-            fs.readFileSync(
-                path.join(__dirname, "..", "package.json"),
-                "utf-8",
-            ),
-        );
-        console.log(`Diogenes v${packageJson.version}`);
+        const content = fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8");
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const raw: { version?: string } = JSON.parse(content);
+        console.log(`Diogenes v${raw.version}`);
     } catch {
         console.log("Diogenes (version unknown)");
     }
@@ -240,16 +258,22 @@ function loadConfig(configPath: string): Partial<DiogenesConfig> {
         const configContent = fs.readFileSync(configPath, "utf-8");
         const ext = path.extname(configPath).toLowerCase();
 
+        let raw: unknown;
         if (ext === ".json") {
-            return JSON.parse(configContent);
+            raw = JSON.parse(configContent);
         } else if (ext === ".yaml" || ext === ".yml") {
-            return yaml.parse(configContent);
+            raw = yaml.parse(configContent);
         } else {
             console.error(
                 `${colors.yellow}Warning: Unsupported config file format ${ext}, using JSON${colors.reset}`,
             );
-            return JSON.parse(configContent);
+            raw = JSON.parse(configContent);
         }
+        if (typeof raw !== "object" || raw === null) {
+            return {};
+        }
+        // Object is validated at runtime, TypeScript trusts the function signature
+        return raw as Partial<DiogenesConfig>;
     } catch (error) {
         console.error(
             `${colors.red}Error loading config file ${configPath}:${colors.reset}`,
@@ -292,9 +316,18 @@ function mergeConfig(
             const baseShell = base.security?.shell;
             const overrideShell = override.security?.shell;
             merged.security.shell = {
-                enabled: overrideShell?.enabled ?? baseShell?.enabled ?? DEFAULT_SECURITY_CONFIG.shell.enabled,
-                timeout: overrideShell?.timeout ?? baseShell?.timeout ?? DEFAULT_SECURITY_CONFIG.shell.timeout,
-                blockedCommands: overrideShell?.blockedCommands ?? baseShell?.blockedCommands ?? DEFAULT_SECURITY_CONFIG.shell.blockedCommands,
+                enabled:
+                    overrideShell?.enabled ??
+                    baseShell?.enabled ??
+                    DEFAULT_SECURITY_CONFIG.shell.enabled,
+                timeout:
+                    overrideShell?.timeout ??
+                    baseShell?.timeout ??
+                    DEFAULT_SECURITY_CONFIG.shell.timeout,
+                blockedCommands:
+                    overrideShell?.blockedCommands ??
+                    baseShell?.blockedCommands ??
+                    DEFAULT_SECURITY_CONFIG.shell.blockedCommands,
             };
         }
 
@@ -302,8 +335,14 @@ function mergeConfig(
             const baseFile = base.security?.file;
             const overrideFile = override.security?.file;
             merged.security.file = {
-                maxFileSize: overrideFile?.maxFileSize ?? baseFile?.maxFileSize ?? DEFAULT_SECURITY_CONFIG.file.maxFileSize,
-                blockedExtensions: overrideFile?.blockedExtensions ?? baseFile?.blockedExtensions ?? DEFAULT_SECURITY_CONFIG.file.blockedExtensions,
+                maxFileSize:
+                    overrideFile?.maxFileSize ??
+                    baseFile?.maxFileSize ??
+                    DEFAULT_SECURITY_CONFIG.file.maxFileSize,
+                blockedExtensions:
+                    overrideFile?.blockedExtensions ??
+                    baseFile?.blockedExtensions ??
+                    DEFAULT_SECURITY_CONFIG.file.blockedExtensions,
             };
         }
 
@@ -311,8 +350,14 @@ function mergeConfig(
             const baseWatch = base.security?.watch;
             const overrideWatch = override.security?.watch;
             merged.security.watch = {
-                enabled: overrideWatch?.enabled ?? baseWatch?.enabled ?? DEFAULT_SECURITY_CONFIG.watch.enabled,
-                debounceMs: overrideWatch?.debounceMs ?? baseWatch?.debounceMs ?? DEFAULT_SECURITY_CONFIG.watch.debounceMs,
+                enabled:
+                    overrideWatch?.enabled ??
+                    baseWatch?.enabled ??
+                    DEFAULT_SECURITY_CONFIG.watch.enabled,
+                debounceMs:
+                    overrideWatch?.debounceMs ??
+                    baseWatch?.debounceMs ??
+                    DEFAULT_SECURITY_CONFIG.watch.debounceMs,
             };
         }
 
@@ -320,7 +365,10 @@ function mergeConfig(
             const baseInteraction = base.security?.interaction;
             const overrideInteraction = override.security?.interaction;
             merged.security.interaction = {
-                enabled: overrideInteraction?.enabled ?? baseInteraction?.enabled ?? DEFAULT_SECURITY_CONFIG.interaction.enabled,
+                enabled:
+                    overrideInteraction?.enabled ??
+                    baseInteraction?.enabled ??
+                    DEFAULT_SECURITY_CONFIG.interaction.enabled,
             };
         }
 
@@ -328,13 +376,31 @@ function mergeConfig(
             const baseSnapshot = base.security?.snapshot;
             const overrideSnapshot = override.security?.snapshot;
             merged.security.snapshot = {
-                enabled: overrideSnapshot?.enabled ?? baseSnapshot?.enabled ?? DEFAULT_SECURITY_CONFIG.snapshot.enabled,
-                includeDiogenesState: overrideSnapshot?.includeDiogenesState ?? baseSnapshot?.includeDiogenesState ?? DEFAULT_SECURITY_CONFIG.snapshot.includeDiogenesState,
-                autoBeforePrompt: overrideSnapshot?.autoBeforePrompt ?? baseSnapshot?.autoBeforePrompt ?? DEFAULT_SECURITY_CONFIG.snapshot.autoBeforePrompt,
+                enabled:
+                    overrideSnapshot?.enabled ??
+                    baseSnapshot?.enabled ??
+                    DEFAULT_SECURITY_CONFIG.snapshot.enabled,
+                includeDiogenesState:
+                    overrideSnapshot?.includeDiogenesState ??
+                    baseSnapshot?.includeDiogenesState ??
+                    DEFAULT_SECURITY_CONFIG.snapshot.includeDiogenesState,
+                autoBeforePrompt:
+                    overrideSnapshot?.autoBeforePrompt ??
+                    baseSnapshot?.autoBeforePrompt ??
+                    DEFAULT_SECURITY_CONFIG.snapshot.autoBeforePrompt,
                 storageRoot: DEFAULT_SECURITY_CONFIG.snapshot.storageRoot,
-                resticBinary: overrideSnapshot?.resticBinary ?? baseSnapshot?.resticBinary ?? DEFAULT_SECURITY_CONFIG.snapshot.resticBinary,
-                resticBinaryArgs: overrideSnapshot?.resticBinaryArgs ?? baseSnapshot?.resticBinaryArgs ?? DEFAULT_SECURITY_CONFIG.snapshot.resticBinaryArgs,
-                timeoutMs: overrideSnapshot?.timeoutMs ?? baseSnapshot?.timeoutMs ?? DEFAULT_SECURITY_CONFIG.snapshot.timeoutMs,
+                resticBinary:
+                    overrideSnapshot?.resticBinary ??
+                    baseSnapshot?.resticBinary ??
+                    DEFAULT_SECURITY_CONFIG.snapshot.resticBinary,
+                resticBinaryArgs:
+                    overrideSnapshot?.resticBinaryArgs ??
+                    baseSnapshot?.resticBinaryArgs ??
+                    DEFAULT_SECURITY_CONFIG.snapshot.resticBinaryArgs,
+                timeoutMs:
+                    overrideSnapshot?.timeoutMs ??
+                    baseSnapshot?.timeoutMs ??
+                    DEFAULT_SECURITY_CONFIG.snapshot.timeoutMs,
             };
         }
     }
@@ -405,16 +471,15 @@ function createConfig(options: CLIOptions): DiogenesConfig {
     };
 
     if (!options.interactive) {
-        const note = "CLI note: task.ask and task.choose are unavailable in this session. Continue without interactive user questions.";
-        merged.systemPrompt = merged.systemPrompt
-            ? `${merged.systemPrompt}\n\n${note}`
-            : note;
+        const note =
+            "CLI note: task.ask and task.choose are unavailable in this session. Continue without interactive user questions.";
+        merged.systemPrompt = merged.systemPrompt ? `${merged.systemPrompt}\n\n${note}` : note;
     }
 
     merged.security = {
         ...(merged.security || {}),
         snapshot: {
-            ...((merged.security as any)?.snapshot || {}),
+            ...((merged.security as { snapshot?: Record<string, unknown> })?.snapshot || {}),
             storageRoot: appPaths.sessionsDir,
         },
     };
@@ -438,8 +503,8 @@ function createLogger(options: CLIOptions): Logger {
 }
 
 function createQuestionFn(rl: readline.Interface): QuestionFn {
-    return (prompt: string) =>
-        new Promise((resolve) => {
+    return async (prompt: string) =>
+        new Promise<string>((resolve) => {
             rl.question(prompt, resolve);
         });
 }
@@ -451,7 +516,9 @@ async function clearDiogenesAppData(
     const appPaths = resolveDiogenesAppPaths();
     const uniqueTargets = Array.from(new Set([appPaths.configDir, appPaths.dataDir]));
 
-    output.write(`${colors.red}${colors.bright}Danger:${colors.reset} this will delete Diogenes config and local storage.\n`);
+    output.write(
+        `${colors.red}${colors.bright}Danger:${colors.reset} this will delete Diogenes config and local storage.\n`,
+    );
     output.write(`- Config: ${appPaths.configDir}\n`);
     output.write(`- Local data: ${appPaths.dataDir}\n`);
     output.write(`Type ${colors.bright}${CLEAR_APP_DATA_PASSPHRASE}${colors.reset} to continue.\n`);
@@ -506,27 +573,31 @@ function normalizeSocraticCommand(input: string): string {
     return input.trim().replace(/^\//, "").toLowerCase();
 }
 
-async function readSocraticInput(
-    question: QuestionFn,
-): Promise<string> {
+async function readSocraticInput(question: QuestionFn): Promise<string> {
     const initial = await question(`${colors.magenta}socratic>${colors.reset} `);
     const trimmed = initial.trim();
     const normalized = normalizeSocraticCommand(trimmed);
 
     if (normalized === "paste") {
-        console.log(`${colors.dim}  paste mode enabled; paste content, then enter '..' to finish${colors.reset}`);
+        console.log(
+            `${colors.dim}  paste mode enabled; paste content, then enter '..' to finish${colors.reset}`,
+        );
         const lines = await readTerminatedBlock(question, `${colors.dim}> ${colors.reset}`);
         return lines.join("\n");
     }
 
     if (normalized === "tool") {
-        console.log(`${colors.dim}  tool mode enabled; enter tool-call content, then enter '..' to finish${colors.reset}`);
+        console.log(
+            `${colors.dim}  tool mode enabled; enter tool-call content, then enter '..' to finish${colors.reset}`,
+        );
         const lines = await readTerminatedBlock(question, `${colors.dim}> ${colors.reset}`);
         return lines.join("\n");
     }
 
     if (startsToolCallBlock(initial)) {
-        console.log(`${colors.dim}  continuing tool-call block; enter '..' to finish if needed${colors.reset}`);
+        console.log(
+            `${colors.dim}  continuing tool-call block; enter '..' to finish if needed${colors.reset}`,
+        );
         const lines = await readTerminatedBlock(question, `${colors.dim}> ${colors.reset}`);
         return [initial, ...lines].join("\n");
     }
@@ -567,7 +638,11 @@ async function executeTaskWithProgress(
         });
         return result.messageHistory || [];
     } catch (error) {
-        logger.taskError(error as Error);
+        if (error instanceof Error) {
+            logger.taskError(error);
+        } else {
+            logger.taskError(new Error(String(error)));
+        }
         process.exit(1);
     }
 }
@@ -575,31 +650,23 @@ async function executeTaskWithProgress(
 /**
  * Interactive mode: prompt user for tasks
  */
-async function interactiveMode(
-    config: DiogenesConfig,
-    options: CLIOptions,
-): Promise<void> {
+async function interactiveMode(config: DiogenesConfig, options: CLIOptions): Promise<void> {
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
     });
 
-    console.log(
-        `${colors.cyan}${colors.bright}Diogenes Interactive Mode${colors.reset}`,
-    );
-    console.log(
-        `${colors.dim}Type 'exit', 'quit', or press Ctrl+C to exit${colors.reset}`,
-    );
-    console.log(
-        `${colors.dim}Type 'help' for available commands${colors.reset}\n`,
-    );
+    console.log(`${colors.cyan}${colors.bright}Diogenes Interactive Mode${colors.reset}`);
+    console.log(`${colors.dim}Type 'exit', 'quit', or press Ctrl+C to exit${colors.reset}`);
+    console.log(`${colors.dim}Type 'help' for available commands${colors.reset}\n`);
 
     const question = createQuestionFn(rl);
 
     const interactiveConfig: DiogenesConfig = {
         ...config,
         interactionHandlers: {
-            ask: async (prompt: string) => question(`\n${colors.cyan}[task.ask]${colors.reset} ${prompt}\n> `),
+            ask: async (prompt: string) =>
+                question(`\n${colors.cyan}[task.ask]${colors.reset} ${prompt}\n> `),
             choose: async (prompt: string, choices: string[]) => {
                 const rendered = [
                     `\n${colors.cyan}[task.choose]${colors.reset} ${prompt}`,
@@ -633,10 +700,7 @@ async function interactiveMode(
             continue;
         }
 
-        if (
-            trimmed.toLowerCase() === "exit" ||
-            trimmed.toLowerCase() === "quit"
-        ) {
+        if (trimmed.toLowerCase() === "exit" || trimmed.toLowerCase() === "quit") {
             break;
         }
 
@@ -658,13 +722,9 @@ ${colors.bright}Available commands:${colors.reset}
         }
 
         if (trimmed.toLowerCase() === "config") {
-            console.log(
-                `${colors.bright}Current configuration:${colors.reset}`,
-            );
+            console.log(`${colors.bright}Current configuration:${colors.reset}`);
             console.log(`Model: ${config.llm?.model || "gpt-4"}`);
-            console.log(
-                `Workspace: ${config.security?.workspaceRoot || process.cwd()}`,
-            );
+            console.log(`Workspace: ${config.security?.workspaceRoot || process.cwd()}`);
             console.log(`Max iterations: ${options.maxIterations || 20}`);
             console.log(`Verbose: ${options.verbose ? "Yes" : "No"}`);
             continue;
@@ -701,9 +761,13 @@ ${colors.cyan}${colors.bright}════════════════�
 ${colors.cyan}${colors.bright}                    SOCRATIC DEBUG MODE                         ${colors.reset}
 ${colors.cyan}${colors.bright}═══════════════════════════════════════════════════════════════${colors.reset}
 `);
-    console.log(`${colors.yellow}You are the "LLM" guiding the agent through the task.${colors.reset}`);
+    console.log(
+        `${colors.yellow}You are the "LLM" guiding the agent through the task.${colors.reset}`,
+    );
     console.log(`${colors.dim}Instead of the AI deciding what to do, YOU decide.${colors.reset}`);
-    console.log(`${colors.dim}This is great for learning, debugging, or teaching others.${colors.reset}\n`);
+    console.log(
+        `${colors.dim}This is great for learning, debugging, or teaching others.${colors.reset}\n`,
+    );
 
     const question = createQuestionFn(rl);
 
@@ -777,7 +841,9 @@ ${colors.bright}Multiline:${colors.reset}
     while (iterations < maxIterations) {
         iterations++;
 
-        console.log(`${colors.cyan}──────────────────────── Iteration ${iterations}/${maxIterations} ────────────────────────${colors.reset}`);
+        console.log(
+            `${colors.cyan}──────────────────────── Iteration ${iterations}/${maxIterations} ────────────────────────${colors.reset}`,
+        );
 
         const input = await readSocraticInput(question);
         const trimmed = input.trim();
@@ -826,14 +892,18 @@ ${colors.bright}Multiline:${colors.reset}
 
         if (!parseResult.success) {
             console.log(`${colors.red}Parse error: ${parseResult.error?.message}${colors.reset}`);
-            console.log(`${colors.dim}Tip: Use tool.name { "param": "value" } or a full tool-call block${colors.reset}`);
+            console.log(
+                `${colors.dim}Tip: Use tool.name { "param": "value" } or a full tool-call block${colors.reset}`,
+            );
             continue;
         }
 
         const toolCalls = parseResult.toolCalls!;
 
         if (toolCalls.length === 0) {
-            console.log(`${colors.yellow}No tool calls parsed. Use 'tools' to see available tools.${colors.reset}`);
+            console.log(
+                `${colors.yellow}No tool calls parsed. Use 'tools' to see available tools.${colors.reset}`,
+            );
             continue;
         }
 
@@ -850,15 +920,21 @@ ${colors.bright}Multiline:${colors.reset}
             for (let i = 0; i < toolCalls.length; i++) {
                 const toolCall = toolCalls[i];
                 if (toolCall.tool === "task.end") {
-                    console.log(`\n${colors.green}${colors.bright}Task ended by user!${colors.reset}`);
-                    console.log(`${colors.dim}Reason: ${toolCall.params?.reason || "No reason"}${colors.reset}`);
+                    console.log(
+                        `\n${colors.green}${colors.bright}Task ended by user!${colors.reset}`,
+                    );
+                    console.log(
+                        `${colors.dim}Reason: ${toolCall.params?.reason || "No reason"}${colors.reset}`,
+                    );
                     rl.close();
                     console.log(`${colors.dim}Goodbye!${colors.reset}`);
                     return;
                 }
             }
         } catch (error) {
-            console.log(`${colors.red}Error executing tools: ${error instanceof Error ? error.message : String(error)}${colors.reset}`);
+            console.log(
+                `${colors.red}Error executing tools: ${error instanceof Error ? error.message : String(error)}${colors.reset}`,
+            );
         }
 
         console.log();
@@ -910,20 +986,12 @@ async function main(): Promise<void> {
     // Check if API key is available
     const apiKey = getApiKey(options);
     if (!apiKey) {
-        console.error(
-            `${colors.red}Error: OpenAI API key is required.${colors.reset}`,
-        );
-        console.error(
-            `Set it via --api-key option or OPENAI_API_KEY environment variable.`,
-        );
+        console.error(`${colors.red}Error: OpenAI API key is required.${colors.reset}`);
+        console.error(`Set it via --api-key option or OPENAI_API_KEY environment variable.`);
         console.error(`\n${colors.yellow}Troubleshooting tips:${colors.reset}`);
-        console.error(
-            `1. Get an API key from https://platform.openai.com/api-keys`,
-        );
+        console.error(`1. Get an API key from https://platform.openai.com/api-keys`);
         console.error(`2. Export it: export OPENAI_API_KEY="your-key-here"`);
-        console.error(
-            `3. Or use: diogenes --api-key "your-key-here" "your task"`,
-        );
+        console.error(`3. Or use: diogenes --api-key "your-key-here" "your task"`);
         process.exit(1);
     }
 
@@ -959,15 +1027,11 @@ async function main(): Promise<void> {
         if (options.interactive) {
             await interactiveMode(config, options);
         } else if (options.socratic) {
-            console.error(
-                `${colors.red}Error: Task required for socratic mode.${colors.reset}`,
-            );
+            console.error(`${colors.red}Error: Task required for socratic mode.${colors.reset}`);
             console.error(`Usage: diogenes --socratic "your task here"`);
             process.exit(1);
         } else {
-            console.error(
-                `${colors.red}Error: No task provided.${colors.reset}`,
-            );
+            console.error(`${colors.red}Error: No task provided.${colors.reset}`);
             console.error(`Usage: diogenes [options] <task>`);
             console.error(`       diogenes --interactive`);
             console.error(`       diogenes --socratic "task"`);
@@ -1018,7 +1082,7 @@ async function handleSessionCommand(command: Exclude<CLICommand, { kind: "run" }
 
 // Run the CLI
 if (require.main === module) {
-    main().catch((error) => {
+    main().catch((error: unknown) => {
         console.error(`${colors.red}Fatal error:${colors.reset}`, error);
         process.exit(1);
     });

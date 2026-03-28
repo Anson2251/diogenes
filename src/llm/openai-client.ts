@@ -1,6 +1,61 @@
 /**
  * OpenAI-style API client for LLM integration
  */
+import { z } from "zod";
+
+// Zod schemas for runtime validation
+const OpenAIErrorSchema = z.object({
+    error: z.object({
+        message: z.string(),
+        type: z.string().optional(),
+        param: z.string().nullable().optional(),
+        code: z.string().nullable().optional(),
+    }),
+});
+
+const OpenAICompletionResponseSchema = z.object({
+    id: z.string(),
+    object: z.string(),
+    created: z.number(),
+    model: z.string(),
+    choices: z
+        .array(
+            z.object({
+                index: z.number(),
+                message: z.object({
+                    role: z.string(),
+                    content: z.string(),
+                }),
+                finish_reason: z.string(),
+            }),
+        )
+        .nonempty(),
+    usage: z
+        .object({
+            prompt_tokens: z.number(),
+            completion_tokens: z.number(),
+            total_tokens: z.number(),
+        })
+        .optional(),
+});
+
+const OpenAIStreamChunkSchema = z.object({
+    id: z.string(),
+    object: z.string(),
+    created: z.number(),
+    model: z.string(),
+    choices: z.array(
+        z.object({
+            index: z.number(),
+            delta: z.object({
+                role: z.string().optional(),
+                content: z.string().optional(),
+                reasoning_content: z.string().optional(),
+            }),
+            finish_reason: z.string().nullable(),
+        }),
+    ),
+});
 
 export interface OpenAIClientConfig {
     apiKey: string;
@@ -85,6 +140,24 @@ export interface OpenAIErrorResponse {
     };
 }
 
+/**
+ * Type guards for OpenAI API responses using Zod
+ */
+function isOpenAIErrorResponse(val: unknown): val is OpenAIErrorResponse {
+    const result = OpenAIErrorSchema.safeParse(val);
+    return result.success;
+}
+
+function isOpenAICompletionResponse(val: unknown): val is OpenAICompletionResponse {
+    const result = OpenAICompletionResponseSchema.safeParse(val);
+    return result.success;
+}
+
+function isOpenAIStreamChunk(val: unknown): val is OpenAIStreamChunk {
+    const result = OpenAIStreamChunkSchema.safeParse(val);
+    return result.success;
+}
+
 export class OpenAIClient {
     private config: Required<OpenAIClientConfig>;
     private abortController: AbortController | null = null;
@@ -133,10 +206,10 @@ export class OpenAIClient {
 
         // Clean up any existing abort controller - abort previous request if still active
         if (this.abortController) {
-          this.abortReason = "cancelled";
-          this.abortController.abort();
-          // Small delay to allow previous request cleanup before creating new controller
-          await new Promise((resolve) => setTimeout(resolve, 0));
+            this.abortReason = "cancelled";
+            this.abortController.abort();
+            // Small delay to allow previous request cleanup before creating new controller
+            await new Promise((resolve) => setTimeout(resolve, 0));
         }
         this.abortController = new AbortController();
         this.abortReason = null;
@@ -146,31 +219,29 @@ export class OpenAIClient {
         }, this.config.timeout);
 
         try {
-            const response = await fetch(
-                `${this.config.baseURL}/chat/completions`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${this.config.apiKey}`,
-                    },
-                    body: JSON.stringify(request),
-                    signal: this.abortController.signal,
+            const response = await fetch(`${this.config.baseURL}/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${this.config.apiKey}`,
                 },
-            );
+                body: JSON.stringify(request),
+                signal: this.abortController.signal,
+            });
 
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const errorData =
-                    (await response.json()) as OpenAIErrorResponse;
-                throw new Error(`OpenAI API error: ${errorData.error.message}`);
+                const errorData: unknown = await response.json();
+                if (isOpenAIErrorResponse(errorData)) {
+                    throw new Error(`OpenAI API error: ${errorData.error.message}`);
+                }
+                throw new Error(`OpenAI API error: ${JSON.stringify(errorData)}`);
             }
 
-            const data = (await response.json()) as OpenAICompletionResponse;
-
-            if (!data.choices || data.choices.length === 0) {
-                throw new Error("No completion choices returned");
+            const data: unknown = await response.json();
+            if (!isOpenAICompletionResponse(data)) {
+                throw new Error("Invalid response format from OpenAI API");
             }
 
             return data.choices[0].message.content;
@@ -182,9 +253,7 @@ export class OpenAIClient {
                     if (this.abortReason === "cancelled") {
                         throw new Error("Request cancelled");
                     }
-                    throw new Error(
-                        `Request timeout after ${this.config.timeout}ms`,
-                    );
+                    throw new Error(`Request timeout after ${this.config.timeout}ms`);
                 }
 
                 // Provide more detailed error messages for fetch failures
@@ -192,11 +261,11 @@ export class OpenAIClient {
                 const sanitizedBaseURL = this.config.baseURL.replace(/\/\/([^@]+)@/, "//***@");
                 const errorMsg = error.message?.toLowerCase() || "";
                 if (
-                  errorMsg.includes("fetch") ||
-                  errorMsg.includes("network") ||
-                  errorMsg.includes("failed")
+                    errorMsg.includes("fetch") ||
+                    errorMsg.includes("network") ||
+                    errorMsg.includes("failed")
                 ) {
-                  let detailedError = `Network error connecting to ${sanitizedBaseURL}: ${error.message}`;
+                    let detailedError = `Network error connecting to ${sanitizedBaseURL}: ${error.message}`;
 
                     // Add specific suggestions based on error
                     if (
@@ -206,10 +275,7 @@ export class OpenAIClient {
                     ) {
                         detailedError +=
                             "\nSSL/TLS certificate issue detected. If using a self-signed certificate, try adding NODE_TLS_REJECT_UNAUTHORIZED=0";
-                    } else if (
-                        errorMsg.includes("dns") ||
-                        errorMsg.includes("hostname")
-                    ) {
+                    } else if (errorMsg.includes("dns") || errorMsg.includes("hostname")) {
                         detailedError +=
                             "\nDNS resolution failed. Check if the API endpoint URL is correct.";
                     } else if (
@@ -226,15 +292,15 @@ export class OpenAIClient {
                 }
 
                 throw error;
-              }
-              throw new Error(`Unknown error: ${String(error)}`);
-            } finally {
-              // Only clear abortController if it's still the one we created
-              // This prevents race conditions with concurrent requests
-              if (this.abortController?.signal.aborted === false) {
-                this.abortController = null;
-              }
             }
+            throw new Error(`Unknown error: ${String(error)}`);
+        } finally {
+            // Only clear abortController if it's still the one we created
+            // This prevents race conditions with concurrent requests
+            if (!this.abortController?.signal.aborted) {
+                this.abortController = null;
+            }
+        }
     }
 
     /**
@@ -275,26 +341,26 @@ export class OpenAIClient {
         }, this.config.timeout);
 
         let fullContent = "";
-        let reasoning_text = ""
+        let reasoning_text = "";
 
         try {
-            const response = await fetch(
-                `${this.config.baseURL}/chat/completions`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${this.config.apiKey}`,
-                    },
-                    body: JSON.stringify(request),
-                    signal: this.abortController.signal,
+            const response = await fetch(`${this.config.baseURL}/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${this.config.apiKey}`,
                 },
-            );
+                body: JSON.stringify(request),
+                signal: this.abortController.signal,
+            });
 
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const errorData = await response.json() as OpenAIErrorResponse;
+                const errorData: unknown = await response.json();
+                if (isOpenAIErrorResponse(errorData)) {
+                    throw new Error(`OpenAI API error: ${errorData.error.message}`);
+                }
                 throw new Error(`OpenAI API error: ${JSON.stringify(errorData)}`);
             }
 
@@ -307,10 +373,13 @@ export class OpenAIClient {
             const decoder = new TextDecoder();
 
             while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+                const readResult: { done: boolean; value?: unknown } = await reader.read();
+                if (readResult.done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
+                if (!(readResult.value instanceof Uint8Array)) {
+                    continue;
+                }
+                const chunk = decoder.decode(readResult.value, { stream: true });
                 const lines = chunk.split("\n");
 
                 for (const line of lines) {
@@ -326,11 +395,14 @@ export class OpenAIClient {
                     }
 
                     try {
-                        const parsed = JSON.parse(data) as OpenAIStreamChunk;
+                        const parsed: unknown = JSON.parse(data);
+                        if (!isOpenAIStreamChunk(parsed)) {
+                            continue;
+                        }
                         const delta = parsed.choices[0]?.delta;
 
                         if (delta?.reasoning_content) {
-                            reasoning_text += delta.reasoning_content
+                            reasoning_text += delta.reasoning_content;
                             onChunk({ type: "reasoning", content: delta.reasoning_content });
                         }
 
@@ -361,9 +433,7 @@ export class OpenAIClient {
                     if (this.abortReason === "cancelled") {
                         throw new Error("Request cancelled");
                     }
-                    throw new Error(
-                        `Request timeout after ${this.config.timeout}ms`,
-                    );
+                    throw new Error(`Request timeout after ${this.config.timeout}ms`);
                 }
 
                 const sanitizedBaseURL = this.config.baseURL.replace(/\/\/([^@]+)@/, "//***@");
@@ -382,10 +452,7 @@ export class OpenAIClient {
                     ) {
                         detailedError +=
                             "\nSSL/TLS certificate issue detected. If using a self-signed certificate, try adding NODE_TLS_REJECT_UNAUTHORIZED=0";
-                    } else if (
-                        errorMsg.includes("dns") ||
-                        errorMsg.includes("hostname")
-                    ) {
+                    } else if (errorMsg.includes("dns") || errorMsg.includes("hostname")) {
                         detailedError +=
                             "\nDNS resolution failed. Check if the API endpoint URL is correct.";
                     } else if (
@@ -405,7 +472,7 @@ export class OpenAIClient {
             }
             throw new Error(`Unknown error: ${String(error)}`);
         } finally {
-            if (this.abortController?.signal.aborted === false) {
+            if (!this.abortController?.signal.aborted) {
                 this.abortController = null;
             }
         }

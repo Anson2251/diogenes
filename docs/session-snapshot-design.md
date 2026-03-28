@@ -58,6 +58,7 @@ The snapshot system uses two complementary layers:
 Restic stores historical snapshots efficiently, but cannot provide atomic in-place replacement with gitignore preservation. The application layer implements transaction semantics using staging and rollback directories to ensure safe workspace replacement.
 
 This separation allows:
+
 - Restic to focus on what it does best (versioned, deduplicated storage)
 - Application code to handle safety semantics (atomicity, gitignore preservation, error recovery)
 
@@ -594,6 +595,7 @@ On failure:
 ```
 
 This ensures:
+
 - **Atomicity**: Either fully restored or fully rolled back
 - **Gitignore preservation**: Files listed in `.gitignore` are never deleted during restore
 - **Safety**: Rollback provides a recovery path if anything fails

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+
 import { FileUnloadTool } from "../src/tools/file/file-unload";
 
 describe("FileUnloadTool", () => {
@@ -31,6 +32,6 @@ describe("FileUnloadTool", () => {
         const result = await tool.execute({});
 
         expect(result.success).toBe(false);
-        expect(result.error?.code).toBe("INVALID_PARAM");
+        expect(result.error?.code).toBe("INVALID_PARAMS");
     });
 });

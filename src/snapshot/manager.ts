@@ -1,12 +1,24 @@
 import { randomBytes, randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
+
 import type { SecurityConfig } from "../types";
-import { ResticClient } from "../utils/restic";
+import type {
+    SnapshotCreateInput,
+    SnapshotCreateResult,
+    SnapshotRestoreInput,
+    SnapshotSummary,
+} from "./types";
+
 import { getDefaultSessionsStorageRoot as getDefaultSessionsStorageRootFromAppPaths } from "../utils/app-paths";
+import { ResticClient } from "../utils/restic";
 import { SnapshotManifestStore } from "./manifest-store";
-import { DiogenesStateSerializer, type SnapshotStateProvider, type SnapshotStateRestorer, type SnapshotStateSerializer } from "./state-serializer";
-import type { SnapshotCreateInput, SnapshotCreateResult, SnapshotRestoreInput, SnapshotSummary } from "./types";
+import {
+    DiogenesStateSerializer,
+    type SnapshotStateProvider,
+    type SnapshotStateRestorer,
+    type SnapshotStateSerializer,
+} from "./state-serializer";
 
 export interface SnapshotManager {
     initialize(): Promise<void>;
@@ -40,24 +52,30 @@ export class SessionSnapshotManager implements SnapshotManager {
     private cleanedUp = false;
 
     constructor(private readonly options: SnapshotManagerOptions) {
-        this.sessionDir = path.join(options.config.storageRoot, options.sessionId, "snapshots");
+        const config = options.config ?? {};
+        this.sessionDir = path.join(
+            config.storageRoot ?? getDefaultSessionsStorageRootFromAppPaths(),
+            options.sessionId,
+            "snapshots",
+        );
         this.repoDir = path.join(this.sessionDir, "repo");
         this.stateDir = path.join(this.sessionDir, "state");
         this.manifestPath = path.join(this.sessionDir, "manifest.json");
         this.passwordFilePath = path.join(this.sessionDir, ".restic-password");
         this.restic = new ResticClient({
-            binary: options.config.resticBinary,
-            binaryArgs: options.config.resticBinaryArgs,
+            binary: config.resticBinary ?? "restic",
+            binaryArgs: config.resticBinaryArgs ?? [],
             repository: this.repoDir,
             passwordFile: this.passwordFilePath,
-            timeoutMs: options.config.timeoutMs,
+            timeoutMs: config.timeoutMs ?? 30000,
         });
         this.manifestStore = new SnapshotManifestStore(this.manifestPath);
-        this.stateSerializer = options.stateSerializer ?? new DiogenesStateSerializer(this.stateDir);
+        this.stateSerializer =
+            options.stateSerializer ?? new DiogenesStateSerializer(this.stateDir);
     }
 
     isAutoBeforePromptEnabled(): boolean {
-        return this.options.config.autoBeforePrompt;
+        return this.options.config?.autoBeforePrompt ?? false;
     }
 
     async initialize(): Promise<void> {
@@ -69,8 +87,14 @@ export class SessionSnapshotManager implements SnapshotManager {
             throw new Error("Snapshot manager has already been cleaned up");
         }
 
-        const manifestExists = await fs.stat(this.manifestPath).then(() => true).catch(() => false);
-        const passwordExists = await fs.stat(this.passwordFilePath).then(() => true).catch(() => false);
+        const manifestExists = await fs
+            .stat(this.manifestPath)
+            .then(() => true)
+            .catch(() => false);
+        const passwordExists = await fs
+            .stat(this.passwordFilePath)
+            .then(() => true)
+            .catch(() => false);
 
         await fs.mkdir(this.repoDir, { recursive: true });
         await fs.mkdir(this.stateDir, { recursive: true });
@@ -113,7 +137,7 @@ export class SessionSnapshotManager implements SnapshotManager {
         });
 
         let diogenesStatePath: string | null | undefined;
-        if (this.options.config.includeDiogenesState) {
+        if (this.options.config?.includeDiogenesState ?? false) {
             const serialized = await this.stateSerializer.serialize({
                 snapshotId,
                 sessionId: this.options.sessionId,
@@ -223,7 +247,11 @@ export class SessionSnapshotManager implements SnapshotManager {
         return excludes;
     }
 
-    private async walkForGitIgnoredPaths(directory: string, workspaceRelativeDirectory: string, excludes: string[]): Promise<void> {
+    private async walkForGitIgnoredPaths(
+        directory: string,
+        workspaceRelativeDirectory: string,
+        excludes: string[],
+    ): Promise<void> {
         const entries = await fs.readdir(directory, { withFileTypes: true });
 
         for (const entry of entries) {
@@ -243,9 +271,8 @@ export class SessionSnapshotManager implements SnapshotManager {
 
     private async isGitIgnored(absolutePath: string): Promise<boolean> {
         const relativePath = this.toWorkspaceRelativePath(absolutePath);
-        const pathParts = path.dirname(relativePath) === "."
-            ? []
-            : path.dirname(relativePath).split(path.sep);
+        const pathParts =
+            path.dirname(relativePath) === "." ? [] : path.dirname(relativePath).split(path.sep);
         const ignoreDirs = [this.options.cwd];
 
         let currentDir = this.options.cwd;
@@ -261,7 +288,9 @@ export class SessionSnapshotManager implements SnapshotManager {
                 continue;
             }
 
-            const relativeToIgnoreDir = this.normalizeForGitIgnore(path.relative(ignoreDir, absolutePath));
+            const relativeToIgnoreDir = this.normalizeForGitIgnore(
+                path.relative(ignoreDir, absolutePath),
+            );
             for (const rule of rules) {
                 if (this.matchesGitIgnoreRule(relativeToIgnoreDir, rule.pattern)) {
                     ignored = !rule.negated;
@@ -295,7 +324,12 @@ export class SessionSnapshotManager implements SnapshotManager {
             this.gitIgnoreRulesCache.set(directory, rules);
             return rules;
         } catch (error) {
-            if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+            if (
+                typeof error === "object" &&
+                error !== null &&
+                "code" in error &&
+                error.code === "ENOENT"
+            ) {
                 this.gitIgnoreRulesCache.set(directory, []);
                 return [];
             }
@@ -359,13 +393,20 @@ export class SessionSnapshotManager implements SnapshotManager {
         return path.relative(this.options.cwd, absolutePath);
     }
 
-    private async replaceWorkspaceFromStaging(restoredRoot: string, afterWorkspaceRestore?: () => Promise<void>): Promise<void> {
+    private async replaceWorkspaceFromStaging(
+        restoredRoot: string,
+        afterWorkspaceRestore?: () => Promise<void>,
+    ): Promise<void> {
         const restoredStat = await fs.stat(restoredRoot).catch(() => null);
         if (!restoredStat?.isDirectory()) {
             throw new Error(`Restored workspace root is missing: ${restoredRoot}`);
         }
 
-        const rollbackDir = path.join(this.sessionDir, "restore-staging", `rollback-${randomUUID()}`);
+        const rollbackDir = path.join(
+            this.sessionDir,
+            "restore-staging",
+            `rollback-${randomUUID()}`,
+        );
         await fs.mkdir(rollbackDir, { recursive: true });
 
         const currentEntries = await fs.readdir(this.options.cwd);
@@ -384,36 +425,55 @@ export class SessionSnapshotManager implements SnapshotManager {
 
         try {
             // Only backup entries that will be replaced (non-gitignored)
-            await Promise.all(entriesToReplace.map((entry) => fs.cp(
-                path.join(this.options.cwd, entry),
-                path.join(rollbackDir, entry),
-                { recursive: true, force: true },
-            )));
+            await Promise.all(
+                entriesToReplace.map(async (entry) =>
+                    fs.cp(path.join(this.options.cwd, entry), path.join(rollbackDir, entry), {
+                        recursive: true,
+                        force: true,
+                    }),
+                ),
+            );
 
             // Only delete entries that will be replaced (non-gitignored)
             // Gitignored entries are preserved
-            await Promise.all(entriesToReplace.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+            await Promise.all(
+                entriesToReplace.map(async (entry) =>
+                    fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true }),
+                ),
+            );
 
             const restoredEntries = await fs.readdir(restoredRoot);
-            await Promise.all(restoredEntries.map((entry) => fs.cp(
-                path.join(restoredRoot, entry),
-                path.join(this.options.cwd, entry),
-                { recursive: true, force: true },
-            )));
+            await Promise.all(
+                restoredEntries.map(async (entry) =>
+                    fs.cp(path.join(restoredRoot, entry), path.join(this.options.cwd, entry), {
+                        recursive: true,
+                        force: true,
+                    }),
+                ),
+            );
 
             await afterWorkspaceRestore?.();
         } catch (error) {
             // During rollback, also preserve gitignored entries
             const currentWorkspaceEntries = await fs.readdir(this.options.cwd).catch(() => []);
-            const entriesToClean = currentWorkspaceEntries.filter((entry) => !gitignoredEntries.has(entry));
-            await Promise.all(entriesToClean.map((entry) => fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true })));
+            const entriesToClean = currentWorkspaceEntries.filter(
+                (entry) => !gitignoredEntries.has(entry),
+            );
+            await Promise.all(
+                entriesToClean.map(async (entry) =>
+                    fs.rm(path.join(this.options.cwd, entry), { recursive: true, force: true }),
+                ),
+            );
 
             const rollbackEntries = await fs.readdir(rollbackDir).catch(() => []);
-            await Promise.all(rollbackEntries.map((entry) => fs.cp(
-                path.join(rollbackDir, entry),
-                path.join(this.options.cwd, entry),
-                { recursive: true, force: true },
-            )));
+            await Promise.all(
+                rollbackEntries.map(async (entry) =>
+                    fs.cp(path.join(rollbackDir, entry), path.join(this.options.cwd, entry), {
+                        recursive: true,
+                        force: true,
+                    }),
+                ),
+            );
             throw error;
         } finally {
             await fs.rm(rollbackDir, { recursive: true, force: true });

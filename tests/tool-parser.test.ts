@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+
 import { parseToolCalls } from "../src/utils/tool-parser";
 
 describe("parseToolCalls", () => {
@@ -59,7 +60,10 @@ NOTE
             expect(result.success).toBe(true);
             expect(result.toolCalls).toHaveLength(1);
             expect(result.toolCalls![0].tool).toBe("task.notepad");
-            expect(result.toolCalls![0].params.content).toEqual(["summary line 1", "summary line 2"]);
+            expect(result.toolCalls![0].params.content).toEqual([
+                "summary line 1",
+                "summary line 2",
+            ]);
         });
 
         it("should parse todo.set with multiple items", () => {
@@ -285,8 +289,12 @@ EOF
             expect(result.success).toBe(true);
             expect(result.toolCalls![0].params.edits[0].content).toContain("## Example Session");
             expect(result.toolCalls![0].params.edits[0].content).toContain("```tool-call");
-            expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "dir.list",');
-            expect(result.toolCalls![0].params.edits[0].content).toContain('    "tool": "task.end",');
+            expect(result.toolCalls![0].params.edits[0].content).toContain(
+                '    "tool": "dir.list",',
+            );
+            expect(result.toolCalls![0].params.edits[0].content).toContain(
+                '    "tool": "task.end",',
+            );
         });
 
         it("should fail when referenced heredoc delimiter is missing", () => {
@@ -480,10 +488,7 @@ C
                 "const x = 42;",
                 "const y = 100;",
             ]);
-            expect(result.toolCalls![0].params.edits[2].content).toEqual([
-                "",
-                "// End of file",
-            ]);
+            expect(result.toolCalls![0].params.edits[2].content).toEqual(["", "// End of file"]);
         });
 
         it("should handle multiple edits with mixed content types", () => {
@@ -579,11 +584,11 @@ NEWFUNC
             const result = parseToolCalls(text);
             expect(result.success).toBe(true);
             expect(result.toolCalls![0].params.edits[0].content).toEqual([
-                'function newFunction(arg1: string, arg2: number): void {',
+                "function newFunction(arg1: string, arg2: number): void {",
                 '    const x = "test with \\"quotes\\"";',
-                '    const y = `template ${literal}`;',
-                '    console.log(arg1, arg2, x, y);',
-                '}',
+                "    const y = `template ${literal}`;",
+                "    console.log(arg1, arg2, x, y);",
+                "}",
             ]);
         });
     });

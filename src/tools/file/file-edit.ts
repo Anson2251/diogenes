@@ -4,17 +4,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { BaseTool } from "../base-tool";
-import { ToolCall, ToolResult } from "../../types";
+import { z } from "zod";
+
 import { WorkspaceManager } from "../../context/workspace";
-import {
-    Edit,
-    EditMode,
-    EditOptions,
-    EditResult,
-    EditError,
-    LineAnchor,
-} from "../../types";
+import { ToolCall, ToolResult } from "../../types";
+import { Edit, EditMode, EditResult, EditError } from "../../types";
 import {
     computeMyersLineDiffHunks,
     rstrip,
@@ -23,12 +17,70 @@ import {
     clampLineNumber,
     formatDisplayWindow,
 } from "../../utils/str";
+import { BaseTool } from "../base-tool";
 
-interface FileEditParams {
-    path: string;
-    options?: EditOptions;
-    edits: Edit[];
-}
+// Schema for the file.edit tool
+const lineAnchorSchema = z.object({
+    line: z.number(),
+    text: z.string(),
+    before: z.array(z.string()).optional(),
+    after: z.array(z.string()).optional(),
+});
+
+const anchorSchema = z.object({
+    start: lineAnchorSchema,
+    end: lineAnchorSchema.optional(),
+});
+
+const editSchema = z.object({
+    mode: z.enum(["replace", "delete", "insert_before", "insert_after"]),
+    anchor: anchorSchema,
+    content: z
+        .union([z.string(), z.array(z.string())])
+        .optional()
+        .transform((val) => {
+            if (val === undefined) {
+                return undefined;
+            }
+            if (typeof val === "string") {
+                return val.split("\n");
+            }
+            return val;
+        }),
+});
+
+const editOutputSchema: z.ZodType<Edit> = z.object({
+    mode: z.enum(["replace", "delete", "insert_before", "insert_after"]),
+    anchor: anchorSchema,
+    content: z.array(z.string()).optional(),
+});
+
+const fileEditSchema = z.object({
+    path: z.string(),
+    options: z
+        .object({
+            atomic: z.boolean().optional(),
+        })
+        .optional(),
+    edits: z.array(editSchema),
+});
+
+const fileStateSchema = z
+    .object({
+        total_lines: z.number(),
+    })
+    .loose();
+
+const fileEditResultDataSchema = z
+    .object({
+        applied: z.array(z.unknown()).optional(),
+        errors: z.array(z.unknown()).optional(),
+        file_state: z.unknown().optional(),
+        workspace_update: z.unknown().optional(),
+    })
+    .loose();
+
+type FileEditParams = z.infer<typeof fileEditSchema>;
 
 interface MatchCandidate {
     line: number;
@@ -39,7 +91,8 @@ interface MatchCandidate {
 
 type EditableContent = string | string[] | undefined;
 
-export class FileEditTool extends BaseTool {
+export class FileEditTool extends BaseTool<typeof fileEditSchema> {
+    protected schema = fileEditSchema;
     private workspace: WorkspaceManager;
     private workspaceRoot: string;
 
@@ -193,49 +246,8 @@ EOF
         this.workspaceRoot = workspace.getWorkspaceRoot();
     }
 
-    validateParams(params: unknown): { valid: boolean; errors: string[]; data?: unknown } {
-        const base = super.validateParams(params);
-        if (!base.valid || !base.data) {
-            return base;
-        }
-
-        const data = base.data as FileEditParams;
-        const errors: string[] = [];
-
-        if (!Array.isArray(data.edits)) {
-            errors.push("edits: Expected an array of edit operations");
-        } else {
-            data.edits.forEach((edit, index) => {
-                if (!edit || typeof edit !== "object") {
-                    errors.push(`edits.${index}: Expected an edit object`);
-                    return;
-                }
-
-                if (!this.isSupportedEditContent(edit.content as EditableContent)) {
-                    errors.push(`edits.${index}.content: Expected string or array of strings`);
-                }
-            });
-        }
-
-        if (errors.length > 0) {
-            return { valid: false, errors };
-        }
-
-        return { valid: true, errors: [], data };
-    }
-
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for file.edit",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
-
-        const { path: filePath, options = {}, edits } = validation.data as FileEditParams;
+    async run(params: FileEditParams): Promise<ToolResult> {
+        const { path: filePath, options = {}, edits } = params;
 
         try {
             const absolutePath = this.resolvePath(filePath);
@@ -249,18 +261,19 @@ EOF
 
             const atomic = options.atomic ?? true;
 
-            const preApplyResults = this.validateAnchors(filePath, lines, edits);
+            const validatedEdits = edits.map((e) => editOutputSchema.parse(e));
+            const preApplyResults = this.validateAnchors(filePath, lines, validatedEdits);
 
-            const validEdits: Array<{ edit: Edit; matchResult: typeof preApplyResults[0] }> = [];
+            const validEdits: Array<{ edit: Edit; matchResult: (typeof preApplyResults)[0] }> = [];
             const invalidEdits: Array<{ edit: Edit; error: EditError; suggestion?: string }> = [];
 
-            for (let i = 0; i < edits.length; i++) {
+            for (let i = 0; i < validatedEdits.length; i++) {
                 const result = preApplyResults[i];
                 if (result.valid) {
-                    validEdits.push({ edit: edits[i], matchResult: result });
+                    validEdits.push({ edit: validatedEdits[i], matchResult: result });
                 } else {
                     invalidEdits.push({
-                        edit: edits[i],
+                        edit: validatedEdits[i],
                         error: {
                             index: result.editIndex,
                             error: result.errorCode || "ANCHOR_NOT_FOUND",
@@ -385,11 +398,7 @@ EOF
             typeof toolCall.params.path === "string" ? toolCall.params.path : undefined,
         );
         if (failureLines) {
-            return [
-                `[FAIL] ${toolCall.tool}`,
-                "---",
-                ...failureLines,
-            ].join("\n");
+            return [`[FAIL] ${toolCall.tool}`, "---", ...failureLines].join("\n");
         }
 
         return super.formatResultForLLM(toolCall, result);
@@ -399,17 +408,16 @@ EOF
         filePath: string,
         lines: string[],
         edits: Edit[],
-    ):
-        Array<{
-            valid: boolean;
-            editIndex: number;
-            errorCode?: string;
-            errorMessage?: string;
-            errorSuggestion?: string;
-            candidates?: Array<{ line: number; preview: string }>;
-            matchedRange: { start: number; end: number };
-            matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
-        }> {
+    ): Array<{
+        valid: boolean;
+        editIndex: number;
+        errorCode?: string;
+        errorMessage?: string;
+        errorSuggestion?: string;
+        candidates?: Array<{ line: number; preview: string }>;
+        matchedRange: { start: number; end: number };
+        matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
+    }> {
         const results: Array<{
             valid: boolean;
             editIndex: number;
@@ -441,7 +449,7 @@ EOF
                 if (candidates.length === 0) {
                     errorCode = "NO_MATCH";
                     errorMessage = `Anchor text not found anywhere in file.
-Expected: "${edit.anchor.start.text.slice(0, 80)}${edit.anchor.start.text.length > 80 ? '...' : ''}"
+Expected: "${edit.anchor.start.text.slice(0, 80)}${edit.anchor.start.text.length > 80 ? "..." : ""}"
 
 TROUBLESHOOTING:
 1. Verify whether you copied the EXACT text from the file again (use file.peek to read it)
@@ -455,14 +463,18 @@ TROUBLESHOOTING:
                     errorMessage = `Anchor not found at line ${edit.anchor.start.line}.
 Similar content found at line ${c.line}.
 
-Expected: "${edit.anchor.start.text.slice(0, 60)}${edit.anchor.start.text.length > 60 ? '...' : ''}"
-Actual:   "${actualLine.slice(0, 60)}${actualLine.length > 60 ? '...' : ''}"
+Expected: "${edit.anchor.start.text.slice(0, 60)}${edit.anchor.start.text.length > 60 ? "..." : ""}"
+Actual:   "${actualLine.slice(0, 60)}${actualLine.length > 60 ? "..." : ""}"
 
 TROUBLESHOOTING:
 1. Use line ${c.line} instead of ${edit.anchor.start.line}
 2. Copy the EXACT text from the file (the actual line is shown above)
 3. Include "before" and "after" context fields for disambiguation`;
-                    errorSuggestion = this.formatSingleCandidateSuggestion(lines, edit.anchor.start, c.line);
+                    errorSuggestion = this.formatSingleCandidateSuggestion(
+                        lines,
+                        edit.anchor.start,
+                        c.line,
+                    );
                 } else {
                     errorCode = "AMBIGUOUS_MATCH";
                     errorMessage = `Found ${candidates.length} possible matches for anchor.
@@ -472,7 +484,11 @@ TROUBLESHOOTING:
 1. Add "before" and "after" context fields (2 lines each) to disambiguate
 2. Use a more unique portion of the line as the "text" field
 3. Verify the line number is correct`;
-                    errorSuggestion = this.formatAmbiguousSuggestion(lines, edit.anchor.start, candidates.map((c) => c.line));
+                    errorSuggestion = this.formatAmbiguousSuggestion(
+                        lines,
+                        edit.anchor.start,
+                        candidates.map((c) => c.line),
+                    );
                 }
 
                 results.push({
@@ -498,7 +514,10 @@ TROUBLESHOOTING:
         filePath: string,
         lines: string[],
         edit: Edit,
-    ): { matchedRange: { start: number; end: number }; matchQuality: "exact" | "fuzzy" | "substring" | "line_hint" } | null {
+    ): {
+        matchedRange: { start: number; end: number };
+        matchQuality: "exact" | "fuzzy" | "substring" | "line_hint";
+    } | null {
         const isRange = edit.mode === "replace" || edit.mode === "delete";
         const loose = this.isLooseWhitespace(filePath);
 
@@ -518,14 +537,13 @@ TROUBLESHOOTING:
                     if (foundAmbiguousMatch) {
                         return null;
                     }
-                    const filtered = this.filterByLineHint(
-                        candidates,
-                        edit.anchor.start.line,
-                    );
+                    const filtered = this.filterByLineHint(candidates, edit.anchor.start.line);
                     if (filtered.length >= 1) {
                         const best = filtered.reduce((closest, c) =>
-                            Math.abs(c.startLine - edit.anchor.start.line) < Math.abs(closest.startLine - edit.anchor.start.line)
-                                ? c : closest
+                            Math.abs(c.startLine - edit.anchor.start.line) <
+                            Math.abs(closest.startLine - edit.anchor.start.line)
+                                ? c
+                                : closest,
                         );
                         return {
                             matchedRange: {
@@ -567,8 +585,10 @@ TROUBLESHOOTING:
                     );
                     if (filtered.length >= 1) {
                         const best = filtered.reduce((closest, c) =>
-                            Math.abs(c.line - edit.anchor.start.line) < Math.abs(closest.line - edit.anchor.start.line)
-                                ? c : closest
+                            Math.abs(c.line - edit.anchor.start.line) <
+                            Math.abs(closest.line - edit.anchor.start.line)
+                                ? c
+                                : closest,
                         );
                         return {
                             matchedRange: {
@@ -600,27 +620,42 @@ TROUBLESHOOTING:
             return null;
         }
 
-        const target = filePath ? `${filePath}` : "the target file";
+        const target = filePath ?? "the target file";
         const lines: string[] = [];
 
         if (result.error.code === "ATOMIC_FAILURE") {
             const failedEdits = Array.isArray(result.error.details?.failedEdits)
-                ? result.error.details.failedEdits as Array<{ index?: number; error?: string; suggestion?: string }>
+                ? result.error.details.failedEdits
                 : [];
 
             lines.push(`Could not apply edits to ${target}`);
             lines.push(result.error.message);
             lines.push("Atomic mode left the file unchanged.");
 
+            const failedEditSchema = z.object({
+                index: z.number().optional(),
+                error: z.string().optional(),
+                suggestion: z.string().optional(),
+            });
             for (const failedEdit of failedEdits) {
-                lines.push("");
-                lines.push(`Edit ${(failedEdit.index ?? 0) + 1} failed: ${failedEdit.error ?? "UNKNOWN_ERROR"}`);
-                if (typeof failedEdit.suggestion === "string" && failedEdit.suggestion.length > 0) {
-                    lines.push(failedEdit.suggestion);
+                const parsed = failedEditSchema.safeParse(failedEdit);
+                if (parsed.success) {
+                    const index = parsed.data.index ?? 0;
+                    const errorMsg = parsed.data.error ?? "UNKNOWN_ERROR";
+                    const suggestion = parsed.data.suggestion;
+                    lines.push("");
+                    lines.push(`Edit ${index + 1} failed: ${errorMsg}`);
+                    if (suggestion && suggestion.length > 0) {
+                        lines.push(suggestion);
+                    }
                 }
             }
 
-            if (typeof result.error.suggestion === "string" && result.error.suggestion.length > 0 && failedEdits.length === 0) {
+            if (
+                typeof result.error.suggestion === "string" &&
+                result.error.suggestion.length > 0 &&
+                failedEdits.length === 0
+            ) {
                 lines.push("");
                 lines.push(result.error.suggestion);
             }
@@ -640,8 +675,8 @@ TROUBLESHOOTING:
 
     private searchForAnchor(
         lines: string[],
-        startAnchor: LineAnchor,
-        endAnchor: LineAnchor,
+        startAnchor: { line: number; text: string; before?: string[]; after?: string[] },
+        endAnchor: { line: number; text: string; before?: string[]; after?: string[] },
         quality: "exact" | "fuzzy" | "substring" | "line_hint",
         loose: boolean,
     ): MatchCandidate[] {
@@ -653,9 +688,7 @@ TROUBLESHOOTING:
             const searchEnd = Math.min(lines.length, startAnchor.line + 10);
 
             for (let line = searchStart; line <= searchEnd; line++) {
-                if (
-                    this.matchStartAnchor(lines, startAnchor, line, quality, loose)
-                ) {
+                if (this.matchStartAnchor(lines, startAnchor, line, quality, loose)) {
                     const endLines = this.findMatchingEndLines(
                         lines,
                         endAnchor,
@@ -705,7 +738,7 @@ TROUBLESHOOTING:
 
     private findMatchingEndLines(
         lines: string[],
-        endAnchor: LineAnchor,
+        endAnchor: { line: number; text: string; before?: string[]; after?: string[] },
         startLine: number,
         expectedOffset: number,
         quality: "exact" | "fuzzy" | "substring" | "line_hint",
@@ -713,9 +746,7 @@ TROUBLESHOOTING:
     ): number[] {
         const matches: number[] = [];
         const expectedEndLine = startLine + expectedOffset;
-        const maxEndLine = this.supportsVirtualEofLine(endAnchor)
-            ? lines.length + 1
-            : lines.length;
+        const maxEndLine = this.supportsVirtualEofLine(endAnchor) ? lines.length + 1 : lines.length;
 
         if (
             expectedEndLine >= startLine &&
@@ -740,7 +771,7 @@ TROUBLESHOOTING:
 
     private searchForSingleAnchor(
         lines: string[],
-        anchor: LineAnchor,
+        anchor: { line: number; text: string; before?: string[]; after?: string[] },
         quality: "exact" | "fuzzy" | "substring" | "line_hint",
         loose: boolean,
     ): Array<{ line: number; preview: string }> {
@@ -769,7 +800,7 @@ TROUBLESHOOTING:
 
     private matchStartAnchor(
         lines: string[],
-        anchor: LineAnchor,
+        anchor: { line: number; text: string; before?: string[]; after?: string[] },
         lineNum: number,
         quality: string,
         loose: boolean,
@@ -783,13 +814,13 @@ TROUBLESHOOTING:
         const before: string[] = [];
         for (let i = beforeCount; i >= 1; i--) {
             const idx = lineNum - i;
-            before.push(idx >= 1 ? lines[idx - 1] ?? "" : "");
+            before.push(idx >= 1 ? (lines[idx - 1] ?? "") : "");
         }
 
         const after: string[] = [];
         for (let i = 1; i <= afterCount; i++) {
             const idx = lineNum + i;
-            after.push(idx <= lines.length ? lines[idx - 1] ?? "" : "");
+            after.push(idx <= lines.length ? (lines[idx - 1] ?? "") : "");
         }
 
         if (quality === "exact") {
@@ -823,7 +854,7 @@ TROUBLESHOOTING:
 
     private matchEndAnchor(
         lines: string[],
-        anchor: LineAnchor,
+        anchor: { line: number; text: string; before?: string[]; after?: string[] },
         lineNum: number,
         quality: string,
         loose: boolean,
@@ -837,13 +868,13 @@ TROUBLESHOOTING:
         const before: string[] = [];
         for (let i = beforeCount; i >= 1; i--) {
             const idx = lineNum - i;
-            before.push(idx >= 1 ? lines[idx - 1] ?? "" : "");
+            before.push(idx >= 1 ? (lines[idx - 1] ?? "") : "");
         }
 
         const after: string[] = [];
         for (let i = 1; i <= afterCount; i++) {
             const idx = lineNum + i;
-            after.push(idx <= lines.length ? lines[idx - 1] ?? "" : "");
+            after.push(idx <= lines.length ? (lines[idx - 1] ?? "") : "");
         }
 
         if (quality === "exact") {
@@ -876,14 +907,14 @@ TROUBLESHOOTING:
         }
     }
 
-    private supportsVirtualEofLine(anchor: LineAnchor): boolean {
+    private supportsVirtualEofLine(anchor: { text: string }): boolean {
         return anchor.text === "";
     }
 
     private getAnchorLine(
         lines: string[],
         lineNum: number,
-        anchor: LineAnchor,
+        anchor: { text: string },
     ): string | undefined {
         if (lineNum >= 1 && lineNum <= lines.length) {
             return lines[lineNum - 1];
@@ -944,17 +975,11 @@ TROUBLESHOOTING:
         return actual.slice(0, expectedLength);
     }
 
-    private filterByLineHint(
-        candidates: MatchCandidate[],
-        hintLine: number,
-    ): MatchCandidate[] {
+    private filterByLineHint(candidates: MatchCandidate[], hintLine: number): MatchCandidate[] {
         return candidates.filter((c) => Math.abs(c.line - hintLine) <= 5);
     }
 
-    private findCandidates(
-        lines: string[],
-        edit: Edit,
-    ): Array<{ line: number; preview: string }> {
+    private findCandidates(lines: string[], edit: Edit): Array<{ line: number; preview: string }> {
         const anchorText = edit.anchor.start.text;
         const hintLine = edit.anchor.start.line;
 
@@ -987,12 +1012,12 @@ TROUBLESHOOTING:
         return candidates.slice(0, 5);
     }
 
-    private formatNoMatchSuggestion(lines: string[], anchor: LineAnchor): string {
+    private formatNoMatchSuggestion(
+        lines: string[],
+        anchor: { line: number; text: string; before?: string[]; after?: string[] },
+    ): string {
         const hintLine = clampLineNumber(anchor.line, lines.length);
-        const parts: string[] = [
-            "Anchor hint:",
-            this.formatPeekStyleWindow(lines, hintLine),
-        ];
+        const parts: string[] = ["Anchor hint:", this.formatPeekStyleWindow(lines, hintLine)];
 
         if (anchor.before?.length || anchor.after?.length) {
             parts.push("");
@@ -1011,7 +1036,11 @@ TROUBLESHOOTING:
         return parts.join("\n");
     }
 
-    private formatSingleCandidateSuggestion(lines: string[], anchor: LineAnchor, candidateLine: number): string {
+    private formatSingleCandidateSuggestion(
+        lines: string[],
+        anchor: { line: number; text: string; before?: string[]; after?: string[] },
+        candidateLine: number,
+    ): string {
         const clampedHintLine = clampLineNumber(anchor.line, lines.length);
         const mismatchDetails = this.formatAnchorMismatchDetails(lines, anchor, candidateLine);
         const parts: string[] = [
@@ -1034,10 +1063,12 @@ TROUBLESHOOTING:
         return parts.join("\n");
     }
 
-    private formatAmbiguousSuggestion(lines: string[], anchor: LineAnchor, candidateLines: number[]): string {
-        const parts: string[] = [
-            `Found ${candidateLines.length} possible matches.`,
-        ];
+    private formatAmbiguousSuggestion(
+        lines: string[],
+        anchor: { line: number; text: string; before?: string[]; after?: string[] },
+        candidateLines: number[],
+    ): string {
+        const parts: string[] = [`Found ${candidateLines.length} possible matches.`];
 
         for (let i = 0; i < candidateLines.length; i++) {
             const line = candidateLines[i];
@@ -1069,7 +1100,7 @@ TROUBLESHOOTING:
 
     private formatAnchorMismatchDetails(
         lines: string[],
-        anchor: LineAnchor,
+        anchor: { text: string; before?: string[]; after?: string[] },
         candidateLine: number,
     ): string[] {
         const details: string[] = [];
@@ -1084,7 +1115,7 @@ TROUBLESHOOTING:
         const actualBefore: string[] = [];
         for (let i = expectedBefore.length; i >= 1; i--) {
             const idx = candidateLine - i;
-            actualBefore.push(idx >= 1 ? lines[idx - 1] ?? "" : "");
+            actualBefore.push(idx >= 1 ? (lines[idx - 1] ?? "") : "");
         }
         for (let i = 0; i < expectedBefore.length; i++) {
             const expected = expectedBefore[i] ?? "";
@@ -1099,7 +1130,7 @@ TROUBLESHOOTING:
         const actualAfter: string[] = [];
         for (let i = 1; i <= expectedAfter.length; i++) {
             const idx = candidateLine + i;
-            actualAfter.push(idx <= lines.length ? lines[idx - 1] ?? "" : "");
+            actualAfter.push(idx <= lines.length ? (lines[idx - 1] ?? "") : "");
         }
         for (let i = 0; i < expectedAfter.length; i++) {
             const expected = expectedAfter[i] ?? "";
@@ -1142,7 +1173,7 @@ TROUBLESHOOTING:
                     matrix[i][j] = Math.min(
                         matrix[i - 1][j - 1] + 1,
                         matrix[i][j - 1] + 1,
-                        matrix[i - 1][j] + 1
+                        matrix[i - 1][j] + 1,
                     );
                 }
             }
@@ -1152,7 +1183,10 @@ TROUBLESHOOTING:
 
     private checkOverlappingRanges(
         lines: string[],
-        validEdits: Array<{ edit: Edit; matchResult: { matchedRange: { start: number; end: number }; editIndex: number } }>,
+        validEdits: Array<{
+            edit: Edit;
+            matchResult: { matchedRange: { start: number; end: number }; editIndex: number };
+        }>,
     ): Array<{ editIndex: number; overlappedLines: [number, number] }> {
         const overlaps: Array<{ editIndex: number; overlappedLines: [number, number] }> = [];
         const modified = new Array(lines.length + 1).fill(false);
@@ -1252,10 +1286,14 @@ TROUBLESHOOTING:
         return content;
     }
 
-    private isSupportedEditContent(content: EditableContent): content is string | string[] | undefined {
-        return content === undefined
-            || typeof content === "string"
-            || (Array.isArray(content) && content.every((line) => typeof line === "string"));
+    private isSupportedEditContent(
+        content: EditableContent,
+    ): content is string | string[] | undefined {
+        return (
+            content === undefined ||
+            typeof content === "string" ||
+            (Array.isArray(content) && content.every((line) => typeof line === "string"))
+        );
     }
 
     private isLooseWhitespace(filePath: string): boolean {
@@ -1265,24 +1303,22 @@ TROUBLESHOOTING:
     }
 
     private resolvePath(inputPath: string): string {
-      const resolved = path.isAbsolute(inputPath)
-        ? path.resolve(inputPath)
-        : path.resolve(this.workspaceRoot, inputPath);
+        const resolved = path.isAbsolute(inputPath)
+            ? path.resolve(inputPath)
+            : path.resolve(this.workspaceRoot, inputPath);
 
-      // Use path.relative to securely check if path is outside workspace
-      // This handles symlinks, case sensitivity issues, and normalization
-      const relative = path.relative(this.workspaceRoot, resolved);
-      if (relative.startsWith("..") || relative === "..") {
-        throw new Error(
-          `Path ${resolved} is outside workspace root ${this.workspaceRoot}`,
-        );
-      }
+        // Use path.relative to securely check if path is outside workspace
+        // This handles symlinks, case sensitivity issues, and normalization
+        const relative = path.relative(this.workspaceRoot, resolved);
+        if (relative.startsWith("..") || relative === "..") {
+            throw new Error(`Path ${resolved} is outside workspace root ${this.workspaceRoot}`);
+        }
 
-      return resolved;
+        return resolved;
     }
 
     private async validatePath(absolutePath: string): Promise<void> {
-      // Path is already validated in resolvePath, so we just check file existence here
+        // Path is already validated in resolvePath, so we just check file existence here
 
         try {
             const stat = await fs.promises.stat(absolutePath);
@@ -1290,11 +1326,7 @@ TROUBLESHOOTING:
                 throw new Error(`Path ${absolutePath} is not a file`);
             }
         } catch (error) {
-            if (
-                error instanceof Error &&
-                "code" in error &&
-                error.code === "ENOENT"
-            ) {
+            if (error instanceof Error && "code" in error && error.code === "ENOENT") {
                 throw new Error(`File ${absolutePath} does not exist`);
             }
             throw error;
@@ -1303,29 +1335,60 @@ TROUBLESHOOTING:
 
     formatResult(result: ToolResult): string | undefined {
         if (result.success && result.data) {
-            const { applied, errors, file_state, workspace_update } = result.data as {
-                applied: EditResult[];
-                errors: EditError[];
-                file_state: { total_lines: number };
-                workspace_update?: {
-                    loaded_ranges: Array<{ start: number; end: number }>;
-                    total_lines_in_workspace: number;
-                };
-            };
+            const parsedData = fileEditResultDataSchema.safeParse(result.data);
+            if (!parsedData.success) {
+                return undefined;
+            }
+            const resultDataRec = parsedData.data;
+            const appliedRaw = resultDataRec.applied;
+            const applied = Array.isArray(appliedRaw) ? appliedRaw : [];
+            const errorsRaw = resultDataRec.errors;
+            const errors = Array.isArray(errorsRaw) ? errorsRaw : [];
+            const fileState = resultDataRec.file_state;
+
+            let fileStateTotalLines = 0;
+            if (fileState !== null && typeof fileState === "object") {
+                const parsedFileState = fileStateSchema.safeParse(fileState);
+                if (parsedFileState.success) {
+                    fileStateTotalLines = parsedFileState.data.total_lines;
+                }
+            }
+            const workspaceUpdate = resultDataRec.workspace_update;
 
             const lines: string[] = [];
 
             if (errors.length === 0) {
-                lines.push(`\x1b[32m\x1b[1m✓\x1b[0m Applied ${applied.length} edit(s), ${file_state.total_lines} total lines`);
+                lines.push(
+                    `\x1b[32m\x1b[1m✓\x1b[0m Applied ${applied.length} edit(s), ${String(fileStateTotalLines)} total lines`,
+                );
             } else {
-                lines.push(`\x1b[33m\x1b[1m⚠\x1b[0m Applied ${applied.length} edit(s), ${errors.length} error(s)`);
+                lines.push(
+                    `\x1b[33m\x1b[1m⚠\x1b[0m Applied ${applied.length} edit(s), ${errors.length} error(s)`,
+                );
             }
 
-            if (workspace_update) {
-                const rangeStr = workspace_update.loaded_ranges
-                    .map((r) => `${r.start}-${r.end}`)
-                    .join(", ");
-                lines.push(`\x1b[36mWorkspace:\x1b[0m ${workspace_update.total_lines_in_workspace} lines loaded (${rangeStr})`);
+            if (workspaceUpdate !== null && typeof workspaceUpdate === "object") {
+                const loadedRangesRaw =
+                    "loaded_ranges" in workspaceUpdate ? workspaceUpdate.loaded_ranges : undefined;
+                const loadedRanges = Array.isArray(loadedRangesRaw) ? loadedRangesRaw : [];
+                const totalLinesWsRaw =
+                    "total_lines_in_workspace" in workspaceUpdate
+                        ? workspaceUpdate.total_lines_in_workspace
+                        : undefined;
+                const totalLinesWsType = typeof totalLinesWsRaw;
+                const totalLinesInWorkspace = totalLinesWsType === "number" ? totalLinesWsRaw : 0;
+                const rangeSchema = z.object({ start: z.number(), end: z.number() });
+                const rangeStrParts: string[] = [];
+                for (const r of loadedRanges) {
+                    const parsed = rangeSchema.safeParse(r);
+                    if (parsed.success) {
+                        rangeStrParts.push(`${parsed.data.start}-${parsed.data.end}`);
+                    }
+                }
+                const rangeStr = rangeStrParts.join(", ");
+                lines.push(
+                    `\x1b[36mWorkspace:\x1b[0m ${String(totalLinesInWorkspace)} lines loaded (${rangeStr})`,
+                );
             }
 
             return lines.join("\n");

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
+
+import { createDiogenes } from "../src/index";
 import { TaskAskTool } from "../src/tools/task/task-ask";
 import { TaskChooseTool } from "../src/tools/task/task-choose";
-import { createDiogenes } from "../src/index";
 
 describe("Task interaction tools", () => {
     let askTool: TaskAskTool;
@@ -63,7 +64,7 @@ describe("Task interaction tools", () => {
         });
 
         expect(result.success).toBe(false);
-        expect(result.error?.code).toBe("INVALID_PARAM");
+        expect(result.error?.code).toBe("INVALID_PARAMS");
     });
 
     it("should reject empty options for task.choose", async () => {

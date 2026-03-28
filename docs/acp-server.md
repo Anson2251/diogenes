@@ -262,9 +262,12 @@ If your ACP client accepts a command plus args, prefer one of:
 {
   "command": "diogenes-acp",
   "args": [
-    "--env-file", "/path/to/.env.acp",
-    "--config-file", "/path/to/diogenes.config.yaml",
-    "--workspace", "/path/to/repo"
+    "--env-file",
+    "/path/to/.env.acp",
+    "--config-file",
+    "/path/to/diogenes.config.yaml",
+    "--workspace",
+    "/path/to/repo"
   ]
 }
 ```

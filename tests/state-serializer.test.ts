@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
+
 import { createDiogenes } from "../src/create-diogenes";
 import { DiogenesStateSerializer } from "../src/snapshot/state-serializer";
 
@@ -70,9 +71,7 @@ describe("DiogenesStateSerializer", () => {
                 loadedFiles: [
                     {
                         path: "alpha.txt",
-                        ranges: [
-                            { start: 2, end: 3 },
-                        ],
+                        ranges: [{ start: 2, end: 3 }],
                     },
                 ],
                 todo: [

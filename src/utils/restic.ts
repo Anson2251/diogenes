@@ -1,4 +1,23 @@
 import { spawn } from "child_process";
+import { z } from "zod";
+
+const BackupMessageSchema = z.object({
+    message_type: z.string(),
+    snapshot_id: z.string(),
+});
+
+const ResticSnapshotSchema = z.object({
+    id: z.string(),
+    short_id: z.string().optional(),
+    time: z.string(),
+    tree: z.string().optional(),
+    paths: z.array(z.string()).optional(),
+    hostname: z.string().optional(),
+    username: z.string().optional(),
+    uid: z.number().optional(),
+    gid: z.number().optional(),
+    tags: z.array(z.string()).optional(),
+});
 
 export interface ResticClientOptions {
     binary?: string;
@@ -81,12 +100,15 @@ export class ResticCommandError extends Error {
     readonly stdout: string;
     readonly stderr: string;
 
-    constructor(message: string, params: {
-        args: string[];
-        exitCode: number;
-        stdout: string;
-        stderr: string;
-    }) {
+    constructor(
+        message: string,
+        params: {
+            args: string[];
+            exitCode: number;
+            stdout: string;
+            stderr: string;
+        },
+    ) {
         super(message);
         this.name = "ResticCommandError";
         this.args = params.args;
@@ -233,7 +255,10 @@ export class ResticClient {
         await this.run(args, options);
     }
 
-    private async run(args: string[], options: ResticCommandOptions = {}): Promise<ResticCommandResult> {
+    private async run(
+        args: string[],
+        options: ResticCommandOptions = {},
+    ): Promise<ResticCommandResult> {
         this.validatePasswordSources(options);
 
         const mergedEnv = this.buildEnv(options);
@@ -261,19 +286,21 @@ export class ResticClient {
                 setTimeout(() => {
                     child.kill("SIGKILL");
                 }, 250).unref();
-                reject(new ResticCommandError("restic command timed out", {
-                    args,
-                    exitCode: -1,
-                    stdout,
-                    stderr,
-                }));
+                reject(
+                    new ResticCommandError("restic command timed out", {
+                        args,
+                        exitCode: -1,
+                        stdout,
+                        stderr,
+                    }),
+                );
             }, timeoutMs);
 
-            child.stdout.on("data", (chunk) => {
+            child.stdout.on("data", (chunk: Buffer) => {
                 stdout += chunk.toString();
             });
 
-            child.stderr.on("data", (chunk) => {
+            child.stderr.on("data", (chunk: Buffer) => {
                 stderr += chunk.toString();
             });
 
@@ -284,12 +311,14 @@ export class ResticClient {
 
                 settled = true;
                 clearTimeout(timer);
-                reject(new ResticCommandError(error.message, {
-                    args,
-                    exitCode: -1,
-                    stdout,
-                    stderr,
-                }));
+                reject(
+                    new ResticCommandError(error.message, {
+                        args,
+                        exitCode: -1,
+                        stdout,
+                        stderr,
+                    }),
+                );
             });
 
             child.on("close", (exitCode) => {
@@ -301,12 +330,14 @@ export class ResticClient {
                 clearTimeout(timer);
 
                 if (exitCode !== 0) {
-                    reject(new ResticCommandError("restic command failed", {
-                        args,
-                        exitCode: exitCode ?? -1,
-                        stdout,
-                        stderr,
-                    }));
+                    reject(
+                        new ResticCommandError("restic command failed", {
+                            args,
+                            exitCode: exitCode ?? -1,
+                            stdout,
+                            stderr,
+                        }),
+                    );
                     return;
                 }
 
@@ -360,9 +391,10 @@ export class ResticClient {
 
         for (const line of lines) {
             try {
-                const value = JSON.parse(line) as Record<string, unknown>;
-                if (value.message_type === "summary" && typeof value.snapshot_id === "string") {
-                    return value.snapshot_id;
+                const parsed: unknown = JSON.parse(line);
+                const result = BackupMessageSchema.safeParse(parsed);
+                if (result.success && result.data.message_type === "summary") {
+                    return result.data.snapshot_id;
                 }
             } catch {
                 continue;
@@ -374,10 +406,7 @@ export class ResticClient {
             return fallback[1];
         }
 
-        throw new ResticParseError(
-            "Unable to parse snapshot id from restic backup output",
-            stdout,
-        );
+        throw new ResticParseError("Unable to parse snapshot id from restic backup output", stdout);
     }
 
     private parseSnapshots(stdout: string): ResticSnapshot[] {
@@ -387,7 +416,12 @@ export class ResticClient {
         }
 
         try {
-            return JSON.parse(trimmed) as ResticSnapshot[];
+            const parsed: unknown = JSON.parse(trimmed);
+            const result = z.array(ResticSnapshotSchema).safeParse(parsed);
+            if (result.success) {
+                return result.data;
+            }
+            throw new ResticParseError("Unable to parse restic snapshots output", stdout);
         } catch {
             throw new ResticParseError("Unable to parse restic snapshots output", stdout);
         }

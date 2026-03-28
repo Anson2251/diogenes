@@ -1,9 +1,20 @@
-import { BaseTool } from "../base-tool";
+import { z } from "zod";
+
 import { ToolCall, ToolResult } from "../../types";
+import { BaseTool } from "../base-tool";
+
+const taskChooseSchema = z.object({
+    question: z.string(),
+    options: z.array(z.string()),
+});
+
+type TaskChooseParams = z.infer<typeof taskChooseSchema>;
 
 export type ChooseHandler = (question: string, options: string[]) => Promise<string>;
 
-export class TaskChooseTool extends BaseTool {
+export class TaskChooseTool extends BaseTool<typeof taskChooseSchema> {
+    protected schema = taskChooseSchema;
+
     constructor(private readonly chooseHandler: ChooseHandler) {
         super({
             namespace: "task",
@@ -15,7 +26,7 @@ export class TaskChooseTool extends BaseTool {
                     description: "The question to ask the user",
                 },
                 options: {
-                    type: "array<string>",
+                    type: "array",
                     description: "Available choices to present to the user",
                 },
             },
@@ -25,23 +36,14 @@ export class TaskChooseTool extends BaseTool {
         });
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for task.choose",
-                { errors: validation.errors },
-                "Provide a question and a non-empty array of string options",
-            );
-        }
+    async run(params: TaskChooseParams): Promise<ToolResult> {
+        const { question, options } = params;
 
-        const { question, options } = validation.data as {
-            question: string;
-            options: string[];
-        };
-
-        if (!Array.isArray(options) || options.length === 0 || options.some((option) => typeof option !== "string")) {
+        if (
+            !Array.isArray(options) ||
+            options.length === 0 ||
+            options.some((option) => typeof option !== "string")
+        ) {
             return this.error(
                 "INVALID_PARAM",
                 "Invalid parameters for task.choose",

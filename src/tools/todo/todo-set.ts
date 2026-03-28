@@ -2,20 +2,36 @@
  * Todo set tool
  */
 
+import { z } from "zod";
+
+import type { WorkspaceManager } from "../../context/workspace";
+
+import { ToolResult } from "../../types";
 import { BaseTool } from "../base-tool";
-import { ToolResult, TodoItem } from "../../types";
 
-export class TodoSetTool extends BaseTool {
-    private workspace: any;
+const todoItemSchema = z.object({
+    text: z.string(),
+    state: z.enum(["done", "active", "pending"]),
+});
 
-    constructor(workspace: any) {
+const todoSetSchema = z.object({
+    items: z.array(todoItemSchema),
+});
+
+type TodoSetParams = z.infer<typeof todoSetSchema>;
+
+export class TodoSetTool extends BaseTool<typeof todoSetSchema> {
+    protected schema = todoSetSchema;
+    private workspace: WorkspaceManager;
+
+    constructor(workspace: WorkspaceManager) {
         super({
             namespace: "todo",
             name: "set",
             description: "Overwrite entire todo list",
             params: {
                 items: {
-                    type: "array<object>",
+                    type: "array",
                     description: "Array of todo items with text and state",
                 },
             },
@@ -26,79 +42,30 @@ export class TodoSetTool extends BaseTool {
         this.workspace = workspace;
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for todo.set",
-                { errors: validation.errors },
-                "Check parameter types and values",
-            );
-        }
+    run(params: TodoSetParams): ToolResult {
+        const { items } = params;
 
-        const { items } = validation.data as {
-            items: Array<{ text: string; state: string }>;
-        };
+        this.workspace.setTodoItems(items);
 
-        if (!Array.isArray(items)) {
-            return this.error(
-                "INVALID_PARAM",
-                "Items must be an array",
-                { items },
-                "Provide an array of todo items with text and state properties",
-            );
-        }
-
-        const validatedItems: TodoItem[] = [];
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (!item || typeof item !== "object") {
-                return this.error(
-                    "INVALID_ITEM",
-                    `Item at index ${i} is not an object`,
-                    { index: i, item },
-                    "Each todo item must be an object with text and state properties",
-                );
-            }
-
-            if (typeof item.text !== "string") {
-                return this.error(
-                    "INVALID_ITEM",
-                    `Item at index ${i} has invalid text property`,
-                    { index: i, item },
-                    "Todo item text must be a string",
-                );
-            }
-
-            if (!["done", "active", "pending"].includes(item.state)) {
-                return this.error(
-                    "INVALID_ITEM",
-                    `Item at index ${i} has invalid state: ${item.state}`,
-                    { index: i, item },
-                    'Todo item state must be "done", "active", or "pending"',
-                );
-            }
-
-            validatedItems.push({
-                text: item.text,
-                state: item.state as "done" | "active" | "pending",
-            });
-        }
-
-        this.workspace.setTodoItems(validatedItems);
-
-        return this.success({ success: true, items: validatedItems });
+        return this.success({ success: true, items });
     }
 
     formatResult(result: ToolResult): string | undefined {
-        if (result.success && result.data?.items) {
-            const items = result.data.items as TodoItem[];
-            const lines = items.map((item) => {
-                const icon = item.state === "done" ? "✓" : item.state === "active" ? "→" : "○";
-                return `  ${icon} ${item.text}`;
-            });
-            return `\x1b[32m\x1b[1m✓\x1b[0m Set ${items.length} todo items:\n${lines.join("\n")}`;
+        if (result.success && result.data?.items && Array.isArray(result.data.items)) {
+            const lines: string[] = [];
+            for (const item of result.data.items) {
+                const parsed = todoItemSchema.safeParse(item);
+                if (parsed.success) {
+                    const icon =
+                        parsed.data.state === "done"
+                            ? "✓"
+                            : parsed.data.state === "active"
+                              ? "→"
+                              : "○";
+                    lines.push(`  ${icon} ${parsed.data.text}`);
+                }
+            }
+            return `\x1b[32m\x1b[1m✓\x1b[0m Set ${lines.length} todo items:\n${lines.join("\n")}`;
         }
         return undefined;
     }

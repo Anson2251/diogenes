@@ -1,16 +1,21 @@
 import * as fs from "fs";
 import * as path from "path";
-import { BaseTool } from "../base-tool";
-import { ToolResult } from "../../types";
+import { z } from "zod";
+
 import { WorkspaceManager } from "../../context/workspace";
+import { ToolResult } from "../../types";
 import { computeMyersLineDiffHunks } from "../../utils/str";
+import { BaseTool } from "../base-tool";
 
-interface FileOverwriteParams {
-    path: string;
-    content: string | string[];
-}
+const fileOverwriteSchema = z.object({
+    path: z.string(),
+    content: z.union([z.string(), z.array(z.string())]),
+});
 
-export class FileOverwriteTool extends BaseTool {
+type FileOverwriteParams = z.infer<typeof fileOverwriteSchema>;
+
+export class FileOverwriteTool extends BaseTool<typeof fileOverwriteSchema> {
+    protected schema = fileOverwriteSchema;
     private workspace: WorkspaceManager;
     private workspaceRoot: string;
 
@@ -26,8 +31,9 @@ Use this when replacing most or all of a file.
             params: {
                 path: { type: "string", description: "Existing file path" },
                 content: {
-                    type: "content",
-                    description: "Full replacement content. Prefer {\"$heredoc\":\"EOF\"} for multi-line content.",
+                    type: "string",
+                    description:
+                        'Full replacement content. Prefer {"$heredoc":"EOF"} for multi-line content.',
                 },
             },
             returns: {
@@ -40,18 +46,8 @@ Use this when replacing most or all of a file.
         this.workspaceRoot = workspace.getWorkspaceRoot();
     }
 
-    async execute(params: unknown): Promise<ToolResult> {
-        const validation = this.validateParams(params);
-        if (!validation.valid || !validation.data) {
-            return this.error(
-                "INVALID_PARAM",
-                "Invalid parameters for file.overwrite",
-                { errors: validation.errors },
-                "Provide a path and replacement content",
-            );
-        }
-
-        const { path: filePath, content } = validation.data as FileOverwriteParams;
+    async run(params: FileOverwriteParams): Promise<ToolResult> {
+        const { path: filePath, content } = params;
 
         try {
             const absolutePath = this.resolvePath(filePath);
@@ -68,19 +64,52 @@ Use this when replacing most or all of a file.
             await fs.promises.writeFile(absolutePath, serialized, "utf-8");
 
             const existingEntry = this.workspace.getFileEntry(filePath);
-            const workspaceUpdate = existingEntry
-                ? await this.workspace.reloadFileWithRangesContent(filePath, serialized, existingEntry.ranges)
-                : undefined;
+            let workspaceUpdateResult = undefined;
+            if (
+                existingEntry !== undefined &&
+                existingEntry !== null &&
+                typeof existingEntry === "object"
+            ) {
+                if ("ranges" in existingEntry && Array.isArray(existingEntry.ranges)) {
+                    const rangesSchema = z.array(z.object({ start: z.number(), end: z.number() }));
+                    const rangesParsed = rangesSchema.safeParse(existingEntry.ranges);
+                    if (rangesParsed.success) {
+                        workspaceUpdateResult = this.workspace.reloadFileWithRangesContent(
+                            filePath,
+                            serialized,
+                            rangesParsed.data,
+                        );
+                    }
+                }
+            }
+
+            let workspaceUpdate = undefined;
+            if (
+                workspaceUpdateResult !== undefined &&
+                workspaceUpdateResult !== null &&
+                typeof workspaceUpdateResult === "object"
+            ) {
+                const wsResult = workspaceUpdateResult;
+                const rangesValue = "ranges" in wsResult ? wsResult.ranges : undefined;
+                const contentValue = "content" in wsResult ? wsResult.content : undefined;
+                const rangesArray = Array.isArray(rangesValue) ? rangesValue : [];
+                const contentIsObj = contentValue !== null && typeof contentValue === "object";
+                const contentObj = contentIsObj ? contentValue : undefined;
+                const lengthValue =
+                    contentObj !== undefined && "length" in contentObj
+                        ? contentObj.length
+                        : undefined;
+                const lengthNum = typeof lengthValue === "number" ? lengthValue : 0;
+                workspaceUpdate = {
+                    loaded_ranges: rangesArray,
+                    total_lines_in_workspace: lengthNum,
+                };
+            }
 
             return this.success({
                 path: filePath,
                 total_lines: lines.length,
-                workspace_update: workspaceUpdate
-                    ? {
-                        loaded_ranges: workspaceUpdate.ranges,
-                        total_lines_in_workspace: workspaceUpdate.content.length,
-                    }
-                    : undefined,
+                workspace_update: workspaceUpdate,
                 _diff: {
                     path: absolutePath,
                     oldText: previousContent,
@@ -99,35 +128,22 @@ Use this when replacing most or all of a file.
     }
 
     formatResult(result: ToolResult): string | undefined {
-        if (result.success && result.data) {
+        if (
+            result.success &&
+            result.data &&
+            typeof result.data.path === "string" &&
+            typeof result.data.total_lines === "number"
+        ) {
             return `\x1b[32m\x1b[1m✓\x1b[0m Overwrote ${result.data.path} (${result.data.total_lines} lines)`;
         }
         return undefined;
     }
 
-    validateParams(params: unknown): { valid: boolean; errors: string[]; data?: unknown } {
-        const base = super.validateParams(params);
-        if (!base.valid || !base.data) {
-            return base;
-        }
-
-        const data = base.data as FileOverwriteParams;
-        const errors: string[] = [];
-
-        if (!this.isSupportedContent(data.content)) {
-            errors.push("content: Expected string or array of strings");
-        }
-
-        if (errors.length > 0) {
-            return { valid: false, errors };
-        }
-
-        return { valid: true, errors: [], data };
-    }
-
     private isSupportedContent(content: unknown): content is string | string[] {
-        return typeof content === "string" ||
-            (Array.isArray(content) && content.every((line) => typeof line === "string"));
+        return (
+            typeof content === "string" ||
+            (Array.isArray(content) && content.every((line) => typeof line === "string"))
+        );
     }
 
     private validateContent(content: unknown): asserts content is string | string[] {
@@ -146,9 +162,7 @@ Use this when replacing most or all of a file.
             : path.resolve(this.workspaceRoot, inputPath);
         const relative = path.relative(this.workspaceRoot, resolved);
         if (relative.startsWith("..") || relative === "..") {
-            throw new Error(
-                `Path ${resolved} is outside workspace root ${this.workspaceRoot}`,
-            );
+            throw new Error(`Path ${resolved} is outside workspace root ${this.workspaceRoot}`);
         }
         return resolved;
     }

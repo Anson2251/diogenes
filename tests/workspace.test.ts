@@ -1,13 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { WorkspaceManager } from "../src/context/workspace";
 import * as fs from "fs";
 import * as path from "path";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-async function waitFor(
-    predicate: () => boolean,
-    timeoutMs = 2000,
-    intervalMs = 25,
-): Promise<void> {
+import { WorkspaceManager } from "../src/context/workspace";
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2000, intervalMs = 25): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
         if (predicate()) return;
@@ -32,14 +29,14 @@ describe("WorkspaceManager", () => {
         fs.mkdirSync(nestedDir, { recursive: true });
         fs.mkdirSync(ignoredDir, { recursive: true });
         fs.writeFileSync(testFilePath, "line1\nline2\nline3\nline4\nline5");
-        fs.writeFileSync(multiLineFilePath, "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10");
+        fs.writeFileSync(
+            multiLineFilePath,
+            "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10",
+        );
         fs.writeFileSync(nestedFilePath, "nested content");
         fs.writeFileSync(ignoredFilePath, "top secret");
         fs.writeFileSync(ignoredNestedFilePath, "hidden content");
-        fs.writeFileSync(
-            path.join(testDir, ".gitignore"),
-            "secret.txt\nignored-dir/\n",
-        );
+        fs.writeFileSync(path.join(testDir, ".gitignore"), "secret.txt\nignored-dir/\n");
         workspace = new WorkspaceManager(testDir);
     });
 
@@ -52,9 +49,9 @@ describe("WorkspaceManager", () => {
             const entries = await workspace.loadDirectory(".");
 
             expect(entries.length).toBeGreaterThanOrEqual(2);
-            expect(entries.find(e => e.name === "test-file.txt")?.type).toBe("FILE");
-            expect(entries.find(e => e.name === "multi-line.txt")?.type).toBe("FILE");
-            expect(entries.find(e => e.name === "nested")?.type).toBe("DIR");
+            expect(entries.find((e) => e.name === "test-file.txt")?.type).toBe("FILE");
+            expect(entries.find((e) => e.name === "multi-line.txt")?.type).toBe("FILE");
+            expect(entries.find((e) => e.name === "nested")?.type).toBe("DIR");
         });
 
         it("should sort directories before files", async () => {
@@ -64,8 +61,12 @@ describe("WorkspaceManager", () => {
 
             expect(entries[0].type).toBe("DIR");
             expect(firstFileIndex).toBeGreaterThan(0);
-            expect(entries.slice(0, firstFileIndex).every((entry) => entry.type === "DIR")).toBe(true);
-            expect(entries.slice(firstFileIndex).every((entry) => entry.type === "FILE")).toBe(true);
+            expect(entries.slice(0, firstFileIndex).every((entry) => entry.type === "DIR")).toBe(
+                true,
+            );
+            expect(entries.slice(firstFileIndex).every((entry) => entry.type === "FILE")).toBe(
+                true,
+            );
         });
 
         it("should throw error for non-existent directory", async () => {
@@ -197,11 +198,7 @@ describe("WorkspaceManager", () => {
         it("should preserve semantic ranges after edit delta sync", async () => {
             await workspace.loadFile("test-file.txt", 3, 4);
 
-            fs.writeFileSync(
-                testFilePath,
-                "line1\nline2a\nline2b\nline3\nline4\nline5",
-                "utf-8",
-            );
+            fs.writeFileSync(testFilePath, "line1\nline2a\nline2b\nline3\nline4\nline5", "utf-8");
 
             const update = await workspace.syncLoadedFileAfterEdit("test-file.txt", [
                 { matchedRange: [2, 2], newRange: [2, 3] },
@@ -228,9 +225,7 @@ describe("WorkspaceManager", () => {
         });
 
         it("should update todo item state", () => {
-            workspace.setTodoItems([
-                { text: "Task 1", state: "pending" },
-            ]);
+            workspace.setTodoItems([{ text: "Task 1", state: "pending" }]);
 
             const result = workspace.updateTodoItem("Task 1", "done");
             expect(result).toBe(true);

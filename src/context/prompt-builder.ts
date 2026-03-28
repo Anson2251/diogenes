@@ -24,7 +24,7 @@ interface TemplateStrings {
     notepadWorkspaceEmpty: string;
     sectionDelimiter: string;
     separator: string;
-    todoMarkers: Record<TodoItem['state'], string>;
+    todoMarkers: Record<TodoItem["state"], string>;
 }
 
 const TEMPLATES: TemplateStrings = {
@@ -69,10 +69,7 @@ export class PromptBuilder {
     private currentTokens: number = 0;
     private systemPrompt: string;
 
-    constructor(
-        systemPrompt: string,
-        tokenLimit: number,
-    ) {
+    constructor(systemPrompt: string, tokenLimit: number) {
         this.tokenLimit = tokenLimit;
         this.systemPrompt = systemPrompt;
     }
@@ -287,11 +284,7 @@ export class PromptBuilder {
             return "";
         }
 
-        return [
-            "## Tool Results",
-            ...results,
-            "--",
-        ].join("\n");
+        return ["## Tool Results", ...results, "--"].join("\n");
     }
 
     estimateTokens(text: string): number {
@@ -316,9 +309,7 @@ export class PromptBuilder {
         return (this.currentTokens / this.tokenLimit) * 100;
     }
 
-    static formatToolDefinitions(
-        definitions: import("../types").ToolDefinition[],
-    ): string {
+    static formatToolDefinitions(definitions: import("../types").ToolDefinition[]): string {
         const parts: string[] = [];
 
         for (const def of definitions) {

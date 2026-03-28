@@ -2,9 +2,10 @@
  * Base tool interface and abstract class
  */
 
-import { z } from "zod";
-import { ToolCall, ToolDefinition, ToolResult } from "../types";
 import { TRON } from "@tron-format/tron";
+import { z } from "zod";
+
+import { ToolCall, ToolDefinition, ToolResult } from "../types";
 
 export interface ToolOutputFormatter {
     /**
@@ -15,13 +16,12 @@ export interface ToolOutputFormatter {
     formatResultForLLM(toolCall: ToolCall, result: ToolResult): string;
 }
 
-export abstract class BaseTool implements ToolOutputFormatter {
+export abstract class BaseTool<TParams extends z.ZodType> implements ToolOutputFormatter {
     protected definition: ToolDefinition;
-    protected schema: z.ZodType;
+    protected abstract schema: TParams;
 
     constructor(definition: ToolDefinition) {
         this.definition = definition;
-        this.schema = this.buildSchema(definition);
     }
 
     getDefinition(): ToolDefinition {
@@ -63,79 +63,25 @@ export abstract class BaseTool implements ToolOutputFormatter {
         ].join("\n");
     }
 
-    abstract execute(params: unknown): Promise<ToolResult>;
-
-    validateParams(params: unknown): {
-        valid: boolean;
-        errors: string[];
-        data?: unknown;
-    } {
-        try {
-            const validated = this.schema.parse(params);
-            return {
-                valid: true,
-                errors: [],
-                data: validated,
-            };
-        } catch (error) {
-            if (error instanceof z.ZodError) {
-                const errors = error.issues.map(
-                    (err) => `${err.path.join(".")}: ${err.message}`,
-                );
-                return {
-                    valid: false,
-                    errors,
-                };
-            }
-            return {
-                valid: false,
-                errors: [
-                    `Validation error: ${error instanceof Error ? error.message : String(error)}`,
-                ],
-            };
+    /**
+     * Execute the tool with automatic parameter validation.
+     * This method validates params against the schema and calls run() if valid.
+     */
+    async execute(params: unknown): Promise<ToolResult> {
+        const validation = this.schema.safeParse(params);
+        if (!validation.success) {
+            return this.error("INVALID_PARAMS", "Validation failed", {
+                issues: validation.error.issues,
+            });
         }
+        return this.run(validation.data);
     }
 
-    private buildSchema(definition: ToolDefinition): z.ZodType {
-        const shape: Record<string, z.ZodType> = {};
-
-        for (const [paramName, paramDef] of Object.entries(definition.params)) {
-            let schema: z.ZodType;
-
-            switch (paramDef.type) {
-                case "string":
-                    schema = z.string();
-                    break;
-                case "number":
-                    schema = z.number();
-                    break;
-                case "bool":
-                    schema = z.boolean();
-                    break;
-                case "array":
-                    schema = z.array(z.any());
-                    break;
-                case "object":
-                    schema = z.object({}).loose(); // Allow any object
-                    break;
-                default:
-                    if (paramDef.type.startsWith("array<")) {
-                        // For now, treat all arrays as any[]
-                        schema = z.array(z.any());
-                    } else {
-                        schema = z.any();
-                    }
-            }
-
-            if (paramDef.optional) {
-                shape[paramName] = schema.optional();
-            } else {
-                shape[paramName] = schema;
-            }
-        }
-
-        return z.object(shape);
-    }
+    /**
+     * Abstract method that must be implemented by all tool classes.
+     * This is the actual implementation of the tool's functionality.
+     */
+    abstract run(params: z.infer<TParams>): ToolResult | Promise<ToolResult>;
 
     success(data: Record<string, unknown>): ToolResult {
         return {
