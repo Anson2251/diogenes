@@ -17,6 +17,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "postinstall": "git config core.hooksPath .githooks || true",
     "fmt": "pnpm oxfmt",
     "build": "pnpm tsgo",
     "dev": "pnpm tsgo --watch",

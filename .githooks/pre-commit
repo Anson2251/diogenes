@@ -1,0 +1,30 @@
+#!/bin/sh
+
+echo "Running pre-commit checks..."
+
+echo "\n[1/3] Running linter..."
+pnpm lint
+if [ $? -ne 0 ]; then
+    echo "\n⚠️  WARNING: Lint check failed. Please fix lint issues."
+else
+    echo "✓ Lint check passed"
+fi
+
+echo "\n[2/3] Running tests..."
+pnpm test
+if [ $? -ne 0 ]; then
+    echo "\n⚠️  WARNING: Tests failed. Please fix failing tests."
+else
+    echo "✓ Tests passed"
+fi
+
+echo "\n[3/3] Running formatter..."
+pnpm fmt
+if [ $? -ne 0 ]; then
+    echo "\n⚠️  WARNING: Formatter failed."
+else
+    echo "✓ Formatting complete"
+fi
+
+echo "\n✓ Pre-commit checks completed (warnings shown above if any)\n"
+exit 0
