@@ -256,7 +256,7 @@ export class ACPServer {
             }
             return this.error(
                 message.id ?? null,
-                -32000,
+                -32603,
                 error instanceof Error ? error.message : String(error),
             );
         }
