@@ -9,16 +9,13 @@ import * as yaml from "yaml";
 import type { DiogenesConfig } from "./types";
 
 import { startACPServer } from "./index";
+import { getProviderApiKey } from "./utils/api-key-manager";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
 import {
     ensureDefaultConfigFileSync,
     ensureDefaultModelsConfigSync,
 } from "./utils/config-bootstrap";
-import {
-    loadModelsConfig,
-    resolveModelWithFallback,
-} from "./utils/model-resolver";
-import { getProviderApiKey } from "./utils/api-key-manager";
+import { loadModelsConfig, resolveModelWithFallback } from "./utils/model-resolver";
 
 interface ACPCLIOptions {
     model?: string;
@@ -308,7 +305,7 @@ export function createDebugStdio(
 
 function main(): void {
     const options = parseArgs();
-    
+
     // Load .env file - check both provided path and default locations
     if (options.envFile) {
         loadDotenv({ path: options.envFile });
@@ -318,11 +315,11 @@ function main(): void {
         // If not found in cwd, try to find .env in project root
         // __dirname is in dist/, so go up one level to reach project root
         if (!cwdResult.parsed) {
-            const projectRoot = path.resolve(__dirname, '..');
-            loadDotenv({ path: path.join(projectRoot, '.env'), quiet: true });
+            const projectRoot = path.resolve(__dirname, "..");
+            loadDotenv({ path: path.join(projectRoot, ".env"), quiet: true });
         }
     }
-    
+
     const config = createConfig(options);
 
     let input: NodeJS.ReadStream | PassThrough = process.stdin;

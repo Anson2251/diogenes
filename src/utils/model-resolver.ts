@@ -1,12 +1,8 @@
 import * as fs from "fs";
 import * as yaml from "yaml";
+import { z } from "zod";
 
 import type { DiogenesConfig, ModelsConfig, ResolvedModel } from "../types";
-import {
-    getProviderApiKey,
-    getProviderApiKeyEnvVarName,
-} from "./api-key-manager";
-
 /**
  * Model Resolution
  *
@@ -16,7 +12,7 @@ import {
  * - API key injection from environment
  */
 
-import { z } from "zod";
+import { getProviderApiKey, getProviderApiKeyEnvVarName } from "./api-key-manager";
 
 const ProviderStyleSchema = z.enum(["openai", "anthropic"]);
 
@@ -82,15 +78,10 @@ export function listAvailableModels(config: ModelsConfig): string[] {
  * Resolve a specific model from config
  * Automatically injects API key from environment
  */
-export function resolveModel(
-    config: ModelsConfig,
-    modelRef: string,
-): ResolvedModel {
+export function resolveModel(config: ModelsConfig, modelRef: string): ResolvedModel {
     const parts = modelRef.split("/");
     if (parts.length !== 2) {
-        throw new Error(
-            `Invalid model reference: ${modelRef}. Expected format: provider/model`,
-        );
+        throw new Error(`Invalid model reference: ${modelRef}. Expected format: provider/model`);
     }
 
     const [providerName, modelName] = parts;
@@ -101,9 +92,7 @@ export function resolveModel(
 
     const model = provider.models[modelName];
     if (!model) {
-        throw new Error(
-            `Unknown model: ${modelName} for provider ${providerName}`,
-        );
+        throw new Error(`Unknown model: ${modelName} for provider ${providerName}`);
     }
 
     const apiKey = getProviderApiKey(providerName);
@@ -132,9 +121,7 @@ export function resolveModel(
 /**
  * Resolve the default model from config
  */
-export function resolveDefaultModel(
-    config: ModelsConfig,
-): ResolvedModel | null {
+export function resolveDefaultModel(config: ModelsConfig): ResolvedModel | null {
     if (!config.default) {
         return null;
     }
@@ -166,9 +153,7 @@ export function resolveModelWithFallback(
     const available = listAvailableModels(modelsConfig);
 
     // If requested model is available, use it; otherwise fallback to default
-    const modelToResolve = available.includes(modelRef)
-        ? modelRef
-        : modelsConfig.default;
+    const modelToResolve = available.includes(modelRef) ? modelRef : modelsConfig.default;
 
     if (!modelToResolve) {
         return null;
@@ -179,10 +164,7 @@ export function resolveModelWithFallback(
     } catch (error) {
         // If fallback also fails, return null
         if (process.env.DIOGENES_DEBUG) {
-            console.error(
-                `Failed to resolve model ${modelToResolve}:`,
-                error,
-            );
+            console.error(`Failed to resolve model ${modelToResolve}:`, error);
         }
         return null;
     }
@@ -193,10 +175,7 @@ export function resolveModelWithFallback(
  *
  * Updates the llm configuration with resolved model details
  */
-export function applyResolvedModel(
-    config: Partial<DiogenesConfig>,
-    resolved: ResolvedModel,
-): void {
+export function applyResolvedModel(config: Partial<DiogenesConfig>, resolved: ResolvedModel): void {
     const currentLLM = config.llm || {};
     config.llm = {
         ...currentLLM,

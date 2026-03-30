@@ -15,8 +15,10 @@ import * as path from "path";
 import * as readline from "readline";
 import * as yaml from "yaml";
 
-import { SessionStore, type SessionPruneResult, isTemporarySession } from "./acp/session-store";
 import type { StoredSessionMetadata } from "./acp/types";
+import type { SnapshotSummary } from "./snapshot/types";
+
+import { SessionStore, type SessionPruneResult, isTemporarySession } from "./acp/session-store";
 import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
 import {
     executeTask,
@@ -30,7 +32,7 @@ import {
     type ConversationMessage,
     type DiogenesContextManager,
 } from "./index";
-import type { SnapshotSummary } from "./snapshot/types";
+import { getProviderApiKey } from "./utils/api-key-manager";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
 import {
     ensureDefaultConfigFileSync,
@@ -42,7 +44,6 @@ import {
     resolveModelWithFallback,
     getProviderApiKeyEnvVarName,
 } from "./utils/model-resolver";
-import { getProviderApiKey } from "./utils/api-key-manager";
 import { parseSocraticToolInput } from "./utils/socratic-parser";
 
 // ANSI color codes for terminal output
@@ -128,38 +129,59 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
             command = { kind: "run" };
         });
 
-    program.command("run <task...>").summary("Run a task").action((taskParts: string[]) => {
-        command = { kind: "run" };
-        task = taskParts.join(" ");
-    });
+    program
+        .command("run <task...>")
+        .summary("Run a task")
+        .action((taskParts: string[]) => {
+            command = { kind: "run" };
+            task = taskParts.join(" ");
+        });
 
-    program.command("interactive").summary("Start interactive mode").action(() => {
-        commandOptions.interactive = true;
-    });
+    program
+        .command("interactive")
+        .summary("Start interactive mode")
+        .action(() => {
+            commandOptions.interactive = true;
+        });
 
-    program.command("socratic <task...>").summary("Run in Socratic debug mode").action((taskParts: string[]) => {
-        commandOptions.socratic = true;
-        task = taskParts.join(" ");
-    });
+    program
+        .command("socratic <task...>")
+        .summary("Run in Socratic debug mode")
+        .action((taskParts: string[]) => {
+            commandOptions.socratic = true;
+            task = taskParts.join(" ");
+        });
 
-    program.command("acp").summary("Start ACP stdio server").action(() => {
-        commandOptions.acp = true;
-    });
+    program
+        .command("acp")
+        .summary("Start ACP stdio server")
+        .action(() => {
+            commandOptions.acp = true;
+        });
 
-    program.command("clear-app-data").summary("Delete Diogenes config and local storage").action(() => {
-        commandOptions.clearAppData = true;
-    });
+    program
+        .command("clear-app-data")
+        .summary("Delete Diogenes config and local storage")
+        .action(() => {
+            commandOptions.clearAppData = true;
+        });
 
     const sessions = program
         .command("session")
         .summary("Manage stored sessions")
         .description("Inspect and clean stored session metadata and snapshots");
-    sessions.command("list").summary("List sessions").action(() => {
-        command = { kind: "sessions.list" };
-    });
-    sessions.command("get <sessionId>").summary("Show one session").action((sessionId: string) => {
-        command = { kind: "sessions.get", sessionId };
-    });
+    sessions
+        .command("list")
+        .summary("List sessions")
+        .action(() => {
+            command = { kind: "sessions.list" };
+        });
+    sessions
+        .command("get <sessionId>")
+        .summary("Show one session")
+        .action((sessionId: string) => {
+            command = { kind: "sessions.get", sessionId };
+        });
     sessions
         .command("snapshots <sessionId>")
         .summary("List session snapshots")
@@ -193,12 +215,18 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
     models.action(() => {
         command = { kind: "models.list" };
     });
-    models.command("list").summary("List models").action(() => {
-        command = { kind: "models.list" };
-    });
-    models.command("default [model]").summary("Get or set the default model").action((model?: string) => {
-        command = { kind: "models.default", model };
-    });
+    models
+        .command("list")
+        .summary("List models")
+        .action(() => {
+            command = { kind: "models.list" };
+        });
+    models
+        .command("default [model]")
+        .summary("Get or set the default model")
+        .action((model?: string) => {
+            command = { kind: "models.default", model };
+        });
 
     program.parse(process.argv);
 
@@ -958,7 +986,9 @@ async function main(): Promise<void> {
     try {
         const removedCount = await sessionStore.cleanupTempSessions();
         if (removedCount.length > 0 && options.verbose) {
-            console.log(`${colors.dim}Cleaned up ${removedCount.length} temporary session(s)${colors.reset}`);
+            console.log(
+                `${colors.dim}Cleaned up ${removedCount.length} temporary session(s)${colors.reset}`,
+            );
         }
     } catch {
         // Ignore cleanup errors
@@ -1092,7 +1122,9 @@ async function handleCommand(command: Exclude<CLICommand, { kind: "run" }>): Pro
         }
         case "sessions.prune": {
             if (command.tempOnly) {
-                const result = await pruneTemporarySessions(sessionStore, { dryRun: command.dryRun });
+                const result = await pruneTemporarySessions(sessionStore, {
+                    dryRun: command.dryRun,
+                });
                 console.log(formatTemporarySessionPrune(result, command.dryRun));
                 return;
             }
@@ -1112,7 +1144,9 @@ async function pruneTemporarySessions(
     const sessionIds = sessions.filter(isTemporarySession).map((session) => session.sessionId);
 
     if (!options.dryRun) {
-        await Promise.all(sessionIds.map(async (sessionId) => sessionStore.removeSession(sessionId)));
+        await Promise.all(
+            sessionIds.map(async (sessionId) => sessionStore.removeSession(sessionId)),
+        );
     }
 
     return { sessionIds };
@@ -1204,7 +1238,10 @@ function formatSnapshotList(sessionId: string, snapshots: SnapshotSummary[]): st
     return `${colors.bright}Snapshots for ${sessionId}${colors.reset}\n${formatSnapshotsTable(sessionId, snapshots)}`;
 }
 
-function formatSessionDetails(metadata: StoredSessionMetadata, snapshots: SnapshotSummary[]): string {
+function formatSessionDetails(
+    metadata: StoredSessionMetadata,
+    snapshots: SnapshotSummary[],
+): string {
     return [
         `${colors.bright}Session${colors.reset} ${metadata.sessionId}`,
         `title: ${metadata.title || "(untitled)"}`,
@@ -1236,16 +1273,18 @@ function formatSessionPrune(result: SessionPruneResult, dryRun: boolean): string
 
     return [
         `${colors.bright}${action} ${deleted.length} session artifact set(s)${colors.reset}`,
-        ...deleted.map((sessionId) => `- ${sessionId} ${colors.dim}(${result.reasonsBySessionId[sessionId] || "unknown"})${colors.reset}`),
+        ...deleted.map(
+            (sessionId) =>
+                `- ${sessionId} ${colors.dim}(${result.reasonsBySessionId[sessionId] || "unknown"})${colors.reset}`,
+        ),
     ].join("\n");
 }
 
-function formatTemporarySessionPrune(
-    result: { sessionIds: string[] },
-    dryRun: boolean,
-): string {
+function formatTemporarySessionPrune(result: { sessionIds: string[] }, dryRun: boolean): string {
     if (result.sessionIds.length === 0) {
-        return dryRun ? "No temporary test sessions would be removed." : "No temporary test sessions to remove.";
+        return dryRun
+            ? "No temporary test sessions would be removed."
+            : "No temporary test sessions to remove.";
     }
 
     return [

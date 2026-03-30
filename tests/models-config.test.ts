@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { clearApiKeyCache } from "../src/utils/api-key-manager";
 import {
     parseModelsConfig,
     loadModelsConfig,
@@ -12,7 +13,6 @@ import {
     formatModelsList,
     ModelsConfigSchema,
 } from "../src/utils/models-config";
-import { clearApiKeyCache } from "../src/utils/api-key-manager";
 
 describe("models-config", () => {
     const tempDirs: string[] = [];

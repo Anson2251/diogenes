@@ -23,17 +23,10 @@ import {
     type TaskRunResult,
 } from "../runtime/task-runner";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
+import { getProviderApiKeyEnvVarName } from "../utils/api-key-manager";
+import { ensureDefaultModelsConfigSync } from "../utils/config-bootstrap";
+import { loadModelsConfig, resolveModel } from "../utils/models-config";
 import { tryParsePartialToolCalls } from "../utils/tool-parser";
-import {
-    ensureDefaultModelsConfigSync,
-} from "../utils/config-bootstrap";
-import {
-    loadModelsConfig,
-    resolveModel,
-} from "../utils/models-config";
-import {
-    getProviderApiKeyEnvVarName,
-} from "../utils/api-key-manager";
 import {
     createBaseSlashCommandRegistry,
     createSnapshotSlashCommands,
@@ -1131,7 +1124,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         const currentValue =
             sessionModelValue && options.some((opt) => opt.value === sessionModelValue)
                 ? sessionModelValue
-                : modelsConfig.default ?? null;
+                : (modelsConfig.default ?? null);
 
         if (!currentValue) {
             return null;

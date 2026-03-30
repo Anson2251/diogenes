@@ -1,11 +1,11 @@
 /**
  * API Key Management
- * 
+ *
  * Manages API keys for different providers with support for:
  * - Environment variables (highest priority)
  * - .env file
  * - Provider-specific configuration
- * 
+ *
  * API keys are loaded lazily when a provider is selected.
  */
 
@@ -35,7 +35,7 @@ export function clearApiKeyCache(): void {
  * 1. Cache
  * 2. Environment variable
  * 3. Process env (for already loaded .env)
- * 
+ *
  * @param providerName - The provider name (e.g., 'openai', 'anthropic', 'deepseek')
  * @returns The API key or undefined if not found
  */
@@ -47,10 +47,10 @@ export function getProviderApiKey(providerName: string): string | undefined {
 
     const envVarName = getProviderApiKeyEnvVarName(providerName);
     const apiKey = process.env[envVarName];
-    
+
     // Cache the result (even if undefined)
     apiKeyCache.set(providerName, apiKey);
-    
+
     return apiKey;
 }
 
@@ -76,7 +76,7 @@ export class MissingApiKeyError extends Error {
         const envVarName = getProviderApiKeyEnvVarName(providerName);
         super(
             `No API key found for provider "${providerName}". ` +
-            `Set the ${envVarName} environment variable or add it to your .env file.`
+                `Set the ${envVarName} environment variable or add it to your .env file.`,
         );
         this.name = "MissingApiKeyError";
     }
@@ -113,7 +113,7 @@ export function getApiKeyStatus(providerName: string): {
 } {
     const envVarName = getProviderApiKeyEnvVarName(providerName);
     const apiKey = getProviderApiKey(providerName);
-    
+
     return {
         envVarName,
         isConfigured: apiKey !== undefined,

@@ -42,9 +42,11 @@ describe("CLI session commands", () => {
 
     it("rejects bare task input", () => {
         const originalArgv = process.argv;
-        const exitSpy = vi.spyOn(process, "exit").mockImplementation((((code?: string | number | null) => {
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+            code?: string | number | null,
+        ) => {
             throw new Error(`process.exit:${code ?? 0}`);
-        }) as never));
+        }) as never);
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
         process.argv = ["node", "diogenes", "inspect", "src"];
 
@@ -75,7 +77,11 @@ describe("CLI session commands", () => {
 
         try {
             const parsed = parseArgs();
-            expect(parsed.command).toEqual({ kind: "sessions.prune", dryRun: true, tempOnly: false });
+            expect(parsed.command).toEqual({
+                kind: "sessions.prune",
+                dryRun: true,
+                tempOnly: false,
+            });
         } finally {
             process.argv = originalArgv;
         }
@@ -87,7 +93,11 @@ describe("CLI session commands", () => {
 
         try {
             const parsed = parseArgs();
-            expect(parsed.command).toEqual({ kind: "sessions.prune", dryRun: true, tempOnly: true });
+            expect(parsed.command).toEqual({
+                kind: "sessions.prune",
+                dryRun: true,
+                tempOnly: true,
+            });
         } finally {
             process.argv = originalArgv;
         }

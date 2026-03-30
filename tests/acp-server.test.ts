@@ -3,12 +3,12 @@ import * as os from "os";
 import * as path from "path";
 import { PassThrough } from "stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as yaml from "yaml";
 
 import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
 import { formatToolResults } from "../src/utils/tool-parser";
-import * as yaml from "yaml";
 
 function createStreamingResponse(chunks: string[]): Response {
     const encoder = new TextEncoder();
