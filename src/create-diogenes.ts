@@ -7,6 +7,7 @@ import { DiogenesContextManager } from "./context";
 import { DirListTool } from "./tools/dir/dir-list";
 import { DirUnloadTool } from "./tools/dir/dir-unload";
 import { FileCreateTool } from "./tools/file/file-create";
+import { FileRemoveTool } from "./tools/file/file-remove";
 import { FileEditTool } from "./tools/file/file-edit";
 import { FileLoadTool } from "./tools/file/file-load";
 import { FileOverwriteTool } from "./tools/file/file-overwrite";
@@ -32,6 +33,7 @@ export function createDiogenes(config?: DiogenesConfig) {
     contextManager.registerTool(new FileEditTool(workspace));
     contextManager.registerTool(new FilePeekTool(workspace));
     contextManager.registerTool(new FileCreateTool(workspace));
+    contextManager.registerTool(new FileRemoveTool(workspace));
     contextManager.registerTool(new FileOverwriteTool(workspace));
     contextManager.registerTool(new TodoSetTool(workspace));
     contextManager.registerTool(new TodoUpdateTool(workspace));

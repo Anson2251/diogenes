@@ -16,6 +16,7 @@ export { FileUnloadTool } from "./tools/file/file-unload";
 export { FileEditTool } from "./tools/file/file-edit";
 export { FilePeekTool } from "./tools/file/file-peek";
 export { FileCreateTool } from "./tools/file/file-create";
+export { FileRemoveTool } from "./tools/file/file-remove";
 export { FileOverwriteTool } from "./tools/file/file-overwrite";
 export { TodoSetTool } from "./tools/todo/todo-set";
 export { TodoUpdateTool } from "./tools/todo/todo-update";

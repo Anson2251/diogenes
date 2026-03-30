@@ -117,6 +117,10 @@ The tool tries to find your anchor in this order:
 2. Fuzzy match: "text" is similar + "before"/"after" context matches
 3. Line hint: Falls back to searching around the specified "line" number (±10 lines)
 
+CONTEXT ORDERING:
+- "before": list lines above the anchor in ascending line-number order (furthest line first, nearest line last)
+- "after": list lines below the anchor in ascending line-number order (nearest line first, furthest line last)
+
 COMMON FAILURE MODES - AVOID THESE:
 ❌ WRONG: Paraphrasing text: "text": "function that does something"
 ✅ RIGHT: Copy exact text: "text": "function processData(input: string): void {"
@@ -210,7 +214,7 @@ EXAMPLE - Append to end of file (file has 3 lines):
             "start": {
                 "line": 3,
                 "text": "last line content",
-                "before": ["line 2 content", "line 1 content"],
+                "before": ["line 1 content", "line 2 content"],
                 "after": []
             }
             },
@@ -510,6 +514,15 @@ TROUBLESHOOTING:
         return results;
     }
 
+    /**
+     * Find the best anchor match across quality tiers.
+     *
+     * Strategy per quality tier:
+     *   - 0 candidates  → fall through to next tier
+     *   - 1 candidate   → return immediately (unambiguous)
+     *   - N candidates  → disambiguate by proximity to the line hint (±10);
+     *                      if exactly one is nearby, use it; otherwise fall through
+     */
     private findAnchorMatch(
         filePath: string,
         lines: string[],
@@ -520,10 +533,9 @@ TROUBLESHOOTING:
     } | null {
         const isRange = edit.mode === "replace" || edit.mode === "delete";
         const loose = this.isLooseWhitespace(filePath);
+        const hintLine = edit.anchor.start.line;
 
         if (isRange && edit.anchor.end) {
-            let foundAmbiguousMatch = false;
-
             for (const quality of ["exact", "fuzzy", "substring", "line_hint"] as const) {
                 const candidates = this.searchForAnchor(
                     lines,
@@ -533,27 +545,9 @@ TROUBLESHOOTING:
                     loose,
                 );
 
-                if (quality === "line_hint") {
-                    if (foundAmbiguousMatch) {
-                        return null;
-                    }
-                    const filtered = this.filterByLineHint(candidates, edit.anchor.start.line);
-                    if (filtered.length >= 1) {
-                        const best = filtered.reduce((closest, c) =>
-                            Math.abs(c.startLine - edit.anchor.start.line) <
-                            Math.abs(closest.startLine - edit.anchor.start.line)
-                                ? c
-                                : closest,
-                        );
-                        return {
-                            matchedRange: {
-                                start: best.startLine,
-                                end: best.endLine,
-                            },
-                            matchQuality: quality,
-                        };
-                    }
-                } else if (candidates.length === 1) {
+                if (candidates.length === 0) continue;
+
+                if (candidates.length === 1) {
                     return {
                         matchedRange: {
                             start: candidates[0].startLine,
@@ -561,13 +555,22 @@ TROUBLESHOOTING:
                         },
                         matchQuality: quality,
                     };
-                } else if (candidates.length > 1) {
-                    foundAmbiguousMatch = true;
                 }
+
+                // Multiple candidates: disambiguate by proximity to line hint
+                const best = this.pickClosestCandidate(candidates, hintLine);
+                if (best) {
+                    return {
+                        matchedRange: {
+                            start: best.startLine,
+                            end: best.endLine,
+                        },
+                        matchQuality: quality,
+                    };
+                }
+                // All candidates are far from hint — fall through to next tier
             }
         } else {
-            let foundAmbiguousMatch = false;
-
             for (const quality of ["exact", "fuzzy", "substring", "line_hint"] as const) {
                 const candidates = this.searchForSingleAnchor(
                     lines,
@@ -576,29 +579,9 @@ TROUBLESHOOTING:
                     loose,
                 );
 
-                if (quality === "line_hint") {
-                    if (foundAmbiguousMatch) {
-                        return null;
-                    }
-                    const filtered = candidates.filter(
-                        (c) => Math.abs(c.line - edit.anchor.start.line) <= 10,
-                    );
-                    if (filtered.length >= 1) {
-                        const best = filtered.reduce((closest, c) =>
-                            Math.abs(c.line - edit.anchor.start.line) <
-                            Math.abs(closest.line - edit.anchor.start.line)
-                                ? c
-                                : closest,
-                        );
-                        return {
-                            matchedRange: {
-                                start: best.line,
-                                end: best.line,
-                            },
-                            matchQuality: quality,
-                        };
-                    }
-                } else if (candidates.length === 1) {
+                if (candidates.length === 0) continue;
+
+                if (candidates.length === 1) {
                     return {
                         matchedRange: {
                             start: candidates[0].line,
@@ -606,13 +589,48 @@ TROUBLESHOOTING:
                         },
                         matchQuality: quality,
                     };
-                } else if (candidates.length > 1) {
-                    foundAmbiguousMatch = true;
                 }
+
+                // Multiple candidates: disambiguate by proximity to line hint
+                const nearby = candidates.filter(
+                    (c) => Math.abs(c.line - hintLine) <= 10,
+                );
+                if (nearby.length >= 1) {
+                    const best = nearby.reduce((closest, c) =>
+                        Math.abs(c.line - hintLine) < Math.abs(closest.line - hintLine)
+                            ? c
+                            : closest,
+                    );
+                    return {
+                        matchedRange: {
+                            start: best.line,
+                            end: best.line,
+                        },
+                        matchQuality: quality,
+                    };
+                }
+                // All candidates are far from hint — fall through to next tier
             }
         }
 
         return null;
+    }
+
+    /**
+     * From a list of range-candidates, pick the one closest to `hintLine`
+     * if at least one falls within ±10 lines.  Returns null otherwise.
+     */
+    private pickClosestCandidate(
+        candidates: MatchCandidate[],
+        hintLine: number,
+    ): MatchCandidate | null {
+        const nearby = candidates.filter((c) => Math.abs(c.startLine - hintLine) <= 10);
+        if (nearby.length === 0) return null;
+        return nearby.reduce((closest, c) =>
+            Math.abs(c.startLine - hintLine) < Math.abs(closest.startLine - hintLine)
+                ? c
+                : closest,
+        );
     }
 
     private formatReadableFailure(result: ToolResult, filePath?: string): string[] | null {
@@ -927,6 +945,14 @@ TROUBLESHOOTING:
         return undefined;
     }
 
+    /**
+     * Compare actual context lines against expected context.
+     *
+     * For "before" context, LLMs may provide lines in either ascending
+     * line-number order (far→near) or descending (near→far).  We accept
+     * both by trying the expected array in its original order first, then
+     * reversed.
+     */
     private compareContext(
         actual: string[],
         expected: string[] | undefined,
@@ -940,9 +966,26 @@ TROUBLESHOOTING:
 
         const actualContext = this.selectContextLines(actual, expected.length, direction);
 
-        return expected.every((line, index) => compareLines(actualContext[index], line, loose));
+        // Forward comparison
+        const forwardMatch = expected.every((line, index) =>
+            compareLines(actualContext[index], line, loose),
+        );
+        if (forwardMatch) return true;
+
+        // For "before" context: try reversed order to tolerate near→far vs far→near
+        if (direction === "before" && expected.length > 1) {
+            const reversed = [...expected].reverse();
+            return reversed.every((line, index) =>
+                compareLines(actualContext[index], line, loose),
+            );
+        }
+
+        return false;
     }
 
+    /**
+     * Fuzzy variant of compareContext with the same bidirectional "before" support.
+     */
     private compareContextFuzzy(
         actual: string[],
         expected: string[] | undefined,
@@ -956,7 +999,21 @@ TROUBLESHOOTING:
 
         const actualContext = this.selectContextLines(actual, expected.length, direction);
 
-        return expected.every((line, index) => compareLines(actualContext[index], line, loose));
+        // Forward comparison
+        const forwardMatch = expected.every((line, index) =>
+            compareLines(actualContext[index], line, loose),
+        );
+        if (forwardMatch) return true;
+
+        // For "before" context: try reversed order to tolerate near→far vs far→near
+        if (direction === "before" && expected.length > 1) {
+            const reversed = [...expected].reverse();
+            return reversed.every((line, index) =>
+                compareLines(actualContext[index], line, loose),
+            );
+        }
+
+        return false;
     }
 
     private selectContextLines(
