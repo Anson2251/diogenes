@@ -55,7 +55,7 @@ Use this when you want to permanently delete a file.
 
         try {
             const absolutePath = this.resolvePath(filePath);
-            
+
             // Check if file exists
             let existed = false;
             try {
@@ -113,18 +113,18 @@ Use this when you want to permanently delete a file.
         ) {
             const existed = result.data.existed;
             const workspaceRemoved = result.data.workspace_removed === true;
-            
+
             let message = `\x1b[32m\x1b[1m✓\x1b[0m `;
             if (existed) {
                 message += `Deleted ${result.data.path}`;
             } else {
                 message += `File ${result.data.path} was already missing`;
             }
-            
+
             if (workspaceRemoved) {
                 message += ` (removed from workspace)`;
             }
-            
+
             return message;
         }
         return undefined;

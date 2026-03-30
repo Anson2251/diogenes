@@ -24,6 +24,7 @@ if [ $? -ne 0 ]; then
     echo "\n⚠️  WARNING: Formatter failed."
 else
     echo "✓ Formatting complete"
+    git add -u
 fi
 
 echo "\n✓ Pre-commit checks completed (warnings shown above if any)\n"

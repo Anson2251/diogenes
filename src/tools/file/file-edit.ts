@@ -592,9 +592,7 @@ TROUBLESHOOTING:
                 }
 
                 // Multiple candidates: disambiguate by proximity to line hint
-                const nearby = candidates.filter(
-                    (c) => Math.abs(c.line - hintLine) <= 10,
-                );
+                const nearby = candidates.filter((c) => Math.abs(c.line - hintLine) <= 10);
                 if (nearby.length >= 1) {
                     const best = nearby.reduce((closest, c) =>
                         Math.abs(c.line - hintLine) < Math.abs(closest.line - hintLine)
@@ -627,9 +625,7 @@ TROUBLESHOOTING:
         const nearby = candidates.filter((c) => Math.abs(c.startLine - hintLine) <= 10);
         if (nearby.length === 0) return null;
         return nearby.reduce((closest, c) =>
-            Math.abs(c.startLine - hintLine) < Math.abs(closest.startLine - hintLine)
-                ? c
-                : closest,
+            Math.abs(c.startLine - hintLine) < Math.abs(closest.startLine - hintLine) ? c : closest,
         );
     }
 
@@ -975,9 +971,7 @@ TROUBLESHOOTING:
         // For "before" context: try reversed order to tolerate near→far vs far→near
         if (direction === "before" && expected.length > 1) {
             const reversed = [...expected].reverse();
-            return reversed.every((line, index) =>
-                compareLines(actualContext[index], line, loose),
-            );
+            return reversed.every((line, index) => compareLines(actualContext[index], line, loose));
         }
 
         return false;
@@ -1008,9 +1002,7 @@ TROUBLESHOOTING:
         // For "before" context: try reversed order to tolerate near→far vs far→near
         if (direction === "before" && expected.length > 1) {
             const reversed = [...expected].reverse();
-            return reversed.every((line, index) =>
-                compareLines(actualContext[index], line, loose),
-            );
+            return reversed.every((line, index) => compareLines(actualContext[index], line, loose));
         }
 
         return false;
