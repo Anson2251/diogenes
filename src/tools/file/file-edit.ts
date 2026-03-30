@@ -592,22 +592,18 @@ TROUBLESHOOTING:
                 }
 
                 // Multiple candidates: disambiguate by proximity to line hint
-                const nearby = candidates.filter((c) => Math.abs(c.line - hintLine) <= 10);
-                if (nearby.length >= 1) {
-                    const best = nearby.reduce((closest, c) =>
-                        Math.abs(c.line - hintLine) < Math.abs(closest.line - hintLine)
-                            ? c
-                            : closest,
-                    );
+                // Only accept if exactly one candidate is within ±2 lines
+                const nearby = candidates.filter((c) => Math.abs(c.line - hintLine) <= 2);
+                if (nearby.length === 1) {
                     return {
                         matchedRange: {
-                            start: best.line,
-                            end: best.line,
+                            start: nearby[0].line,
+                            end: nearby[0].line,
                         },
                         matchQuality: quality,
                     };
                 }
-                // All candidates are far from hint — fall through to next tier
+                // Multiple candidates nearby or none within ±2 — fall through to next tier
             }
         }
 
@@ -615,18 +611,16 @@ TROUBLESHOOTING:
     }
 
     /**
-     * From a list of range-candidates, pick the one closest to `hintLine`
-     * if at least one falls within ±10 lines.  Returns null otherwise.
+     * From a list of range-candidates, pick the one within ±2 lines of `hintLine`
+     * if exactly one candidate falls within that range. Returns null otherwise.
      */
     private pickClosestCandidate(
         candidates: MatchCandidate[],
         hintLine: number,
     ): MatchCandidate | null {
-        const nearby = candidates.filter((c) => Math.abs(c.startLine - hintLine) <= 10);
-        if (nearby.length === 0) return null;
-        return nearby.reduce((closest, c) =>
-            Math.abs(c.startLine - hintLine) < Math.abs(closest.startLine - hintLine) ? c : closest,
-        );
+        const nearby = candidates.filter((c) => Math.abs(c.startLine - hintLine) <= 2);
+        if (nearby.length !== 1) return null;
+        return nearby[0];
     }
 
     private formatReadableFailure(result: ToolResult, filePath?: string): string[] | null {

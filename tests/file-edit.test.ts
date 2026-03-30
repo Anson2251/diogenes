@@ -496,7 +496,7 @@ describe("FileEditTool", () => {
             expect(content).toContain("alpha\nrepeat\nbeta\nREPLACED SECOND\ngamma\n");
         });
 
-        it("should report ambiguity when duplicate text has no disambiguating context", async () => {
+        it("should report ambiguity when duplicate text has multiple matches within ±2 lines of line hint", async () => {
             const originalContent = fs.readFileSync(duplicateFilePath, "utf-8");
 
             const result = await tool.execute({
@@ -522,7 +522,9 @@ describe("FileEditTool", () => {
             expect(fs.readFileSync(duplicateFilePath, "utf-8")).toBe(originalContent);
         });
 
-        it("should include ±5 line windows for each ambiguous match in suggestion", async () => {
+        it("should report ambiguity when line hint is between multiple candidates within ±2 lines", async () => {
+            const originalContent = fs.readFileSync(duplicateFilePath, "utf-8");
+
             const result = await tool.execute({
                 path: duplicateFilePath,
                 edits: [
@@ -530,7 +532,7 @@ describe("FileEditTool", () => {
                         mode: "replace",
                         anchor: {
                             start: {
-                                line: 2,
+                                line: 3,
                                 text: "repeat",
                                 before: [],
                                 after: [],
@@ -543,49 +545,38 @@ describe("FileEditTool", () => {
 
             expect(result.success).toBe(false);
             expect(result.error?.code).toBe("ATOMIC_FAILURE");
-            expect(result.error?.suggestion).toContain("Match 1:");
-            expect(result.error?.suggestion).toContain("Match 2:");
-            expect(result.error?.suggestion).toContain("Lines 1-6 of 6");
-            expect(result.error?.suggestion).toContain("1 | alpha");
-            expect(result.error?.suggestion).toContain("2 | repeat");
-            expect(result.error?.suggestion).toContain("4 | repeat");
+            expect(fs.readFileSync(duplicateFilePath, "utf-8")).toBe(originalContent);
         });
 
-        it("should format atomic failures for the llm as readable text instead of JSON", async () => {
+        it("should use line hint to disambiguate when only one match within ±2 lines", async () => {
+            const wideDuplicateFilePath = path.join(testDir, "wide-duplicate.txt");
+            fs.writeFileSync(
+                wideDuplicateFilePath,
+                "line 1\nline 2\nline 3\nline 4\nline 5\nrepeat\nline 7\nline 8\nline 9\nline 10\nline 11\nrepeat\nline 13\n",
+            );
+
             const result = await tool.execute({
-                path: duplicateFilePath,
+                path: wideDuplicateFilePath,
                 edits: [
                     {
                         mode: "replace",
                         anchor: {
                             start: {
-                                line: 2,
+                                line: 6,
                                 text: "repeat",
                                 before: [],
                                 after: [],
                             },
                         },
-                        content: ["SHOULD NOT APPLY"],
+                        content: ["REPLACED"],
                     },
                 ],
             });
 
-            const formatted = tool.formatResultForLLM(
-                {
-                    tool: "file.edit",
-                    params: { path: "duplicate.txt", edits: [] },
-                } as any,
-                result,
-            );
-
-            expect(formatted).toContain("[FAIL] file.edit");
-            expect(formatted).toContain("Could not apply edits to duplicate.txt");
-            expect(formatted).toContain("Atomic mode left the file unchanged.");
-            expect(formatted).toContain("Edit 1 failed: AMBIGUOUS_MATCH");
-            expect(formatted).toContain("Match 1:");
-            expect(formatted).toContain("Lines 1-6 of 6");
-            expect(formatted).not.toContain("failedEdits");
-            expect(formatted).not.toContain('"suggestion"');
+            expect(result.success).toBe(true);
+            const content = fs.readFileSync(wideDuplicateFilePath, "utf-8");
+            expect(content).toContain("REPLACED");
+            expect(content.split("\n").filter((l) => l === "repeat")).toHaveLength(1);
         });
 
         it("should reject conflicting context instead of silently matching by line hint", async () => {
