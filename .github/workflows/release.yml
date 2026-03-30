@@ -1,0 +1,60 @@
+name: Build and Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test -- --run
+
+      - name: Build CLI bundle
+        run: pnpm bundle
+
+      - name: Build ACP bundle
+        run: pnpm bundle:acp
+
+      - name: Upload bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: diogenes-bundles
+          path: |
+            bundle/cli.cjs
+            bundle/acp-server.cjs
+          if-no-files-found: error
+
+      - name: Upload assets to GitHub release
+        run: gh release upload "${{ github.event.release.tag_name }}" bundle/cli.cjs bundle/acp-server.cjs --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
