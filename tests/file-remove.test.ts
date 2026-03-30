@@ -93,7 +93,7 @@ describe("FileRemoveTool", () => {
         expect(result.error?.code).toBe("FILE_REMOVE_ERROR");
     });
 
-    it("should handle file in use error gracefully", async () => {
+    it("should fail when trying to remove a directory", async () => {
         // Create a file and open a read stream to keep it "in use"
         await fs.promises.writeFile(testFile, "test content", "utf-8");
 

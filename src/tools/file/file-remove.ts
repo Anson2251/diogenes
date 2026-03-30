@@ -135,7 +135,7 @@ Use this when you want to permanently delete a file.
             ? path.resolve(inputPath)
             : path.resolve(this.workspaceRoot, inputPath);
         const relative = path.relative(this.workspaceRoot, resolved);
-        if (relative.startsWith("..") || relative === "..") {
+        if (relative.startsWith("..")) {
             throw new Error(`Path ${resolved} is outside workspace root ${this.workspaceRoot}`);
         }
         return resolved;
