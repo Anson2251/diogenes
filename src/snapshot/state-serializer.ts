@@ -20,6 +20,17 @@ const PersistedDiogenesStateSchema: z.ZodType<PersistedDiogenesState> = z.object
             description: z.string().nullable(),
         })
         .optional(),
+    llm: z
+        .object({
+            provider: z.string().optional(),
+            providerStyle: z.enum(["openai", "anthropic"]).optional(),
+            model: z.string().optional(),
+            supportsToolRole: z.boolean().optional(),
+            baseURL: z.string().optional(),
+            maxTokens: z.number().optional(),
+            temperature: z.number().optional(),
+        })
+        .optional(),
     acpReplayLog: z.array(z.record(z.string(), z.unknown())),
     messageHistory: z.array(
         z.object({
@@ -101,6 +112,7 @@ export class DiogenesStateSerializer implements SnapshotStateSerializer {
             createdAt: params.stateProvider.getCreatedAt(),
             updatedAt: params.stateProvider.getUpdatedAt(),
             metadata: params.stateProvider.getSnapshotMetadata?.(),
+            llm: undefined,
             acpReplayLog: params.stateProvider.getACPReplayLog?.() ?? [],
             messageHistory: params.stateProvider.getMessageHistory().map((message) => ({
                 role: message.role,

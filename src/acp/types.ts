@@ -74,6 +74,12 @@ export const CancelSessionParamsSchema = z.object({
     sessionId: z.string(),
 });
 
+export const SetSessionConfigOptionParamsSchema = z.object({
+    sessionId: z.string(),
+    configId: z.string(),
+    value: z.string(),
+});
+
 export const RestoreSessionParamsSchema = z.object({
     sessionId: z.string(),
     snapshotId: z.string(),
@@ -246,6 +252,28 @@ export interface PromptSessionParams {
 
 export interface CancelSessionParams {
     sessionId: string;
+}
+
+export interface SetSessionConfigOptionParams {
+    sessionId: string;
+    configId: string;
+    value: string;
+}
+
+export interface SessionConfigSelectOption {
+    value: string;
+    name: string;
+    description?: string | null;
+}
+
+export interface SessionConfigOption {
+    id: string;
+    name: string;
+    description?: string | null;
+    category?: "mode" | "model" | "thought_level" | "other";
+    type: "select";
+    currentValue: string;
+    options: SessionConfigSelectOption[];
 }
 
 export interface RestoreSessionParams {

@@ -15,11 +15,10 @@ import {
     ensureDefaultModelsConfigSync,
 } from "./utils/config-bootstrap";
 import {
-    getProviderApiKeyEnvVarName,
     loadModelsConfig,
-    listAvailableModels,
-    resolveModel,
-} from "./utils/models-config";
+    resolveModelWithFallback,
+} from "./utils/model-resolver";
+import { getProviderApiKey } from "./utils/api-key-manager";
 
 interface ACPCLIOptions {
     model?: string;
@@ -31,7 +30,7 @@ interface ACPCLIOptions {
 }
 
 function getProviderEnvApiKey(providerName?: string): string | undefined {
-    return process.env[getProviderApiKeyEnvVarName(providerName || "openai")];
+    return getProviderApiKey(providerName || "openai");
 }
 
 function parseArgs(): ACPCLIOptions {
@@ -195,27 +194,21 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
 
-    if (modelsConfig && merged.llm?.model) {
-        const modelRef = merged.llm.model;
-        const available = listAvailableModels(modelsConfig);
-
-        if (available.includes(modelRef)) {
-            try {
-                const resolved = resolveModel(modelsConfig, modelRef);
-                merged.llm = {
-                    ...merged.llm,
-                    provider: resolved.provider,
-                    providerStyle: resolved.providerStyle,
-                    supportsToolRole: resolved.supportsToolRole,
-                    model: resolved.model,
-                    apiKey: resolved.apiKey,
-                    baseURL: resolved.baseURL || merged.llm.baseURL,
-                    maxTokens: resolved.maxTokens ?? merged.llm.maxTokens,
-                    temperature: resolved.temperature ?? merged.llm.temperature,
-                };
-            } catch {
-                // Ignore resolution errors, use as-is
-            }
+    if (modelsConfig) {
+        const resolved = resolveModelWithFallback(modelsConfig, merged.llm?.model);
+        if (resolved) {
+            const currentLLM = merged.llm || {};
+            merged.llm = {
+                ...currentLLM,
+                provider: resolved.provider,
+                providerStyle: resolved.providerStyle,
+                supportsToolRole: resolved.supportsToolRole,
+                model: resolved.model,
+                apiKey: resolved.apiKey,
+                baseURL: resolved.baseURL || currentLLM.baseURL,
+                maxTokens: resolved.maxTokens ?? currentLLM.maxTokens,
+                temperature: resolved.temperature ?? currentLLM.temperature,
+            };
         }
     }
 
@@ -315,7 +308,21 @@ export function createDebugStdio(
 
 function main(): void {
     const options = parseArgs();
-    loadDotenv(options.envFile ? { path: options.envFile } : undefined);
+    
+    // Load .env file - check both provided path and default locations
+    if (options.envFile) {
+        loadDotenv({ path: options.envFile });
+    } else {
+        // Try to load from current working directory first
+        const cwdResult = loadDotenv({ quiet: true });
+        // If not found in cwd, try to find .env in project root
+        // __dirname is in dist/, so go up one level to reach project root
+        if (!cwdResult.parsed) {
+            const projectRoot = path.resolve(__dirname, '..');
+            loadDotenv({ path: path.join(projectRoot, '.env'), quiet: true });
+        }
+    }
+    
     const config = createConfig(options);
 
     let input: NodeJS.ReadStream | PassThrough = process.stdin;

@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
+import * as os from "os";
 import * as path from "path";
 import { z } from "zod";
 
@@ -9,6 +10,20 @@ import type { StoredSessionMetadata } from "./types";
 
 import { resolveDiogenesAppPaths } from "../utils/app-paths";
 import { StoredSessionMetadataSchema } from "./types";
+
+/**
+ * Check if a session is temporary (created in temp directory)
+ */
+export function isTemporarySession(session: StoredSessionMetadata): boolean {
+    const cwd = path.resolve(session.cwd);
+    const tempRoot = path.resolve(os.tmpdir());
+    return (
+        cwd === tempRoot ||
+        cwd.startsWith(`${tempRoot}${path.sep}`) ||
+        cwd.startsWith("/var/folders/") ||
+        cwd.startsWith("/private/var/folders/")
+    );
+}
 
 // Zod schemas for persisted state
 const PersistedDiogenesMessageSchema = z.object({
@@ -42,6 +57,17 @@ const PersistedDiogenesStateSchema = z.object({
         .object({
             title: z.string().nullable(),
             description: z.string().nullable(),
+        })
+        .optional(),
+    llm: z
+        .object({
+            provider: z.string().optional(),
+            providerStyle: z.enum(["openai", "anthropic"]).optional(),
+            model: z.string().optional(),
+            supportsToolRole: z.boolean().optional(),
+            baseURL: z.string().optional(),
+            maxTokens: z.number().optional(),
+            temperature: z.number().optional(),
         })
         .optional(),
     acpReplayLog: z.array(z.record(z.string(), z.unknown())),
@@ -142,7 +168,7 @@ export class SessionStore {
         }
     }
 
-    async listMetadata(): Promise<StoredSessionMetadata[]> {
+    async listMetadata(includeTemp = false): Promise<StoredSessionMetadata[]> {
         await fs.mkdir(this.sessionsRoot, { recursive: true });
         const entries = await fs.readdir(this.sessionsRoot, { withFileTypes: true });
         const sessions = await Promise.all(
@@ -151,9 +177,37 @@ export class SessionStore {
                 .map(async (entry) => this.readMetadata(entry.name)),
         );
 
-        return sessions
+        let filtered = sessions
             .filter((entry): entry is StoredSessionMetadata => entry !== null)
             .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+
+        // Filter out temporary sessions unless explicitly requested
+        if (!includeTemp) {
+            filtered = filtered.filter((session) => !isTemporarySession(session));
+        }
+
+        return filtered;
+    }
+
+    /**
+     * Clean up all temporary sessions
+     * @returns Array of removed session IDs
+     */
+    async cleanupTempSessions(): Promise<string[]> {
+        const allSessions = await this.listMetadata(true); // Get all including temp
+        const tempSessions = allSessions.filter(isTemporarySession);
+        const removedIds: string[] = [];
+
+        for (const session of tempSessions) {
+            try {
+                await this.removeSession(session.sessionId);
+                removedIds.push(session.sessionId);
+            } catch {
+                // Ignore errors during cleanup
+            }
+        }
+
+        return removedIds;
     }
 
     async readState(sessionId: string): Promise<PersistedDiogenesState | null> {

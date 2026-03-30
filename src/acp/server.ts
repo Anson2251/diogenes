@@ -19,6 +19,7 @@ import type {
     NewSessionParams,
     PromptSessionParams,
     RestoreSessionParams,
+    SetSessionConfigOptionParams,
 } from "./types";
 
 import { SessionManager } from "./session-manager";
@@ -28,6 +29,7 @@ import {
     LoadSessionParamsSchema,
     PromptSessionParamsSchema,
     CancelSessionParamsSchema,
+    SetSessionConfigOptionParamsSchema,
     RestoreSessionParamsSchema,
     DiogenesRestoreSessionParamsSchema,
     ListSessionsParamsSchema,
@@ -80,10 +82,15 @@ export class ACPServer {
                         );
                     }
                     const session = await this.handleNewSession(newSessionResult.data);
+                    const configOptions = session.getConfigOptions();
                     const response = this.success(message.id ?? null, {
                         sessionId: session.sessionId,
+                        ...(configOptions ? { configOptions } : {}),
                     });
                     setTimeout(() => {
+                        if (configOptions) {
+                            session.emitConfigOptionsUpdate();
+                        }
                         session.emitAvailableCommandsUpdate();
                     }, 0);
                     return response;
@@ -106,7 +113,11 @@ export class ACPServer {
                         );
                     }
                     const session = await this.handleLoadSession(loadResult.data);
-                    const response = this.success(message.id ?? null, null);
+                    const configOptions = session.getConfigOptions();
+                    const response = this.success(message.id ?? null, {
+                        sessionId: session.sessionId,
+                        ...(configOptions ? { configOptions } : {}),
+                    });
                     setTimeout(() => {
                         for (const update of session.getReplayUpdates()) {
                             this.options.notify?.("session/update", {
@@ -116,6 +127,9 @@ export class ACPServer {
                         }
 
                         session.emitHydratedStateUpdates({ record: false });
+                        if (configOptions) {
+                            session.emitConfigOptionsUpdate({ record: false });
+                        }
                         session.emitAvailableCommandsUpdate({ record: false });
                     }, 0);
                     return response;
@@ -151,6 +165,23 @@ export class ACPServer {
                     }
                     this.handleCancel(cancelResult.data);
                     return null;
+                }
+                case "session/set_config_option": {
+                    this.ensureInitialized(message.id ?? null);
+                    const setConfigResult = SetSessionConfigOptionParamsSchema.safeParse(
+                        message.params ?? {},
+                    );
+                    if (!setConfigResult.success) {
+                        return this.error(
+                            message.id ?? null,
+                            -32602,
+                            "Invalid params for session/set_config_option",
+                        );
+                    }
+                    return this.success(
+                        message.id ?? null,
+                        await this.handleSetConfigOption(setConfigResult.data),
+                    );
                 }
                 case "session/restore":
                 case "_diogenes/session/restore": {
@@ -389,6 +420,28 @@ export class ACPServer {
             throw new ACPServerError(-32602, "session/cancel requires sessionId");
         }
         this.sessionManager.cancelSession(params.sessionId);
+    }
+
+    private async handleSetConfigOption(params: SetSessionConfigOptionParams | undefined) {
+        if (!params?.sessionId || !params.configId || !params.value) {
+            throw new ACPServerError(
+                -32602,
+                "session/set_config_option requires sessionId, configId, and value",
+            );
+        }
+
+        const session = this.sessionManager.getSession(params.sessionId);
+        if (!session) {
+            throw new ACPServerError(-32001, `Unknown session: ${params.sessionId}`);
+        }
+        if (session.isBusy()) {
+            throw new ACPServerError(-32002, `Session is busy: ${params.sessionId}`);
+        }
+
+        await session.setConfigOption(params.configId, params.value);
+        return {
+            configOptions: session.getConfigOptions(),
+        };
     }
 
     private async handleRestore(params: RestoreSessionParams | undefined) {

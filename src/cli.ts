@@ -6,14 +6,17 @@
 
 // Load environment variables from .env file
 import { config } from "dotenv";
-config();
+config({ quiet: true });
 
+import Table from "cli-table3";
+import { Command } from "commander";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import * as yaml from "yaml";
 
-import { SessionStore } from "./acp/session-store";
+import { SessionStore, type SessionPruneResult, isTemporarySession } from "./acp/session-store";
+import type { StoredSessionMetadata } from "./acp/types";
 import { DEFAULT_SECURITY_CONFIG } from "./config/default-prompts";
 import {
     executeTask,
@@ -27,6 +30,7 @@ import {
     type ConversationMessage,
     type DiogenesContextManager,
 } from "./index";
+import type { SnapshotSummary } from "./snapshot/types";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
 import {
     ensureDefaultConfigFileSync,
@@ -35,10 +39,10 @@ import {
 import {
     loadModelsConfig,
     listAvailableModels,
-    resolveModel,
-    formatModelsList,
+    resolveModelWithFallback,
     getProviderApiKeyEnvVarName,
-} from "./utils/models-config";
+} from "./utils/model-resolver";
+import { getProviderApiKey } from "./utils/api-key-manager";
 import { parseSocraticToolInput } from "./utils/socratic-parser";
 
 // ANSI color codes for terminal output
@@ -72,12 +76,12 @@ type CLICommand =
     | { kind: "sessions.get"; sessionId: string }
     | { kind: "sessions.snapshots"; sessionId: string }
     | { kind: "sessions.delete"; sessionId: string }
-    | { kind: "sessions.prune"; dryRun: boolean }
+    | { kind: "sessions.prune"; dryRun: boolean; tempOnly: boolean }
     | { kind: "models.list" }
     | { kind: "models.default"; model?: string };
 
 function getProviderEnvApiKey(providerName?: string): string | undefined {
-    return process.env[getProviderApiKeyEnvVarName(providerName || "openai")];
+    return getProviderApiKey(providerName || "openai");
 }
 
 type QuestionFn = (prompt: string) => Promise<string>;
@@ -87,217 +91,150 @@ const CLEAR_APP_DATA_PASSPHRASE = "delete diogenes data";
  * Parse command-line arguments
  */
 function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand } {
-    const args = process.argv.slice(2);
-    const options: CLIOptions = {};
     let task: string | undefined;
     let command: CLICommand = { kind: "run" };
+    const commandOptions: CLIOptions = {};
 
-    if (args[0] === "sessions") {
-        const subcommand = args[1];
-        const sessionId = args[2];
-
-        switch (subcommand) {
-            case "list":
-                return { options, command: { kind: "sessions.list" } };
-            case "get":
-                if (!sessionId) {
-                    console.error(
-                        `${colors.red}Error: sessions get requires <sessionId>${colors.reset}`,
-                    );
-                    showHelp();
-                    process.exit(1);
-                }
-                return { options, command: { kind: "sessions.get", sessionId } };
-            case "snapshots":
-                if (!sessionId) {
-                    console.error(
-                        `${colors.red}Error: sessions snapshots requires <sessionId>${colors.reset}`,
-                    );
-                    showHelp();
-                    process.exit(1);
-                }
-                return { options, command: { kind: "sessions.snapshots", sessionId } };
-            case "prune":
-                return {
-                    options,
-                    command: { kind: "sessions.prune", dryRun: args.includes("--dry-run") },
-                };
-            case "delete":
-            case "remove":
-                if (!sessionId) {
-                    console.error(
-                        `${colors.red}Error: sessions ${subcommand} requires <sessionId>${colors.reset}`,
-                    );
-                    showHelp();
-                    process.exit(1);
-                }
-                return { options, command: { kind: "sessions.delete", sessionId } };
-            default:
-                console.error(
-                    `${colors.red}Error: Unknown sessions command ${subcommand || ""}${colors.reset}`,
-                );
-                showHelp();
-                process.exit(1);
-        }
-    }
-
-    if (args[0] === "models") {
-        const subcommand = args[1];
-
-        switch (subcommand) {
-            case "list":
-            case undefined:
-                return { options, command: { kind: "models.list" } };
-            case "default":
-                return { options, command: { kind: "models.default", model: args[2] } };
-            default:
-                console.error(
-                    `${colors.red}Error: Unknown models command ${subcommand}${colors.reset}`,
-                );
-                showHelp();
-                process.exit(1);
-        }
-    }
-
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-
-        if (arg === "--help" || arg === "-h") {
-            showHelp();
-            process.exit(0);
-        } else if (arg === "--version" || arg === "-v") {
-            showVersion();
-            process.exit(0);
-        } else if (arg === "--model" || arg === "-m") {
-            options.model = args[++i];
-        } else if (arg === "--base-url" || arg === "-b") {
-            options.baseUrl = args[++i];
-        } else if (arg === "--workspace" || arg === "-w") {
-            options.workspace = args[++i];
-        } else if (arg === "--verbose" || arg === "-V") {
-            options.verbose = true;
-        } else if (arg === "--socratic" || arg === "-s") {
-            options.socratic = true;
-        } else if (arg === "--interactive" || arg === "-I") {
-            options.interactive = true;
-        } else if (arg === "--acp") {
-            options.acp = true;
-        } else if (arg === "--clear-app-data") {
-            options.clearAppData = true;
-        } else if (arg === "--max-iterations" || arg === "-i") {
-            options.maxIterations = parseInt(args[++i], 10);
-        } else if (arg.startsWith("-")) {
-            console.error(`${colors.red}Error: Unknown option ${arg}${colors.reset}`);
-            showHelp();
-            process.exit(1);
-        } else {
-            // First non-option argument is the task
-            if (!task) {
-                task = arg;
-            } else {
-                // Append to task if it contains spaces
-                task += " " + arg;
+    const program = new Command()
+        .name("diogenes")
+        .usage("[OPTIONS] <COMMAND>")
+        .description("Run tasks and manage local Diogenes state")
+        .configureOutput({
+            writeErr: (str: string) => {
+                console.error(str.trimEnd());
+            },
+        })
+        .showHelpAfterError("\nRun with --help for usage.")
+        .allowExcessArguments(false)
+        .option("-m, --model <model>", "Model to use (provider/model or model name)")
+        .option("-b, --base-url <url>", "OpenAI-compatible API base URL")
+        .option("-w, --workspace <path>", "Workspace directory")
+        .option("-V, --verbose", "Enable verbose output")
+        .option("-i, --max-iterations <n>", "Maximum LLM iterations", (value: string) => {
+            const parsed = Number.parseInt(value, 10);
+            if (Number.isNaN(parsed)) {
+                throw new Error(`Invalid integer value for --max-iterations: ${value}`);
             }
-        }
-    }
+            return parsed;
+        })
+        .option("-s, --socratic", "Run in Socratic debug mode")
+        .option("-I, --interactive", "Start interactive mode")
+        .option("--acp", "Start ACP stdio server")
+        .option("--clear-app-data", "Delete Diogenes config and local storage")
+        .helpOption("-h, --help", "Print help")
+        .version(getVersion(), "-v, --version", "Print version")
+        .showSuggestionAfterError(true)
+        .action(() => {
+            command = { kind: "run" };
+        });
 
-    return { task, options, command };
-}
+    program.command("run <task...>").summary("Run a task").action((taskParts: string[]) => {
+        command = { kind: "run" };
+        task = taskParts.join(" ");
+    });
 
-/**
- * Show help message
- */
-function showHelp(): void {
-    console.log(`
-${colors.bright}Diogenes CLI - LLM-controlled agent framework${colors.reset}
+    program.command("interactive").summary("Start interactive mode").action(() => {
+        commandOptions.interactive = true;
+    });
 
-${colors.bright}Usage:${colors.reset}
-  diogenes [options] <task>
-  diogenes [options] --interactive
-  diogenes [options] --acp
-  diogenes sessions list
-  diogenes sessions get <sessionId>
-  diogenes sessions snapshots <sessionId>
-  diogenes sessions delete <sessionId>
-  diogenes sessions prune [--dry-run]
-  diogenes models [list]
-  diogenes models default [provider/model]
-  diogenes --help
+    program.command("socratic <task...>").summary("Run in Socratic debug mode").action((taskParts: string[]) => {
+        commandOptions.socratic = true;
+        task = taskParts.join(" ");
+    });
 
-${colors.bright}Options:${colors.reset}
-  -h, --help                    Show this help message
-  -v, --version                 Show version information
-  -m, --model <model>           LLM model to use (format: provider/model or model name)
-  -b, --base-url <url>          OpenAI-compatible API base URL
-  -w, --workspace <path>        Workspace directory (default: current directory)
-  -V, --verbose                 Enable verbose output
-  -i, --max-iterations <n>      Maximum LLM iterations (default: 20)
-  -s, --socratic                Socratic debug mode - you guide the agent
-  -I, --interactive             Start interactive mode
-      --acp                     Start ACP stdio server
-      --clear-app-data          Delete Diogenes config and local storage after confirmation
+    program.command("acp").summary("Start ACP stdio server").action(() => {
+        commandOptions.acp = true;
+    });
 
-${colors.bright}Examples:${colors.reset}
-  diogenes "List all TypeScript files in src directory"
-  diogenes --base-url https://api.openai.com/v1 "Use custom OpenAI endpoint"
-  diogenes --workspace ./my-project "Analyze project structure"
-  diogenes --interactive        Start interactive mode
-  diogenes --socratic "Debug my code"
-  diogenes --acp                Start ACP stdio server
-  diogenes --clear-app-data     Delete Diogenes config and local storage
-  diogenes sessions list        List managed session metadata
-  diogenes sessions get <id>    Show one managed session and its snapshots
-  diogenes sessions delete <id> Delete managed session artifacts
-  diogenes sessions prune       Remove broken managed session artifacts
-  diogenes models               List available models from models.yaml
-  diogenes models default       Show current default model
-  diogenes models default openai/gpt-4o-mini  Set default model
+    program.command("clear-app-data").summary("Delete Diogenes config and local storage").action(() => {
+        commandOptions.clearAppData = true;
+    });
 
-${colors.bright}Environment Variables:${colors.reset}
-  OPENAI_API_KEY                API key for provider openai
-  ANTHROPIC_API_KEY             API key for provider anthropic
-  OPENAI_BASE_URL               OpenAI-compatible API base URL
-  DIOGENES_WORKSPACE            Default workspace directory
-  DIOGENES_MODEL                Default LLM model
+    const sessions = program
+        .command("session")
+        .summary("Manage stored sessions")
+        .description("Inspect and clean stored session metadata and snapshots");
+    sessions.command("list").summary("List sessions").action(() => {
+        command = { kind: "sessions.list" };
+    });
+    sessions.command("get <sessionId>").summary("Show one session").action((sessionId: string) => {
+        command = { kind: "sessions.get", sessionId };
+    });
+    sessions
+        .command("snapshots <sessionId>")
+        .summary("List session snapshots")
+        .action((sessionId: string) => {
+            command = { kind: "sessions.snapshots", sessionId };
+        });
+    sessions
+        .command("delete <sessionId>")
+        .alias("remove")
+        .summary("Delete a session")
+        .action((sessionId: string) => {
+            command = { kind: "sessions.delete", sessionId };
+        });
+    sessions
+        .command("prune")
+        .summary("Remove broken session artifacts")
+        .option("--dry-run", "Show what would be removed")
+        .option("--temp", "Remove temporary test sessions")
+        .action((subOptions: { dryRun?: boolean; temp?: boolean }) => {
+            command = {
+                kind: "sessions.prune",
+                dryRun: Boolean(subOptions.dryRun),
+                tempOnly: Boolean(subOptions.temp),
+            };
+        });
 
-${colors.bright}Configuration:${colors.reset}
-  Environment variables can be loaded from a .env file in the current directory.
-  Diogenes loads config only from the platform-managed config directory. Create a config file there
-  (config.yaml, config.yml, or config.json) or create a .env file with your credentials:
+    const models = program
+        .command("model")
+        .summary("Manage configured models")
+        .description("List available models and manage the default model");
+    models.action(() => {
+        command = { kind: "models.list" };
+    });
+    models.command("list").summary("List models").action(() => {
+        command = { kind: "models.list" };
+    });
+    models.command("default [model]").summary("Get or set the default model").action((model?: string) => {
+        command = { kind: "models.default", model };
+    });
 
-  OPENAI_API_KEY=sk-your-api-key-here
-  OPENAI_BASE_URL=https://api.openai.com/v1
-  DIOGENES_MODEL=gpt-4
+    program.parse(process.argv);
 
-  Models are configured in models.yaml in the same directory:
-  providers:
-    openai:
-      baseURL: https://api.openai.com/v1
-      models:
-        gpt-4o:
-          name: GPT-4o
-          contextWindow: 128000
-  default: openai/gpt-4o
-`);
+    const parsedOptions = program.opts<CLIOptions>();
+    return {
+        task,
+        options: {
+            model: commandOptions.model ?? parsedOptions.model,
+            baseUrl: commandOptions.baseUrl ?? parsedOptions.baseUrl,
+            workspace: commandOptions.workspace ?? parsedOptions.workspace,
+            verbose: commandOptions.verbose ?? parsedOptions.verbose,
+            maxIterations: commandOptions.maxIterations ?? parsedOptions.maxIterations,
+            socratic: commandOptions.socratic ?? parsedOptions.socratic,
+            interactive: commandOptions.interactive ?? parsedOptions.interactive,
+            acp: commandOptions.acp ?? parsedOptions.acp,
+            clearAppData: commandOptions.clearAppData ?? parsedOptions.clearAppData,
+        },
+        command,
+    };
 }
 
 /**
  * Show version information
  */
-function showVersion(): void {
+function getVersion(): string {
     try {
         const content = fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8");
         const raw: unknown = JSON.parse(content);
-        const version =
-            typeof raw === "object" &&
+        return typeof raw === "object" &&
             raw !== null &&
             "version" in raw &&
             typeof raw.version === "string"
-                ? raw.version
-                : "unknown";
-        console.log(`Diogenes v${version}`);
+            ? raw.version
+            : "unknown";
     } catch {
-        console.log("Diogenes (version unknown)");
+        return "unknown";
     }
 }
 
@@ -500,29 +437,21 @@ function createConfig(options: CLIOptions): DiogenesConfig {
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
 
-    if (modelsConfig && merged.llm?.model) {
-        const modelRef = merged.llm.model;
-        const available = listAvailableModels(modelsConfig);
-
-        if (available.includes(modelRef)) {
-            try {
-                const resolved = resolveModel(modelsConfig, modelRef);
-                merged.llm = {
-                    ...merged.llm,
-                    provider: resolved.provider,
-                    providerStyle: resolved.providerStyle,
-                    supportsToolRole: resolved.supportsToolRole,
-                    model: resolved.model,
-                    apiKey: resolved.apiKey,
-                    baseURL: resolved.baseURL || merged.llm.baseURL,
-                    maxTokens: resolved.maxTokens ?? merged.llm.maxTokens,
-                    temperature: resolved.temperature ?? merged.llm.temperature,
-                };
-            } catch (error) {
-                console.error(
-                    `${colors.yellow}Warning: Could not resolve model ${modelRef}: ${error instanceof Error ? error.message : String(error)}${colors.reset}`,
-                );
-            }
+    if (modelsConfig) {
+        const resolved = resolveModelWithFallback(modelsConfig, merged.llm?.model);
+        if (resolved) {
+            const currentLLM = merged.llm || {};
+            merged.llm = {
+                ...currentLLM,
+                provider: resolved.provider,
+                providerStyle: resolved.providerStyle,
+                supportsToolRole: resolved.supportsToolRole,
+                model: resolved.model,
+                apiKey: resolved.apiKey,
+                baseURL: resolved.baseURL || currentLLM.baseURL,
+                maxTokens: resolved.maxTokens ?? currentLLM.maxTokens,
+                temperature: resolved.temperature ?? currentLLM.temperature,
+            };
         }
     }
 
@@ -1024,6 +953,17 @@ ${colors.bright}Multiline:${colors.reset}
 async function main(): Promise<void> {
     const { task, options, command } = parseArgs();
 
+    // Auto-cleanup temporary sessions on startup
+    const sessionStore = new SessionStore();
+    try {
+        const removedCount = await sessionStore.cleanupTempSessions();
+        if (removedCount.length > 0 && options.verbose) {
+            console.log(`${colors.dim}Cleaned up ${removedCount.length} temporary session(s)${colors.reset}`);
+        }
+    } catch {
+        // Ignore cleanup errors
+    }
+
     if (options.clearAppData) {
         const rl = readline.createInterface({
             input: process.stdin,
@@ -1101,13 +1041,13 @@ async function main(): Promise<void> {
             await interactiveMode(config, options);
         } else if (options.socratic) {
             console.error(`${colors.red}Error: Task required for socratic mode.${colors.reset}`);
-            console.error(`Usage: diogenes --socratic "your task here"`);
+            console.error(`Usage: diogenes socratic "your task here"`);
             process.exit(1);
         } else {
             console.error(`${colors.red}Error: No task provided.${colors.reset}`);
-            console.error(`Usage: diogenes [options] <task>`);
-            console.error(`       diogenes --interactive`);
-            console.error(`       diogenes --socratic "task"`);
+            console.error(`Usage: diogenes run "task"`);
+            console.error(`       diogenes interactive`);
+            console.error(`       diogenes socratic "task"`);
             process.exit(1);
         }
     }
@@ -1123,8 +1063,8 @@ async function handleCommand(command: Exclude<CLICommand, { kind: "run" }>): Pro
 
     switch (command.kind) {
         case "sessions.list": {
-            const sessions = await sessionStore.listMetadata();
-            console.log(JSON.stringify({ sessions }, null, 2));
+            const sessions = await sessionStore.listMetadata(true); // Include temp sessions to show hidden count
+            console.log(formatSessionList(sessions));
             return;
         }
         case "sessions.get": {
@@ -1133,7 +1073,7 @@ async function handleCommand(command: Exclude<CLICommand, { kind: "run" }>): Pro
                 throw new Error(`Unknown managed session: ${command.sessionId}`);
             }
             const snapshots = await sessionStore.listSnapshots(command.sessionId);
-            console.log(JSON.stringify({ metadata, snapshots }, null, 2));
+            console.log(formatSessionDetails(metadata, snapshots));
             return;
         }
         case "sessions.snapshots": {
@@ -1142,20 +1082,202 @@ async function handleCommand(command: Exclude<CLICommand, { kind: "run" }>): Pro
                 throw new Error(`Unknown managed session: ${command.sessionId}`);
             }
             const snapshots = await sessionStore.listSnapshots(command.sessionId);
-            console.log(JSON.stringify({ sessionId: command.sessionId, snapshots }, null, 2));
+            console.log(formatSnapshotList(command.sessionId, snapshots));
             return;
         }
         case "sessions.delete": {
             await sessionStore.removeSession(command.sessionId);
-            console.log(JSON.stringify({ deleted: true, sessionId: command.sessionId }, null, 2));
+            console.log(formatSessionDelete(command.sessionId));
             return;
         }
         case "sessions.prune": {
+            if (command.tempOnly) {
+                const result = await pruneTemporarySessions(sessionStore, { dryRun: command.dryRun });
+                console.log(formatTemporarySessionPrune(result, command.dryRun));
+                return;
+            }
+
             const result = await sessionStore.pruneSessions({ dryRun: command.dryRun });
-            console.log(JSON.stringify({ ...result, dryRun: command.dryRun }, null, 2));
+            console.log(formatSessionPrune(result, command.dryRun));
             return;
         }
     }
+}
+
+async function pruneTemporarySessions(
+    sessionStore: SessionStore,
+    options: { dryRun: boolean },
+): Promise<{ sessionIds: string[] }> {
+    const sessions = await sessionStore.listMetadata(true); // Include temp sessions
+    const sessionIds = sessions.filter(isTemporarySession).map((session) => session.sessionId);
+
+    if (!options.dryRun) {
+        await Promise.all(sessionIds.map(async (sessionId) => sessionStore.removeSession(sessionId)));
+    }
+
+    return { sessionIds };
+}
+
+function formatTimeToMinute(dateString: string): string {
+    const date = new Date(dateString);
+    return date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+function formatSessionList(sessions: StoredSessionMetadata[]): string {
+    const visibleSessions = sessions.filter((session) => !isTemporarySession(session));
+    const hiddenCount = sessions.length - visibleSessions.length;
+
+    if (visibleSessions.length === 0) {
+        return hiddenCount > 0
+            ? `No stored sessions. ${colors.dim}(${hiddenCount} temporary test session(s) hidden)${colors.reset}`
+            : "No stored sessions.";
+    }
+
+    const table = new Table({
+        head: ["Session", "Title", "State", "Updated", "Workspace"],
+        style: {
+            head: ["cyan"],
+            border: [],
+        },
+        wordWrap: true,
+    });
+
+    for (const session of visibleSessions) {
+        table.push([
+            session.sessionId,
+            session.title || session.description || "(untitled)",
+            session.state,
+            formatTimeToMinute(session.updatedAt),
+            session.cwd,
+        ]);
+    }
+
+    return [
+        `${colors.bright}Stored Sessions${colors.reset}`,
+        table.toString(),
+        hiddenCount > 0
+            ? `${colors.dim}${hiddenCount} temporary test session(s) hidden${colors.reset}`
+            : undefined,
+    ]
+        .filter((line): line is string => typeof line === "string")
+        .join("\n");
+}
+
+function formatSnapshotsTable(sessionId: string, snapshots: SnapshotSummary[]): string {
+    if (snapshots.length === 0) {
+        return `No snapshots for session ${sessionId}.`;
+    }
+
+    const table = new Table({
+        head: ["Snapshot", "Turn", "Trigger", "Created", "Label"],
+        style: {
+            head: ["cyan"],
+            border: [],
+        },
+        wordWrap: true,
+    });
+
+    for (const snapshot of snapshots) {
+        table.push([
+            snapshot.snapshotId,
+            snapshot.turn,
+            snapshot.trigger,
+            formatTimeToMinute(snapshot.createdAt),
+            snapshot.label || "-",
+        ]);
+    }
+
+    return table.toString();
+}
+
+function formatSnapshotList(sessionId: string, snapshots: SnapshotSummary[]): string {
+    if (snapshots.length === 0) {
+        return `No snapshots for session ${sessionId}.`;
+    }
+
+    return `${colors.bright}Snapshots for ${sessionId}${colors.reset}\n${formatSnapshotsTable(sessionId, snapshots)}`;
+}
+
+function formatSessionDetails(metadata: StoredSessionMetadata, snapshots: SnapshotSummary[]): string {
+    return [
+        `${colors.bright}Session${colors.reset} ${metadata.sessionId}`,
+        `title: ${metadata.title || "(untitled)"}`,
+        `description: ${metadata.description || "-"}`,
+        `state: ${metadata.state}`,
+        `cwd: ${metadata.cwd}`,
+        `created: ${formatTimeToMinute(metadata.createdAt)}`,
+        `updated: ${formatTimeToMinute(metadata.updatedAt)}`,
+        `active run: ${metadata.hasActiveRun ? "yes" : "no"}`,
+        `snapshots: ${snapshots.length}`,
+        snapshots.length > 0 ? "" : undefined,
+        snapshots.length > 0 ? formatSnapshotsTable(metadata.sessionId, snapshots) : undefined,
+    ]
+        .filter((line): line is string => typeof line === "string")
+        .join("\n");
+}
+
+function formatSessionDelete(sessionId: string): string {
+    return `${colors.green}Deleted session:${colors.reset} ${sessionId}`;
+}
+
+function formatSessionPrune(result: SessionPruneResult, dryRun: boolean): string {
+    const action = dryRun ? "Would remove" : "Removed";
+    const deleted = result.deletedSessionIds;
+
+    if (deleted.length === 0) {
+        return dryRun ? "Nothing would be removed." : "Nothing to remove.";
+    }
+
+    return [
+        `${colors.bright}${action} ${deleted.length} session artifact set(s)${colors.reset}`,
+        ...deleted.map((sessionId) => `- ${sessionId} ${colors.dim}(${result.reasonsBySessionId[sessionId] || "unknown"})${colors.reset}`),
+    ].join("\n");
+}
+
+function formatTemporarySessionPrune(
+    result: { sessionIds: string[] },
+    dryRun: boolean,
+): string {
+    if (result.sessionIds.length === 0) {
+        return dryRun ? "No temporary test sessions would be removed." : "No temporary test sessions to remove.";
+    }
+
+    return [
+        `${colors.bright}${dryRun ? "Would remove" : "Removed"} ${result.sessionIds.length} temporary test session(s)${colors.reset}`,
+        ...result.sessionIds.map((sessionId) => `- ${sessionId}`),
+    ].join("\n");
+}
+
+function formatModelList(modelsConfig: NonNullable<ReturnType<typeof loadModelsConfig>>): string {
+    const table = new Table({
+        head: ["Model", "Provider", "Name", "Context", "Default"],
+        style: {
+            head: ["cyan"],
+            border: [],
+        },
+        wordWrap: true,
+    });
+
+    for (const [providerName, provider] of Object.entries(modelsConfig.providers)) {
+        for (const [modelName, model] of Object.entries(provider.models)) {
+            const fullName = `${providerName}/${modelName}`;
+            table.push([
+                fullName,
+                providerName,
+                model.name,
+                model.contextWindow ?? "-",
+                modelsConfig.default === fullName ? "yes" : "",
+            ]);
+        }
+    }
+
+    return `${colors.bright}Available Models${colors.reset}\n${table.toString()}`;
 }
 
 function handleModelsCommand(
@@ -1171,8 +1293,7 @@ function handleModelsCommand(
 
     switch (command.kind) {
         case "models.list": {
-            console.log(`${colors.bright}Available Models:${colors.reset}`);
-            console.log(formatModelsList(modelsConfig));
+            console.log(formatModelList(modelsConfig));
             return;
         }
         case "models.default": {

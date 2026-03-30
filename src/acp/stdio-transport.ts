@@ -3,6 +3,7 @@ import { Readable, Writable } from "stream";
 import type { ACPServerOptions } from "./types";
 
 import { ACPServer } from "./server";
+import { SessionStore } from "./session-store";
 import { JsonRpcRequestSchema } from "./types";
 
 export interface ACPStdioOptions extends ACPServerOptions {
@@ -15,6 +16,12 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
     const input = options.input || process.stdin;
     const output = options.output || process.stdout;
     const error = options.error || process.stderr;
+
+    // Auto-cleanup temporary sessions on startup
+    const sessionStore = new SessionStore();
+    void sessionStore.cleanupTempSessions().catch(() => {
+        // Ignore cleanup errors
+    });
 
     const server = new ACPServer({
         ...options,

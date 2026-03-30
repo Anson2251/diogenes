@@ -8,6 +8,8 @@ import type { DiogenesConfig } from "../types";
 import type { PromptBlock } from "./types";
 import type {
     AvailableCommand,
+    SessionConfigOption,
+    SessionConfigSelectOption,
     SessionLifecycleState,
     SessionMetadata,
     StoredSessionMetadata,
@@ -22,6 +24,16 @@ import {
 } from "../runtime/task-runner";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
 import { tryParsePartialToolCalls } from "../utils/tool-parser";
+import {
+    ensureDefaultModelsConfigSync,
+} from "../utils/config-bootstrap";
+import {
+    loadModelsConfig,
+    resolveModel,
+} from "../utils/models-config";
+import {
+    getProviderApiKeyEnvVarName,
+} from "../utils/api-key-manager";
 import {
     createBaseSlashCommandRegistry,
     createSnapshotSlashCommands,
@@ -809,6 +821,27 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         };
     }
 
+    private getPersistedLLMState(): PersistedDiogenesState["llm"] {
+        const llmConfig = this.diogenes.getLLMConfig();
+        return {
+            provider: llmConfig.provider,
+            providerStyle: llmConfig.providerStyle,
+            model: llmConfig.model,
+            supportsToolRole: llmConfig.supportsToolRole,
+            baseURL: llmConfig.baseURL,
+            maxTokens: llmConfig.maxTokens,
+            temperature: llmConfig.temperature,
+        };
+    }
+
+    private getResolvedLLMApiKey(providerName?: string): string | undefined {
+        if (!providerName) {
+            return undefined;
+        }
+
+        return process.env[getProviderApiKeyEnvVarName(providerName)];
+    }
+
     getPersistedState(): PersistedDiogenesState {
         const workspace = this.diogenes.getWorkspaceManager();
         const directoryWorkspace = workspace.getDirectoryWorkspace();
@@ -827,6 +860,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 title: this.title,
                 description: this.description,
             },
+            llm: this.getPersistedLLMState(),
             acpReplayLog: this.acpReplayLog.map((update) => cloneACPUpdate(update)),
             messageHistory: this.getMessageHistory().map((message) => ({
                 role: message.role,
@@ -911,6 +945,19 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.title = state.metadata?.title ?? this.title;
         this.description = state.metadata?.description ?? this.description;
 
+        if (state.llm) {
+            this.diogenes.setLLMConfig({
+                provider: state.llm.provider,
+                providerStyle: state.llm.providerStyle,
+                model: state.llm.model,
+                supportsToolRole: state.llm.supportsToolRole,
+                baseURL: state.llm.baseURL,
+                maxTokens: state.llm.maxTokens,
+                temperature: state.llm.temperature,
+                apiKey: this.getResolvedLLMApiKey(state.llm.provider),
+            });
+        }
+
         for (const dirPath of state.workspace.loadedDirectories) {
             await workspace.loadDirectory(dirPath);
         }
@@ -934,6 +981,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         }
         if (options.emitPlanUpdate ?? true) {
             this.emitTodoPlanUpdate();
+            this.emitConfigOptionsUpdate();
         }
     }
 
@@ -1048,6 +1096,103 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
     getAvailableCommands(): AvailableCommand[] {
         return this.slashCommands.list().map((definition) => definition.command);
+    }
+
+    getConfigOptions(): SessionConfigOption[] | null {
+        const modelsPath = ensureDefaultModelsConfigSync();
+        const modelsConfig = loadModelsConfig(modelsPath);
+        if (!modelsConfig) {
+            return null;
+        }
+
+        // Build available options from config file
+        const options: SessionConfigSelectOption[] = [];
+        for (const [providerName, provider] of Object.entries(modelsConfig.providers)) {
+            for (const [modelName, model] of Object.entries(provider.models)) {
+                options.push({
+                    value: `${providerName}/${modelName}`,
+                    name: model.name,
+                    description: model.description ?? null,
+                });
+            }
+        }
+
+        if (options.length === 0) {
+            return null;
+        }
+
+        // Determine current value: prefer session's llmConfig if it's in available options,
+        // otherwise fall back to config file default
+        const llmConfig = this.diogenes.getLLMConfig();
+        const sessionModelValue =
+            llmConfig.provider && llmConfig.model
+                ? `${llmConfig.provider}/${llmConfig.model}`
+                : null;
+        const currentValue =
+            sessionModelValue && options.some((opt) => opt.value === sessionModelValue)
+                ? sessionModelValue
+                : modelsConfig.default ?? null;
+
+        if (!currentValue) {
+            return null;
+        }
+
+        return [
+            {
+                id: "model",
+                name: "Model",
+                description: "Controls which provider/model the session uses",
+                category: "model",
+                type: "select",
+                currentValue,
+                options,
+            },
+        ];
+    }
+
+    async setConfigOption(configId: string, value: string): Promise<void> {
+        switch (configId) {
+            case "model": {
+                const modelsPath = ensureDefaultModelsConfigSync();
+                const modelsConfig = loadModelsConfig(modelsPath);
+                if (!modelsConfig) {
+                    throw new Error("Models configuration is unavailable");
+                }
+
+                const resolved = resolveModel(modelsConfig, value);
+                this.diogenes.setLLMConfig({
+                    provider: resolved.provider,
+                    providerStyle: resolved.providerStyle,
+                    supportsToolRole: resolved.supportsToolRole,
+                    model: resolved.model,
+                    baseURL: resolved.baseURL,
+                    apiKey: resolved.apiKey,
+                    maxTokens: resolved.maxTokens,
+                    temperature: resolved.temperature,
+                });
+                this.updatedAt = new Date().toISOString();
+                await this.persistMetadata();
+                this.emitConfigOptionsUpdate();
+                return;
+            }
+            default:
+                throw new Error(`Unknown config option: ${configId}`);
+        }
+    }
+
+    emitConfigOptionsUpdate(options: EmitSessionUpdateOptions = {}): void {
+        const configOptions = this.getConfigOptions();
+        if (!configOptions) {
+            return;
+        }
+
+        this.emitSessionUpdate(
+            {
+                sessionUpdate: "config_option_update",
+                configOptions,
+            },
+            options,
+        );
     }
 
     private emitSessionUpdate(

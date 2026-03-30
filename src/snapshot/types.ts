@@ -78,6 +78,15 @@ export interface PersistedDiogenesState {
         title: string | null;
         description: string | null;
     };
+    llm?: {
+        provider?: string;
+        providerStyle?: "openai" | "anthropic";
+        model?: string;
+        supportsToolRole?: boolean;
+        baseURL?: string;
+        maxTokens?: number;
+        temperature?: number;
+    };
     acpReplayLog: PersistedACPUpdate[];
     messageHistory: PersistedDiogenesMessage[];
     workspace: {

@@ -12,6 +12,7 @@ import {
     formatModelsList,
     ModelsConfigSchema,
 } from "../src/utils/models-config";
+import { clearApiKeyCache } from "../src/utils/api-key-manager";
 
 describe("models-config", () => {
     const tempDirs: string[] = [];
@@ -19,6 +20,7 @@ describe("models-config", () => {
     afterEach(async () => {
         vi.restoreAllMocks();
         vi.unstubAllEnvs();
+        clearApiKeyCache();
         await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
         tempDirs.length = 0;
     });
@@ -258,7 +260,7 @@ providers:
 
         it("throws when no apiKey available", () => {
             expect(() => resolveModel(config as any, "custom/model-1")).toThrow(
-                "No API key found for provider custom. Expected environment variable CUSTOM_API_KEY",
+                /No API key found for provider "custom"/,
             );
         });
     });

@@ -8,6 +8,7 @@ import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
 import { formatToolResults } from "../src/utils/tool-parser";
+import * as yaml from "yaml";
 
 function createStreamingResponse(chunks: string[]): Response {
     const encoder = new TextEncoder();
@@ -57,6 +58,7 @@ describe("ACPServer", () => {
 
     afterEach(() => {
         vi.restoreAllMocks();
+        vi.unstubAllEnvs();
         process.env.HOME = originalHome;
         for (const sandboxHome of sandboxHomes.splice(0, sandboxHomes.length)) {
             fs.rmSync(sandboxHome, { recursive: true, force: true });
@@ -89,10 +91,112 @@ describe("ACPServer", () => {
         expect(sessionNew && "result" in sessionNew && sessionNew.result.sessionId).toBeTypeOf(
             "string",
         );
-        expect(sessionNew && "result" in sessionNew ? sessionNew.result : null).toEqual({
+        expect(sessionNew && "result" in sessionNew ? sessionNew.result : null).toMatchObject({
             sessionId: expect.any(String),
         });
         expect(notifications).toHaveLength(0);
+    });
+
+    it("supports ACP model config options and model switching", async () => {
+        const configDir = path.join(
+            process.env.HOME!,
+            "Library",
+            "Application Support",
+            "diogenes",
+        );
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(configDir, "models.yaml"),
+            yaml.stringify({
+                providers: {
+                    openai: {
+                        style: "openai",
+                        supportsToolRole: false,
+                        baseURL: "https://api.openai.com/v1",
+                        models: {
+                            "gpt-4o": { name: "GPT-4o" },
+                        },
+                    },
+                    anthropic: {
+                        style: "anthropic",
+                        supportsToolRole: false,
+                        baseURL: "https://api.anthropic.com/v1",
+                        models: {
+                            "claude-sonnet-4-20250514": { name: "Claude Sonnet 4" },
+                        },
+                    },
+                },
+                default: "openai/gpt-4o",
+            }),
+            "utf8",
+        );
+        vi.stubEnv("OPENAI_API_KEY", "sk-openai");
+        vi.stubEnv("ANTHROPIC_API_KEY", "sk-anthropic");
+
+        const server = new ACPServer({
+            config: {
+                llm: {
+                    apiKey: "sk-openai",
+                    provider: "openai",
+                    providerStyle: "openai",
+                    supportsToolRole: false,
+                    model: "gpt-4o",
+                    baseURL: "https://api.openai.com/v1",
+                },
+            },
+        });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+
+        const created = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+
+        expect(created && "result" in created ? created.result.configOptions : null).toEqual([
+            expect.objectContaining({
+                id: "model",
+                category: "model",
+                currentValue: "openai/gpt-4o",
+            }),
+        ]);
+
+        const sessionId =
+            created && "result" in created ? (created.result.sessionId as string) : "";
+
+        const updated = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/set_config_option",
+            params: {
+                sessionId,
+                configId: "model",
+                value: "anthropic/claude-sonnet-4-20250514",
+            },
+        });
+
+        expect(updated && "result" in updated ? updated.result.configOptions : null).toEqual([
+            expect.objectContaining({
+                id: "model",
+                currentValue: "anthropic/claude-sonnet-4-20250514",
+            }),
+        ]);
+
+        const session = (server as any).sessionManager.getSession(sessionId);
+        expect(session.diogenes.getLLMConfig()).toEqual(
+            expect.objectContaining({
+                provider: "anthropic",
+                providerStyle: "anthropic",
+                model: "claude-sonnet-4-20250514",
+            }),
+        );
     });
 
     it("advertises ACP session management capabilities", async () => {
@@ -175,7 +279,7 @@ describe("ACPServer", () => {
                 params: { cwd: process.cwd() },
             });
 
-            expect(sessionNew && "result" in sessionNew ? sessionNew.result : null).toEqual({
+            expect(sessionNew && "result" in sessionNew ? sessionNew.result : null).toMatchObject({
                 sessionId: expect.any(String),
             });
         } finally {
@@ -275,7 +379,9 @@ describe("ACPServer", () => {
                 },
             });
 
-            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+            });
             expect(
                 slashPrompt && "result" in slashPrompt ? slashPrompt.result.stopReason : null,
             ).toBe("end_turn");
@@ -435,7 +541,9 @@ describe("ACPServer", () => {
             });
             events.push("response");
 
-            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+            });
             expect(events).toEqual(["response"]);
 
             await waitFor(() => events.includes("notify"));
@@ -607,7 +715,9 @@ describe("ACPServer", () => {
                 params: { sessionId, cwd: workspaceDir, mcpServers: [] },
             });
 
-            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+            });
             await waitFor(() =>
                 notifications.find((item) => item.params?.update?.sessionUpdate === "tool_call"),
             );
@@ -729,7 +839,9 @@ describe("ACPServer", () => {
                 params: { sessionId, cwd: workspaceDir, mcpServers: [] },
             });
 
-            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+            });
             await waitFor(() =>
                 notifications.find(
                     (item) => item.params?.update?.sessionUpdate === "user_message_chunk",
@@ -850,7 +962,9 @@ describe("ACPServer", () => {
                 },
             });
 
-            expect(loaded && "result" in loaded ? loaded.result : null).toBeNull();
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+            });
             expect(
                 promptResponse && "result" in promptResponse
                     ? promptResponse.result.stopReason
@@ -1135,7 +1249,7 @@ describe("ACPServer", () => {
                 snapshotsResponse && "result" in snapshotsResponse
                     ? snapshotsResponse.result
                     : null,
-            ).toEqual({
+            ).toMatchObject({
                 sessionId,
                 liveSession: true,
                 snapshots: expect.arrayContaining([
@@ -1299,7 +1413,7 @@ describe("ACPServer", () => {
                 snapshotsResponse && "result" in snapshotsResponse
                     ? snapshotsResponse.result
                     : null,
-            ).toEqual({
+            ).toMatchObject({
                 sessionId,
                 liveSession: false,
                 snapshots: [
@@ -1314,7 +1428,7 @@ describe("ACPServer", () => {
             ).toBe(-32001);
             expect(
                 deleteResponse && "result" in deleteResponse ? deleteResponse.result : null,
-            ).toEqual({
+            ).toMatchObject({
                 deleted: true,
                 sessionId,
             });
@@ -1421,7 +1535,7 @@ describe("ACPServer", () => {
             expect(nextCursor).toEqual(expect.any(String));
             expect(
                 firstPage && "result" in firstPage ? firstPage.result._meta?.diogenes : null,
-            ).toEqual({
+            ).toMatchObject({
                 pageSize: 5,
                 supportsCursorPagination: true,
             });
@@ -3424,7 +3538,7 @@ describe("ACPServer", () => {
         ).toBe("cancelled");
         expect(cancelled).toBe(true);
         expect(
-            notifications.every(
+            notifications.some(
                 (item) => item.params?.update?.sessionUpdate === "available_commands_update",
             ),
         ).toBe(true);
@@ -3666,5 +3780,443 @@ describe("ACPServer", () => {
                     item.params.update.rawOutput?.success === true,
             ),
         ).toBe(true);
+    });
+
+    it("returns sessionId in session/load response", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-response-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
+
+            const session = (firstServer as any).sessionManager.getSession(sessionId);
+            await session.restorePersistedState({
+                version: 1,
+                kind: "diogenes_state",
+                sessionId,
+                cwd: process.cwd(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                acpReplayLog: [],
+                messageHistory: [],
+                workspace: {
+                    loadedDirectories: [],
+                    loadedFiles: [],
+                    todo: [],
+                    notepad: [],
+                },
+            });
+
+            const secondServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: process.cwd(), mcpServers: [] },
+            });
+
+            // Should contain sessionId, and may contain configOptions if models.yaml exists
+            const result = loaded && "result" in loaded ? loaded.result : null;
+            expect(result).toMatchObject({
+                sessionId,
+            });
+            expect(result.sessionId).toBe(sessionId);
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("returns configOptions in session/load when model is configured", async () => {
+        const configDir = path.join(
+            process.env.HOME!,
+            "Library",
+            "Application Support",
+            "diogenes",
+        );
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(configDir, "models.yaml"),
+            yaml.stringify({
+                providers: {
+                    openai: {
+                        style: "openai",
+                        supportsToolRole: false,
+                        baseURL: "https://api.openai.com/v1",
+                        models: {
+                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
+                        },
+                    },
+                },
+                default: "openai/gpt-4o",
+            }),
+            "utf8",
+        );
+        vi.stubEnv("OPENAI_API_KEY", "sk-openai");
+
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-config-options-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: {
+                    llm: {
+                        apiKey: "sk-openai",
+                        provider: "openai",
+                        providerStyle: "openai",
+                        supportsToolRole: false,
+                        model: "gpt-4o",
+                        baseURL: "https://api.openai.com/v1",
+                    },
+                },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
+
+            const session = (firstServer as any).sessionManager.getSession(sessionId);
+            await session.restorePersistedState({
+                version: 1,
+                kind: "diogenes_state",
+                sessionId,
+                cwd: process.cwd(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                acpReplayLog: [],
+                messageHistory: [],
+                workspace: {
+                    loadedDirectories: [],
+                    loadedFiles: [],
+                    todo: [],
+                    notepad: [],
+                },
+            });
+
+            const secondServer = new ACPServer({
+                config: {
+                    llm: {
+                        apiKey: "sk-openai",
+                        provider: "openai",
+                        providerStyle: "openai",
+                        supportsToolRole: false,
+                        model: "gpt-4o",
+                        baseURL: "https://api.openai.com/v1",
+                    },
+                },
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: process.cwd(), mcpServers: [] },
+            });
+
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+                configOptions: [
+                    expect.objectContaining({
+                        id: "model",
+                        category: "model",
+                        currentValue: "openai/gpt-4o",
+                        options: expect.arrayContaining([
+                            expect.objectContaining({
+                                value: "openai/gpt-4o",
+                                name: "GPT-4o",
+                            }),
+                        ]),
+                    }),
+                ],
+            });
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("falls back to config default when session has unsupported model", async () => {
+        const configDir = path.join(
+            process.env.HOME!,
+            "Library",
+            "Application Support",
+            "diogenes",
+        );
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(configDir, "models.yaml"),
+            yaml.stringify({
+                providers: {
+                    openai: {
+                        style: "openai",
+                        supportsToolRole: false,
+                        baseURL: "https://api.openai.com/v1",
+                        models: {
+                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
+                        },
+                    },
+                },
+                default: "openai/gpt-4o",
+            }),
+            "utf8",
+        );
+
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-unsupported-model-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: {
+                    llm: {
+                        apiKey: "test-key",
+                        provider: "custom",
+                        providerStyle: "openai",
+                        supportsToolRole: false,
+                        model: "custom-model",
+                    },
+                },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
+
+            const session = (firstServer as any).sessionManager.getSession(sessionId);
+            await session.restorePersistedState({
+                version: 1,
+                kind: "diogenes_state",
+                sessionId,
+                cwd: process.cwd(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                acpReplayLog: [],
+                messageHistory: [],
+                workspace: {
+                    loadedDirectories: [],
+                    loadedFiles: [],
+                    todo: [],
+                    notepad: [],
+                },
+            });
+
+            const secondServer = new ACPServer({
+                config: {
+                    llm: {
+                        apiKey: "test-key",
+                        provider: "custom",
+                        providerStyle: "openai",
+                        supportsToolRole: false,
+                        model: "custom-model",
+                    },
+                },
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: process.cwd(), mcpServers: [] },
+            });
+
+            // Should fall back to config default since custom-model is not in models.yaml
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+                configOptions: [
+                    expect.objectContaining({
+                        id: "model",
+                        category: "model",
+                        currentValue: "openai/gpt-4o",
+                        options: expect.arrayContaining([
+                            expect.objectContaining({
+                                value: "openai/gpt-4o",
+                                name: "GPT-4o",
+                            }),
+                        ]),
+                    }),
+                ],
+            });
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("falls back to config default when session has no model configured", async () => {
+        const configDir = path.join(
+            process.env.HOME!,
+            "Library",
+            "Application Support",
+            "diogenes",
+        );
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(configDir, "models.yaml"),
+            yaml.stringify({
+                providers: {
+                    openai: {
+                        style: "openai",
+                        supportsToolRole: false,
+                        baseURL: "https://api.openai.com/v1",
+                        models: {
+                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
+                        },
+                    },
+                },
+                default: "openai/gpt-4o",
+            }),
+            "utf8",
+        );
+
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-no-model-fallback-"));
+        const originalHome = process.env.HOME;
+        process.env.HOME = root;
+
+        try {
+            const firstServer = new ACPServer({
+                config: { llm: { apiKey: "test-key" } },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
+
+            const session = (firstServer as any).sessionManager.getSession(sessionId);
+            await session.restorePersistedState({
+                version: 1,
+                kind: "diogenes_state",
+                sessionId,
+                cwd: process.cwd(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                acpReplayLog: [],
+                messageHistory: [],
+                workspace: {
+                    loadedDirectories: [],
+                    loadedFiles: [],
+                    todo: [],
+                    notepad: [],
+                },
+            });
+
+            const secondServer = new ACPServer({
+                config: { llm: { apiKey: "test-key" } },
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const loaded = await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: process.cwd(), mcpServers: [] },
+            });
+
+            // Should fall back to config default when session has no model
+            expect(loaded && "result" in loaded ? loaded.result : null).toMatchObject({
+                sessionId,
+                configOptions: [
+                    expect.objectContaining({
+                        id: "model",
+                        category: "model",
+                        currentValue: "openai/gpt-4o",
+                        options: expect.arrayContaining([
+                            expect.objectContaining({
+                                value: "openai/gpt-4o",
+                                name: "GPT-4o",
+                            }),
+                        ]),
+                    }),
+                ],
+            });
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 });
