@@ -46,6 +46,10 @@ async function waitFor<T>(getValue: () => T | undefined, timeoutMs = 200): Promi
     throw new Error("Timed out waiting for value");
 }
 
+function getAppPathsForHome(homeDir: string) {
+    return resolveDiogenesAppPaths({ homeDir });
+}
+
 describe("ACPServer", () => {
     const sandboxHomes: string[] = [];
     let originalHome: string | undefined;
@@ -99,12 +103,7 @@ describe("ACPServer", () => {
     });
 
     it("supports ACP model config options and model switching", async () => {
-        const configDir = path.join(
-            process.env.HOME!,
-            "Library",
-            "Application Support",
-            "diogenes",
-        );
+        const configDir = getAppPathsForHome(process.env.HOME!).configDir;
         fs.mkdirSync(configDir, { recursive: true });
         fs.writeFileSync(
             path.join(configDir, "models.yaml"),
@@ -237,6 +236,7 @@ describe("ACPServer", () => {
     it("returns only sessionId in session/new when snapshot commands are enabled", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-new-commands-"));
         const originalHome = process.env.HOME;
+        const appPaths = getAppPathsForHome(root);
         process.env.HOME = root;
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
 
@@ -249,7 +249,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [
                                 path.join(process.cwd(), "tests/fixtures/fake-restic.cjs"),
@@ -868,6 +868,7 @@ describe("ACPServer", () => {
         const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-load-snapshot-workspace-"));
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const originalHome = process.env.HOME;
+        const appPaths = getAppPathsForHome(root);
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
         process.env.HOME = root;
 
@@ -880,7 +881,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -913,7 +914,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -995,6 +996,7 @@ describe("ACPServer", () => {
     it("lists active sessions and exposes snapshots through ACP management methods", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-management-"));
         const originalHome = process.env.HOME;
+        const appPaths = getAppPathsForHome(root);
         process.env.HOME = root;
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
 
@@ -1007,7 +1009,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [
                                 path.join(process.cwd(), "tests/fixtures/fake-restic.cjs"),
@@ -1244,7 +1246,7 @@ describe("ACPServer", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-stored-session-management-"));
         const originalHome = process.env.HOME;
         const sessionId = "stored-session-1";
-        const sessionsRoot = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
+        const sessionsRoot = getAppPathsForHome(root).sessionsDir;
         const sessionDir = path.join(sessionsRoot, sessionId);
 
         process.env.HOME = root;
@@ -1413,7 +1415,7 @@ describe("ACPServer", () => {
     it("paginates session/list results with cursor", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-pagination-"));
         const originalHome = process.env.HOME;
-        const sessionsDir = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
+        const sessionsDir = getAppPathsForHome(root).sessionsDir;
         process.env.HOME = root;
 
         try {
@@ -1519,7 +1521,7 @@ describe("ACPServer", () => {
     it("prunes broken persisted sessions through ACP", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-prune-"));
         const originalHome = process.env.HOME;
-        const sessionsDir = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
+        const sessionsDir = getAppPathsForHome(root).sessionsDir;
         process.env.HOME = root;
 
         try {
@@ -2678,6 +2680,7 @@ describe("ACPServer", () => {
         process.env.HOME = root;
 
         try {
+            const appPaths = getAppPathsForHome(root);
             const server = new ACPServer({
                 config: {
                     llm: { apiKey: "test-key", model: "gpt-4" },
@@ -2686,7 +2689,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2731,6 +2734,7 @@ describe("ACPServer", () => {
         const originalHome = process.env.HOME;
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const notifications: Array<{ method: string; params: any }> = [];
+        const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
         process.env.HOME = root;
@@ -2746,7 +2750,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2916,6 +2920,7 @@ describe("ACPServer", () => {
         const originalHome = process.env.HOME;
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const logPath = path.join(root, "restic.log");
+        const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = logPath;
         process.env.HOME = root;
@@ -2929,7 +2934,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2983,6 +2988,7 @@ describe("ACPServer", () => {
         const originalHome = process.env.HOME;
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const notifications: Array<{ method: string; params: any }> = [];
+        const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
         process.env.HOME = root;
@@ -2996,7 +3002,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -3121,6 +3127,7 @@ describe("ACPServer", () => {
         const originalHome = process.env.HOME;
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const notifications: Array<{ method: string; params: any }> = [];
+        const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
         process.env.HOME = root;
@@ -3134,7 +3141,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -3463,7 +3470,7 @@ describe("ACPServer", () => {
     it("restores a snapshot through the host-controlled ACP method", async () => {
         const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "acp-restore-"));
         const workspaceDir = path.join(root, "workspace");
-        const storageRoot = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
+        const storageRoot = getAppPathsForHome(root).sessionsDir;
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const logPath = path.join(root, "restic.log");
         const notifications: any[] = [];
@@ -3767,37 +3774,32 @@ describe("ACPServer", () => {
     });
 
     it("returns configOptions in session/load when model is configured", async () => {
-        const configDir = path.join(
-            process.env.HOME!,
-            "Library",
-            "Application Support",
-            "diogenes",
-        );
-        fs.mkdirSync(configDir, { recursive: true });
-        fs.writeFileSync(
-            path.join(configDir, "models.yaml"),
-            yaml.stringify({
-                providers: {
-                    openai: {
-                        style: "openai",
-                        supportsToolRole: false,
-                        baseURL: "https://api.openai.com/v1",
-                        models: {
-                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
-                        },
-                    },
-                },
-                default: "openai/gpt-4o",
-            }),
-            "utf8",
-        );
-        vi.stubEnv("OPENAI_API_KEY", "sk-openai");
-
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-config-options-"));
         const originalHome = process.env.HOME;
         process.env.HOME = root;
 
         try {
+            const configDir = getAppPathsForHome(root).configDir;
+            fs.mkdirSync(configDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(configDir, "models.yaml"),
+                yaml.stringify({
+                    providers: {
+                        openai: {
+                            style: "openai",
+                            supportsToolRole: false,
+                            baseURL: "https://api.openai.com/v1",
+                            models: {
+                                "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
+                            },
+                        },
+                    },
+                    default: "openai/gpt-4o",
+                }),
+                "utf8",
+            );
+            vi.stubEnv("OPENAI_API_KEY", "sk-openai");
+
             const firstServer = new ACPServer({
                 config: {
                     llm: {
@@ -3895,36 +3897,31 @@ describe("ACPServer", () => {
     });
 
     it("falls back to config default when session has unsupported model", async () => {
-        const configDir = path.join(
-            process.env.HOME!,
-            "Library",
-            "Application Support",
-            "diogenes",
-        );
-        fs.mkdirSync(configDir, { recursive: true });
-        fs.writeFileSync(
-            path.join(configDir, "models.yaml"),
-            yaml.stringify({
-                providers: {
-                    openai: {
-                        style: "openai",
-                        supportsToolRole: false,
-                        baseURL: "https://api.openai.com/v1",
-                        models: {
-                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
-                        },
-                    },
-                },
-                default: "openai/gpt-4o",
-            }),
-            "utf8",
-        );
-
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-unsupported-model-"));
         const originalHome = process.env.HOME;
         process.env.HOME = root;
 
         try {
+            const configDir = getAppPathsForHome(root).configDir;
+            fs.mkdirSync(configDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(configDir, "models.yaml"),
+                yaml.stringify({
+                    providers: {
+                        openai: {
+                            style: "openai",
+                            supportsToolRole: false,
+                            baseURL: "https://api.openai.com/v1",
+                            models: {
+                                "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
+                            },
+                        },
+                    },
+                    default: "openai/gpt-4o",
+                }),
+                "utf8",
+            );
+
             const firstServer = new ACPServer({
                 config: {
                     llm: {
@@ -4021,36 +4018,31 @@ describe("ACPServer", () => {
     });
 
     it("falls back to config default when session has no model configured", async () => {
-        const configDir = path.join(
-            process.env.HOME!,
-            "Library",
-            "Application Support",
-            "diogenes",
-        );
-        fs.mkdirSync(configDir, { recursive: true });
-        fs.writeFileSync(
-            path.join(configDir, "models.yaml"),
-            yaml.stringify({
-                providers: {
-                    openai: {
-                        style: "openai",
-                        supportsToolRole: false,
-                        baseURL: "https://api.openai.com/v1",
-                        models: {
-                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
-                        },
-                    },
-                },
-                default: "openai/gpt-4o",
-            }),
-            "utf8",
-        );
-
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-no-model-fallback-"));
         const originalHome = process.env.HOME;
         process.env.HOME = root;
 
         try {
+            const configDir = getAppPathsForHome(root).configDir;
+            fs.mkdirSync(configDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(configDir, "models.yaml"),
+                yaml.stringify({
+                    providers: {
+                        openai: {
+                            style: "openai",
+                            supportsToolRole: false,
+                            baseURL: "https://api.openai.com/v1",
+                            models: {
+                                "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
+                            },
+                        },
+                    },
+                    default: "openai/gpt-4o",
+                }),
+                "utf8",
+            );
+
             const firstServer = new ACPServer({
                 config: { llm: { apiKey: "test-key" } },
             });
