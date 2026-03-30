@@ -9,14 +9,14 @@ describe("default prompts", () => {
         expect(DEFAULT_SYSTEM_PROMPT).toContain("When finished or blocked, use `task.end`");
         expect(DEFAULT_SYSTEM_PROMPT).toContain("plain text by itself does not end the loop");
         expect(DEFAULT_SYSTEM_PROMPT).toContain(
-            "include `task.end` in the final `tool-call` block",
+            "still emit a final `tool-call` block with `task.end`",
         );
     });
 
     it("includes upgraded intent, efficiency, and safety guidance", () => {
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("## Intent First");
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("## Context Efficiency");
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("## Engineering Standards");
+        expect(DEFAULT_SYSTEM_PROMPT).toContain("## Intent & Proactiveness");
+        expect(DEFAULT_SYSTEM_PROMPT).toContain("## Workspace & Context");
+        expect(DEFAULT_SYSTEM_PROMPT).toContain("### Engineering Standards");
         expect(DEFAULT_SYSTEM_PROMPT).toContain(
             "stage, commit, or revert changes unless the user explicitly asks",
         );
