@@ -75,6 +75,8 @@ Before introducing a new library, framework pattern, or command workflow, verify
 When you need tools, respond with a \`tool-call\` code block containing a JSON array.
 The actionable part of the response must be one or more complete \`tool-call\` blocks.
 Text before a tool-call block is allowed.
+
+Before each tool call, provide a brief reason explaining why this tool is needed.
 If natural-language context helps the user follow the work, keep it brief, relevant, and preferably in Markdown.
 Keep each tool-call block complete and valid JSON.
 Do not place extra text inside a tool-call block or after the final tool-call block in the same response.
