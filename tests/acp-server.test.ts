@@ -8,6 +8,7 @@ import * as yaml from "yaml";
 import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
+import { resolveDiogenesAppPaths } from "../src/utils/app-paths";
 import { formatToolResults } from "../src/utils/tool-parser";
 
 function createStreamingResponse(chunks: string[]): Response {
@@ -3306,6 +3307,7 @@ describe("ACPServer", () => {
             fs.mkdirSync(workspaceDir, { recursive: true });
             fs.writeFileSync(path.join(workspaceDir, "hello.txt"), "hello\n", "utf8");
 
+            const appPaths = resolveDiogenesAppPaths({ homeDir: root });
             const server = new ACPServer({
                 config: {
                     llm: { apiKey: "test-key", model: "gpt-4" },
@@ -3314,13 +3316,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: appPaths.sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -3445,15 +3441,7 @@ describe("ACPServer", () => {
             ).toBe("restored via acp\n");
             const persistedState = JSON.parse(
                 await fs.promises.readFile(
-                    path.join(
-                        root,
-                        "Library",
-                        "Application Support",
-                        "diogenes",
-                        "sessions",
-                        sessionId,
-                        "state.json",
-                    ),
+                    path.join(appPaths.sessionsDir, sessionId, "state.json"),
                     "utf8",
                 ),
             );

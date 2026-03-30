@@ -21,9 +21,10 @@ describe("config bootstrap", () => {
         const home = fs.mkdtempSync(path.join(os.tmpdir(), "config-bootstrap-"));
         tempDirs.push(home);
 
-        const configDir = path.join(home, "Library", "Application Support", "diogenes");
-        const dataDir = configDir;
-        const sessionsDir = path.join(dataDir, "sessions");
+        const paths = appPaths.resolveDiogenesAppPaths({ homeDir: home });
+        const configDir = paths.configDir;
+        const dataDir = paths.dataDir;
+        const sessionsDir = paths.sessionsDir;
 
         vi.spyOn(appPaths, "ensureDiogenesAppDirsSync").mockImplementation(() => {
             fs.mkdirSync(configDir, { recursive: true });
@@ -47,9 +48,7 @@ describe("config bootstrap", () => {
         const configPath = ensureDefaultConfigFileSync();
         const content = fs.readFileSync(configPath, "utf8");
 
-        expect(configPath).toBe(
-            path.join(home, "Library", "Application Support", "diogenes", "config.yaml"),
-        );
+        expect(configPath).toBe(path.join(configDir, "config.yaml"));
         expect(content).toContain("# Diogenes default configuration");
         expect(content).toContain("llm:");
         expect(content).toContain("security:");
@@ -61,9 +60,10 @@ describe("config bootstrap", () => {
         const home = fs.mkdtempSync(path.join(os.tmpdir(), "config-bootstrap-existing-"));
         tempDirs.push(home);
 
-        const configDir = path.join(home, "Library", "Application Support", "diogenes");
-        const dataDir = configDir;
-        const sessionsDir = path.join(dataDir, "sessions");
+        const paths = appPaths.resolveDiogenesAppPaths({ homeDir: home });
+        const configDir = paths.configDir;
+        const dataDir = paths.dataDir;
+        const sessionsDir = paths.sessionsDir;
         fs.mkdirSync(configDir, { recursive: true });
         const configPath = path.join(configDir, "config.yaml");
         fs.writeFileSync(configPath, "llm:\n  model: custom\n", "utf8");

@@ -534,9 +534,8 @@ describe("CLI session commands", () => {
         process.env.HOME = root;
 
         try {
-            const configDir = path.join(root, "Library", "Application Support", "diogenes");
-            const dataDir = path.join(root, "data");
-            const sessionsDir = path.join(dataDir, "sessions");
+            const paths = appPaths.resolveDiogenesAppPaths({ homeDir: root });
+            const configDir = paths.configDir;
 
             await fs.mkdir(configDir, { recursive: true });
             await fs.writeFile(
