@@ -231,8 +231,7 @@ function extractCompleteJsonObjects(jsonArrayText: string): {
             if (depth === 1 && char === "}" && currentStart !== -1) {
                 const objText = trimmed.slice(currentStart, i + 1);
                 try {
-                    const parsed = JSON.parse(objText);
-                    objects.push(parsed);
+                    objects.push(JSON.parse(objText));
                 } catch {
                     // Skip invalid JSON
                 }
