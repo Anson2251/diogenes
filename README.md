@@ -4,7 +4,7 @@ A TypeScript framework for building LLM-driven coding agents with explicit, insp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Status**: Active development. Expect API and prompt changes before `1.0.0`.
+> **Status**: Alpha (v0.1.0-alpha.1). Expect API and prompt changes before `1.0.0`.
 
 ## What Diogenes Is
 
@@ -239,6 +239,7 @@ If a watched file changes on disk:
 - `file.create`
 - `file.overwrite`
 - `file.unload`
+- `file.remove`
 
 ### Task Tools
 
