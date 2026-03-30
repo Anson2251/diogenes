@@ -111,7 +111,11 @@ export interface SessionPruneResult {
 }
 
 export class SessionStore {
-    constructor(private readonly sessionsRoot = resolveDiogenesAppPaths().sessionsDir) {}
+    private readonly sessionsRoot: string;
+
+    constructor(sessionsRoot?: string) {
+        this.sessionsRoot = sessionsRoot ?? resolveDiogenesAppPaths().sessionsDir;
+    }
 
     getSessionsRoot(): string {
         return this.sessionsRoot;

@@ -168,7 +168,7 @@ describe("CLI session commands", () => {
             JSON.stringify(
                 {
                     sessionId,
-                    cwd: "/tmp/workspace",
+                    cwd: "/home/test/workspace",
                     createdAt: "2026-03-27T00:00:00.000Z",
                     updatedAt: "2026-03-27T00:00:01.000Z",
                     title: "Session title",
@@ -188,7 +188,7 @@ describe("CLI session commands", () => {
             JSON.stringify(
                 {
                     sessionId,
-                    cwd: "/tmp/workspace",
+                    cwd: "/home/test/workspace",
                     createdAt: "2026-03-27T00:00:00.000Z",
                     snapshots: [
                         {
@@ -245,7 +245,7 @@ describe("CLI session commands", () => {
             JSON.stringify(
                 {
                     sessionId,
-                    cwd: "/tmp/workspace",
+                    cwd: "/home/test/workspace",
                     createdAt: "2026-03-27T00:00:00.000Z",
                     updatedAt: "2026-03-27T00:00:01.000Z",
                     title: "Session title",
@@ -265,7 +265,7 @@ describe("CLI session commands", () => {
             JSON.stringify(
                 {
                     sessionId,
-                    cwd: "/tmp/workspace",
+                    cwd: "/home/test/workspace",
                     createdAt: "2026-03-27T00:00:00.000Z",
                     snapshots: [
                         {
@@ -320,7 +320,7 @@ describe("CLI session commands", () => {
             JSON.stringify(
                 {
                     sessionId,
-                    cwd: "/tmp/workspace",
+                    cwd: "/home/test/workspace",
                     createdAt: "2026-03-27T00:00:00.000Z",
                     updatedAt: "2026-03-27T00:00:01.000Z",
                     title: "Demo session",
@@ -353,7 +353,7 @@ describe("CLI session commands", () => {
         expect(output).toContain("Stored Sessions");
         expect(output).toContain(sessionId);
         expect(output).toContain("Demo session");
-        expect(output).toContain("/tmp/workspace");
+        expect(output).toContain("/home/test/workspace");
     });
 
     it("hides temporary sessions from /var/folders in session list", async () => {
@@ -424,7 +424,7 @@ describe("CLI session commands", () => {
             path.join(sessionsDir, "snapshot-only", "snapshots", "manifest.json"),
             JSON.stringify({
                 sessionId: "snapshot-only",
-                cwd: "/tmp/workspace",
+                cwd: "/home/test/workspace",
                 createdAt: "2026-03-27T00:00:00.000Z",
                 snapshots: [],
             }),

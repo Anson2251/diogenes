@@ -249,13 +249,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [
                                 path.join(process.cwd(), "tests/fixtures/fake-restic.cjs"),
@@ -886,13 +880,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -925,13 +913,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -1025,13 +1007,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [
                                 path.join(process.cwd(), "tests/fixtures/fake-restic.cjs"),
@@ -1268,13 +1244,7 @@ describe("ACPServer", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-stored-session-management-"));
         const originalHome = process.env.HOME;
         const sessionId = "stored-session-1";
-        const sessionsRoot = path.join(
-            root,
-            "Library",
-            "Application Support",
-            "diogenes",
-            "sessions",
-        );
+        const sessionsRoot = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
         const sessionDir = path.join(sessionsRoot, sessionId);
 
         process.env.HOME = root;
@@ -1286,7 +1256,7 @@ describe("ACPServer", () => {
                 JSON.stringify(
                     {
                         sessionId,
-                        cwd: "/tmp/workspace",
+                        cwd: "/home/test/workspace",
                         createdAt: "2026-03-27T00:00:00.000Z",
                         updatedAt: "2026-03-27T00:00:01.000Z",
                         title: "Stored session",
@@ -1312,7 +1282,7 @@ describe("ACPServer", () => {
                 JSON.stringify(
                     {
                         sessionId,
-                        cwd: "/tmp/workspace",
+                        cwd: "/home/test/workspace",
                         createdAt: "2026-03-27T00:00:00.000Z",
                         snapshots: [
                             {
@@ -1443,13 +1413,7 @@ describe("ACPServer", () => {
     it("paginates session/list results with cursor", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-pagination-"));
         const originalHome = process.env.HOME;
-        const sessionsDir = path.join(
-            root,
-            "Library",
-            "Application Support",
-            "diogenes",
-            "sessions",
-        );
+        const sessionsDir = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
         process.env.HOME = root;
 
         try {
@@ -1463,7 +1427,7 @@ describe("ACPServer", () => {
                     JSON.stringify(
                         {
                             sessionId,
-                            cwd: "/tmp/workspace",
+                            cwd: "/home/test/workspace",
                             createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
                             updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
                             title: `Session ${i}`,
@@ -1484,7 +1448,7 @@ describe("ACPServer", () => {
                             version: 1,
                             kind: "diogenes_state",
                             sessionId,
-                            cwd: "/tmp/workspace",
+                            cwd: "/home/test/workspace",
                             createdAt: `2026-03-27T00:00:${String(i).padStart(2, "0")}.000Z`,
                             updatedAt: `2026-03-27T00:00:${String(59 - i).padStart(2, "0")}.000Z`,
                             metadata: { title: `Session ${i}`, description: null },
@@ -1555,13 +1519,7 @@ describe("ACPServer", () => {
     it("prunes broken persisted sessions through ACP", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-prune-"));
         const originalHome = process.env.HOME;
-        const sessionsDir = path.join(
-            root,
-            "Library",
-            "Application Support",
-            "diogenes",
-            "sessions",
-        );
+        const sessionsDir = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
         process.env.HOME = root;
 
         try {
@@ -1576,7 +1534,7 @@ describe("ACPServer", () => {
                 JSON.stringify(
                     {
                         sessionId: "snapshot-only",
-                        cwd: "/tmp/workspace",
+                        cwd: "/home/test/workspace",
                         createdAt: "2026-03-27T00:00:00.000Z",
                         snapshots: [],
                     },
@@ -2728,13 +2686,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2794,13 +2746,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -2983,13 +2929,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -3056,13 +2996,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -3200,13 +3134,7 @@ describe("ACPServer", () => {
                             enabled: true,
                             includeDiogenesState: false,
                             autoBeforePrompt: true,
-                            storageRoot: path.join(
-                                root,
-                                "Library",
-                                "Application Support",
-                                "diogenes",
-                                "sessions",
-                            ),
+                            storageRoot: resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                             resticBinary: process.execPath,
                             resticBinaryArgs: [fixturePath],
                             timeoutMs: 5_000,
@@ -3535,13 +3463,7 @@ describe("ACPServer", () => {
     it("restores a snapshot through the host-controlled ACP method", async () => {
         const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "acp-restore-"));
         const workspaceDir = path.join(root, "workspace");
-        const storageRoot = path.join(
-            root,
-            "Library",
-            "Application Support",
-            "diogenes",
-            "sessions",
-        );
+        const storageRoot = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
         const fixturePath = path.join(process.cwd(), "tests/fixtures/fake-restic.cjs");
         const logPath = path.join(root, "restic.log");
         const notifications: any[] = [];

@@ -7,6 +7,7 @@ import { ACPServer } from "../src/acp/server";
 import { ACPSession } from "../src/acp/session";
 import { SessionManager } from "../src/acp/session-manager";
 import { OpenAIClient } from "../src/llm/openai-client";
+import { resolveDiogenesAppPaths } from "../src/utils/app-paths";
 
 function createSession(): ACPSession {
     return new ACPSession(
@@ -262,13 +263,7 @@ describe("SessionManager lifecycle", () => {
             );
 
             await expect(manager.createSession(process.cwd())).rejects.toThrow();
-            const sessionsDir = path.join(
-                root,
-                "Library",
-                "Application Support",
-                "diogenes",
-                "sessions",
-            );
+            const sessionsDir = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
             expect(fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir) : []).toEqual([]);
         } finally {
             process.env.HOME = originalHome;
@@ -287,13 +282,7 @@ describe("SessionManager lifecycle", () => {
                 5,
                 () => {},
             );
-            const sessionsDir = path.join(
-                root,
-                "Library",
-                "Application Support",
-                "diogenes",
-                "sessions",
-            );
+            const sessionsDir = resolveDiogenesAppPaths({ homeDir: root }).sessionsDir;
             fs.mkdirSync(path.join(sessionsDir, "broken-session"), { recursive: true });
             fs.writeFileSync(
                 path.join(sessionsDir, "broken-session", "metadata.json"),
@@ -493,11 +482,7 @@ describe("ACPServer disposal", () => {
             expect(
                 fs.existsSync(
                     path.join(
-                        root,
-                        "Library",
-                        "Application Support",
-                        "diogenes",
-                        "sessions",
+                        resolveDiogenesAppPaths({ homeDir: root }).sessionsDir,
                         sessionId,
                         "metadata.json",
                     ),
@@ -547,14 +532,7 @@ describe("ACPServer disposal", () => {
             });
             expect(
                 fs.existsSync(
-                    path.join(
-                        root,
-                        "Library",
-                        "Application Support",
-                        "diogenes",
-                        "sessions",
-                        sessionId,
-                    ),
+                    path.join(resolveDiogenesAppPaths({ homeDir: root }).sessionsDir, sessionId),
                 ),
             ).toBe(false);
         } finally {
