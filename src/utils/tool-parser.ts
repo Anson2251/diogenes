@@ -142,6 +142,144 @@ function validateToolCall(toolCall: unknown): { valid: boolean; error?: string }
     };
 }
 
+export interface PartialParseResult {
+    completeToolCalls: ToolCall[];
+    hasIncompleteToolCall: boolean;
+    isInToolCallBlock: boolean;
+}
+
+function isInToolCallBlock(text: string): { inBlock: boolean; blockContent: string | null } {
+    const lines = text.split("\n");
+    let inBlock = false;
+    let heredocDelimiter: string | null = null;
+    const blockLines: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+
+        if (!inBlock) {
+            if (trimmed === "```tool-call" || trimmed === "```tool") {
+                inBlock = true;
+                heredocDelimiter = null;
+            }
+        } else {
+            if (heredocDelimiter === null) {
+                const heredocMatch = trimmed.match(/^<<<(\w+)$/);
+                if (heredocMatch) {
+                    heredocDelimiter = heredocMatch[1];
+                } else if (trimmed === "```") {
+                    return { inBlock: false, blockContent: blockLines.join("\n") };
+                } else {
+                    blockLines.push(lines[i]);
+                }
+            } else {
+                if (trimmed === heredocDelimiter) {
+                    heredocDelimiter = null;
+                }
+                blockLines.push(lines[i]);
+            }
+        }
+    }
+
+    return { inBlock, blockContent: inBlock ? blockLines.join("\n") : null };
+}
+
+function extractCompleteJsonObjects(jsonArrayText: string): {
+    objects: unknown[];
+    hasIncomplete: boolean;
+} {
+    const trimmed = jsonArrayText.trim();
+    if (!trimmed.startsWith("[")) {
+        return { objects: [], hasIncomplete: false };
+    }
+
+    const objects: unknown[] = [];
+    let depth = 0;
+    let currentStart = -1;
+    let inString = false;
+    let escapeNext = false;
+
+    for (let i = 0; i < trimmed.length; i++) {
+        const char = trimmed[i];
+
+        if (escapeNext) {
+            escapeNext = false;
+            continue;
+        }
+
+        if (char === "\\") {
+            escapeNext = true;
+            continue;
+        }
+
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+
+        if (inString) {
+            continue;
+        }
+
+        if (char === "{" || char === "[") {
+            if (depth === 1 && char === "{") {
+                currentStart = i;
+            }
+            depth++;
+        } else if (char === "}" || char === "]") {
+            depth--;
+            if (depth === 1 && char === "}" && currentStart !== -1) {
+                const objText = trimmed.slice(currentStart, i + 1);
+                try {
+                    const parsed = JSON.parse(objText);
+                    objects.push(parsed);
+                } catch {
+                    // Skip invalid JSON
+                }
+                currentStart = -1;
+            }
+        }
+    }
+
+    const hasIncomplete = depth > 0 || (trimmed.length > 1 && !trimmed.endsWith("]"));
+    return { objects, hasIncomplete };
+}
+
+export function tryParsePartialToolCalls(text: string): PartialParseResult {
+    const { inBlock, blockContent } = isInToolCallBlock(text);
+
+    if (!inBlock || !blockContent) {
+        return {
+            completeToolCalls: [],
+            hasIncompleteToolCall: false,
+            isInToolCallBlock: false,
+        };
+    }
+
+    try {
+        const { objects, hasIncomplete } = extractCompleteJsonObjects(blockContent);
+        const completeToolCalls: ToolCall[] = [];
+
+        for (const obj of objects) {
+            if (isToolCall(obj)) {
+                completeToolCalls.push(obj);
+            }
+        }
+
+        return {
+            completeToolCalls,
+            hasIncompleteToolCall: hasIncomplete,
+            isInToolCallBlock: true,
+        };
+    } catch {
+        return {
+            completeToolCalls: [],
+            hasIncompleteToolCall: true,
+            isInToolCallBlock: true,
+        };
+    }
+}
+
 export type ToolResultFormatter = (toolCall: ToolCall, result: ToolResult) => string;
 
 export interface ParseResult {
@@ -153,6 +291,12 @@ export interface ParseResult {
         rawContent?: string;
         suggestion?: string;
     };
+}
+
+export interface PartialParseResult {
+    completeToolCalls: ToolCall[];
+    hasIncompleteToolCall: boolean;
+    isInToolCallBlock: boolean;
 }
 
 class HeredocParseError extends Error {

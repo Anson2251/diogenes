@@ -21,6 +21,7 @@ import {
     type TaskRunResult,
 } from "../runtime/task-runner";
 import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
+import { tryParsePartialToolCalls } from "../utils/tool-parser";
 import {
     createBaseSlashCommandRegistry,
     createSnapshotSlashCommands,
@@ -723,6 +724,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         emittedContentLength: number;
         nextToolCallSequence: number;
         toolCallIds: Map<string, string>;
+        pendingToolCallKeys: Map<string, string>;
     } | null = null;
     private activePromptPromise: Promise<TaskRunResult> | null = null;
 
@@ -1165,6 +1167,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             emittedContentLength: 0,
             nextToolCallSequence: 0,
             toolCallIds: new Map(),
+            pendingToolCallKeys: new Map(),
         };
         this.lifecycleState = "running";
         this.updatedAt = new Date().toISOString();
@@ -1514,7 +1517,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         }));
     }
 
-    private getToolCallKey(iteration: number, index: number): string {
+    private getToolCallIterationKey(iteration: number, index: number): string {
         return `${iteration}:${index}`;
     }
 
@@ -1523,7 +1526,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             return `${this.sessionId}:toolcall:missing-run`;
         }
 
-        const key = this.getToolCallKey(iteration, index);
+        const key = this.getToolCallIterationKey(iteration, index);
         const existing = this.activeRun.toolCallIds.get(key);
         if (existing) {
             return existing;
@@ -1604,6 +1607,42 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         void this.persistMetadata().catch(() => undefined);
     }
 
+    private getToolCallContentKey(toolCall: ToolCall): string {
+        return JSON.stringify({ tool: toolCall.tool, params: toolCall.params });
+    }
+
+    private tryEmitPendingToolCalls(): void {
+        if (!this.activeRun) {
+            return;
+        }
+
+        const partialResult = tryParsePartialToolCalls(this.activeRun.streamedContent);
+        if (!partialResult.isInToolCallBlock || partialResult.completeToolCalls.length === 0) {
+            return;
+        }
+
+        for (const toolCall of partialResult.completeToolCalls) {
+            const contentKey = this.getToolCallContentKey(toolCall);
+            if (this.activeRun.pendingToolCallKeys.has(contentKey)) {
+                continue;
+            }
+
+            const sequence = this.activeRun.nextToolCallSequence++;
+            const toolCallId = `${this.activeRun.id}:tool:${sequence}`;
+            this.activeRun.toolCallIds.set(`pending:${sequence}`, toolCallId);
+            this.activeRun.pendingToolCallKeys.set(contentKey, toolCallId);
+
+            this.emitSessionUpdate(
+                createACPToolCallUpdate(
+                    toolCallId,
+                    toolCall,
+                    "pending",
+                    this.extractLocations(toolCall.params),
+                ),
+            );
+        }
+    }
+
     private handleEvent(event: TaskRunEvent): void {
         if (event.type === "llm.stream.delta") {
             if (event.chunk.type === "content" && this.activeRun) {
@@ -1612,6 +1651,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 const nextChunk = visibleText.slice(this.activeRun.emittedContentLength);
 
                 if (nextChunk.length === 0) {
+                    this.tryEmitPendingToolCalls();
                     return;
                 }
 
@@ -1620,6 +1660,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                     sessionUpdate: "agent_message_chunk",
                     content: createTextContent(nextChunk),
                 });
+                this.tryEmitPendingToolCalls();
                 return;
             }
 
@@ -1632,14 +1673,24 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
         if (event.type === "tool.calls.parsed") {
             event.toolCalls.forEach((toolCall, index) => {
-                this.emitSessionUpdate(
-                    createACPToolCallUpdate(
-                        this.registerToolCallId(event.iteration, index),
-                        toolCall,
-                        "pending",
-                        this.extractLocations(toolCall.params),
-                    ),
-                );
+                const contentKey = this.getToolCallContentKey(toolCall);
+                const existingId = this.activeRun?.pendingToolCallKeys.get(contentKey);
+
+                if (existingId) {
+                    const iterationKey = this.getToolCallIterationKey(event.iteration, index);
+                    this.activeRun?.toolCallIds.set(iterationKey, existingId);
+                } else {
+                    this.emitSessionUpdate(
+                        createACPToolCallUpdate(
+                            this.registerToolCallId(event.iteration, index),
+                            toolCall,
+                            "pending",
+                            this.extractLocations(toolCall.params),
+                        ),
+                    );
+                    const toolCallId = this.getToolCallId(event.iteration, index);
+                    this.activeRun?.pendingToolCallKeys.set(contentKey, toolCallId);
+                }
             });
             return;
         }

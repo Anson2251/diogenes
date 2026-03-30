@@ -18,6 +18,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "postinstall": "git config core.hooksPath .githooks || true",
+    "typecheck": "pnpm tsgo --noEmit",
     "fmt": "pnpm oxfmt",
     "build": "pnpm tsgo",
     "dev": "pnpm tsgo --watch",

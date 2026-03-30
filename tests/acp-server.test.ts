@@ -3570,4 +3570,101 @@ describe("ACPServer", () => {
             await fs.promises.rm(root, { recursive: true, force: true });
         }
     });
+
+    it("emits pending tool calls during streaming before JSON is complete", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const responses: any[] = [];
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+            respond: (response) => responses.push(response),
+        });
+
+        vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
+            async (_messages, onChunk) => {
+                onChunk({ type: "content", content: "I'll run some tools.\n\n```to" });
+                onChunk({ type: "content", content: "ol-call\n[" });
+                onChunk({
+                    type: "content",
+                    content: '{"tool":"file.load","params":{"path":"a.ts"}},',
+                });
+                onChunk({
+                    type: "content",
+                    content: '{"tool":"dir.list","params":{"path":"src"}},',
+                });
+                onChunk({
+                    type: "content",
+                    content:
+                        '{"tool":"task.end","params":{"reason":"done","summary":"completed"}}]',
+                });
+                onChunk({ type: "content", content: "\n```" });
+                return {
+                    content:
+                        '```tool-call\n[{"tool":"file.load","params":{"path":"a.ts"}},{"tool":"dir.list","params":{"path":"src"}},{"tool":"task.end","params":{"reason":"done","summary":"completed"}}]\n```',
+                    reasoning: "",
+                };
+            },
+        );
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "Run multiple tools" }],
+            },
+        });
+
+        const finalResponse = await waitFor(() => responses.find((response) => response.id === 3));
+
+        expect(finalResponse?.result?.stopReason).toBe("end_turn");
+
+        const toolCalls = notifications.filter(
+            (item) => item.params?.update?.sessionUpdate === "tool_call",
+        );
+        const pendingToolCalls = toolCalls.filter(
+            (item) => item.params?.update?.status === "pending",
+        );
+        const toolCallUpdates = notifications.filter(
+            (item) => item.params?.update?.sessionUpdate === "tool_call_update",
+        );
+
+        expect(toolCalls.length).toBeGreaterThanOrEqual(3);
+        expect(pendingToolCalls.length).toBeGreaterThanOrEqual(3);
+        expect(pendingToolCalls.some((item) => item.params.update.rawInput?.path === "a.ts")).toBe(
+            true,
+        );
+        expect(pendingToolCalls.some((item) => item.params.update.rawInput?.path === "src")).toBe(
+            true,
+        );
+        expect(
+            pendingToolCalls.some((item) => item.params.update.rawInput?.reason === "done"),
+        ).toBe(true);
+        expect(
+            toolCallUpdates.some(
+                (item) =>
+                    item.params.update.status === "completed" &&
+                    item.params.update.rawOutput?.success === true,
+            ),
+        ).toBe(true);
+    });
 });

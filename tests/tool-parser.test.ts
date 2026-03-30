@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { parseToolCalls } from "../src/utils/tool-parser";
+import { parseToolCalls, tryParsePartialToolCalls } from "../src/utils/tool-parser";
 
 describe("parseToolCalls", () => {
     describe("basic parsing", () => {
@@ -590,6 +590,165 @@ NEWFUNC
                 "    console.log(arg1, arg2, x, y);",
                 "}",
             ]);
+        });
+    });
+});
+
+describe("tryParsePartialToolCalls", () => {
+    describe("detecting tool call blocks", () => {
+        it("should return empty when not in tool call block", () => {
+            const result = tryParsePartialToolCalls("Some regular text");
+            expect(result.isInToolCallBlock).toBe(false);
+            expect(result.completeToolCalls).toEqual([]);
+            expect(result.hasIncompleteToolCall).toBe(false);
+        });
+
+        it("should detect being inside tool-call block", () => {
+            const text = `\`\`\`tool-call
+[{"tool": "file.load", "params": {"path": "test.ts"`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.isInToolCallBlock).toBe(true);
+        });
+
+        it("should detect being inside tool block (alias)", () => {
+            const text = `\`\`\`tool
+[{"tool": "dir.list", "params": {"path": "src"`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.isInToolCallBlock).toBe(true);
+        });
+
+        it("should return false after block is closed", () => {
+            const text = `\`\`\`tool-call
+[{"tool": "file.load", "params": {"path": "test.ts"}}]
+\`\`\`
+Some text after`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.isInToolCallBlock).toBe(false);
+        });
+    });
+
+    describe("parsing complete tool calls in partial JSON", () => {
+        it("should extract complete tool call from partial array", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool": "file.load", "params": {"path": "a.ts"}},
+    {"tool": "file.load", "params": {"path": "b.ts"`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.isInToolCallBlock).toBe(true);
+            expect(result.hasIncompleteToolCall).toBe(true);
+            expect(result.completeToolCalls).toHaveLength(1);
+            expect(result.completeToolCalls[0]).toEqual({
+                tool: "file.load",
+                params: { path: "a.ts" },
+            });
+        });
+
+        it("should extract multiple complete tool calls", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool": "dir.list", "params": {"path": "src"}},
+    {"tool": "file.load", "params": {"path": "test.ts"}},
+    {"tool": "task.end", "params": {"reason": "incomplete"`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.isInToolCallBlock).toBe(true);
+            expect(result.hasIncompleteToolCall).toBe(true);
+            expect(result.completeToolCalls).toHaveLength(2);
+            expect(result.completeToolCalls[0].tool).toBe("dir.list");
+            expect(result.completeToolCalls[1].tool).toBe("file.load");
+        });
+
+        it("should handle empty array start", () => {
+            const text = `\`\`\`tool-call
+[`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.isInToolCallBlock).toBe(true);
+            expect(result.hasIncompleteToolCall).toBe(true);
+            expect(result.completeToolCalls).toEqual([]);
+        });
+
+        it("should handle complete array with no incomplete", () => {
+            const text = `\`\`\`tool-call
+[{"tool": "file.load", "params": {"path": "test.ts"}}]`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.isInToolCallBlock).toBe(true);
+            expect(result.hasIncompleteToolCall).toBe(false);
+            expect(result.completeToolCalls).toHaveLength(1);
+        });
+
+        it("should handle tool call with nested objects", () => {
+            const text = `\`\`\`tool-call
+[
+    {
+        "tool": "todo.set",
+        "params": {
+            "items": [
+                {"text": "Task 1", "state": "active"},
+                {"text": "Task 2", "state": "pending"}
+            ]
+        }
+    },
+    {"tool": "file.edit", "params": {"path": "incomplete"`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.completeToolCalls).toHaveLength(1);
+            expect(result.completeToolCalls[0].tool).toBe("todo.set");
+            expect(result.completeToolCalls[0].params.items).toHaveLength(2);
+        });
+
+        it("should skip invalid tool calls", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool": "file.load", "params": {"path": "valid.ts"}},
+    {"invalid": "object"},
+    {"tool": "dir.list", "params": {"path": "src"`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.completeToolCalls).toHaveLength(1);
+            expect(result.completeToolCalls[0].tool).toBe("file.load");
+        });
+
+        it("should skip unknown tool names", () => {
+            const text = `\`\`\`tool-call
+[
+    {"tool": "file.load", "params": {"path": "test.ts"}},
+    {"tool": "unknown.tool", "params": {}},
+    {"tool": "dir.list", "params": {"path": "src"`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.completeToolCalls).toHaveLength(1);
+            expect(result.completeToolCalls[0].tool).toBe("file.load");
+        });
+    });
+
+    describe("handling heredocs in partial parsing", () => {
+        it("should handle incomplete heredoc", () => {
+            const text = `\`\`\`tool-call
+[{"tool": "file.edit", "params": {"edits": [{"content": {"$heredoc": "EOF"}}]}}]
+<<<EOF
+incomplete heredoc content`;
+            const result = tryParsePartialToolCalls(text);
+            expect(result.hasIncompleteToolCall).toBe(true);
+        });
+    });
+
+    describe("incremental parsing simulation", () => {
+        it("should correctly track new tool calls across incremental updates", () => {
+            const texts = [
+                `\`\`\`tool-call
+[`,
+                `\`\`\`tool-call
+[{"tool": "file.load", "params": {"path": "a.ts"}}`,
+                `\`\`\`tool-call
+[{"tool": "file.load", "params": {"path": "a.ts"}},
+ {"tool": "dir.list", "params": {"path": "src"`,
+                `\`\`\`tool-call
+[{"tool": "file.load", "params": {"path": "a.ts"}},
+ {"tool": "dir.list", "params": {"path": "src"}}]`,
+            ];
+
+            const results = texts.map(tryParsePartialToolCalls);
+
+            expect(results[0].completeToolCalls).toHaveLength(0);
+            expect(results[1].completeToolCalls).toHaveLength(1);
+            expect(results[2].completeToolCalls).toHaveLength(1);
+            expect(results[3].completeToolCalls).toHaveLength(2);
         });
     });
 });
