@@ -28,7 +28,17 @@ import {
     type DiogenesContextManager,
 } from "./index";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
-import { ensureDefaultConfigFileSync } from "./utils/config-bootstrap";
+import {
+    ensureDefaultConfigFileSync,
+    ensureDefaultModelsConfigSync,
+} from "./utils/config-bootstrap";
+import {
+    loadModelsConfig,
+    listAvailableModels,
+    resolveModel,
+    formatModelsList,
+    getProviderApiKeyEnvVarName,
+} from "./utils/models-config";
 import { parseSocraticToolInput } from "./utils/socratic-parser";
 
 // ANSI color codes for terminal output
@@ -45,7 +55,6 @@ const colors = {
 };
 
 interface CLIOptions {
-    apiKey?: string;
     model?: string;
     baseUrl?: string;
     workspace?: string;
@@ -63,7 +72,13 @@ type CLICommand =
     | { kind: "sessions.get"; sessionId: string }
     | { kind: "sessions.snapshots"; sessionId: string }
     | { kind: "sessions.delete"; sessionId: string }
-    | { kind: "sessions.prune"; dryRun: boolean };
+    | { kind: "sessions.prune"; dryRun: boolean }
+    | { kind: "models.list" }
+    | { kind: "models.default"; model?: string };
+
+function getProviderEnvApiKey(providerName?: string): string | undefined {
+    return process.env[getProviderApiKeyEnvVarName(providerName || "openai")];
+}
 
 type QuestionFn = (prompt: string) => Promise<string>;
 const CLEAR_APP_DATA_PASSPHRASE = "delete diogenes data";
@@ -126,6 +141,24 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
         }
     }
 
+    if (args[0] === "models") {
+        const subcommand = args[1];
+
+        switch (subcommand) {
+            case "list":
+            case undefined:
+                return { options, command: { kind: "models.list" } };
+            case "default":
+                return { options, command: { kind: "models.default", model: args[2] } };
+            default:
+                console.error(
+                    `${colors.red}Error: Unknown models command ${subcommand}${colors.reset}`,
+                );
+                showHelp();
+                process.exit(1);
+        }
+    }
+
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
 
@@ -135,8 +168,6 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
         } else if (arg === "--version" || arg === "-v") {
             showVersion();
             process.exit(0);
-        } else if (arg === "--api-key" || arg === "-k") {
-            options.apiKey = args[++i];
         } else if (arg === "--model" || arg === "-m") {
             options.model = args[++i];
         } else if (arg === "--base-url" || arg === "-b") {
@@ -189,13 +220,14 @@ ${colors.bright}Usage:${colors.reset}
   diogenes sessions snapshots <sessionId>
   diogenes sessions delete <sessionId>
   diogenes sessions prune [--dry-run]
+  diogenes models [list]
+  diogenes models default [provider/model]
   diogenes --help
 
 ${colors.bright}Options:${colors.reset}
   -h, --help                    Show this help message
   -v, --version                 Show version information
-  -k, --api-key <key>           OpenAI API key (or set OPENAI_API_KEY env var)
-  -m, --model <model>           LLM model to use (default: gpt-4)
+  -m, --model <model>           LLM model to use (format: provider/model or model name)
   -b, --base-url <url>          OpenAI-compatible API base URL
   -w, --workspace <path>        Workspace directory (default: current directory)
   -V, --verbose                 Enable verbose output
@@ -207,7 +239,6 @@ ${colors.bright}Options:${colors.reset}
 
 ${colors.bright}Examples:${colors.reset}
   diogenes "List all TypeScript files in src directory"
-  diogenes --api-key sk-... "Fix type errors in utils.ts"
   diogenes --base-url https://api.openai.com/v1 "Use custom OpenAI endpoint"
   diogenes --workspace ./my-project "Analyze project structure"
   diogenes --interactive        Start interactive mode
@@ -218,9 +249,13 @@ ${colors.bright}Examples:${colors.reset}
   diogenes sessions get <id>    Show one managed session and its snapshots
   diogenes sessions delete <id> Delete managed session artifacts
   diogenes sessions prune       Remove broken managed session artifacts
+  diogenes models               List available models from models.yaml
+  diogenes models default       Show current default model
+  diogenes models default openai/gpt-4o-mini  Set default model
 
 ${colors.bright}Environment Variables:${colors.reset}
-  OPENAI_API_KEY                OpenAI API key (alternative to --api-key)
+  OPENAI_API_KEY                API key for provider openai
+  ANTHROPIC_API_KEY             API key for provider anthropic
   OPENAI_BASE_URL               OpenAI-compatible API base URL
   DIOGENES_WORKSPACE            Default workspace directory
   DIOGENES_MODEL                Default LLM model
@@ -233,6 +268,16 @@ ${colors.bright}Configuration:${colors.reset}
   OPENAI_API_KEY=sk-your-api-key-here
   OPENAI_BASE_URL=https://api.openai.com/v1
   DIOGENES_MODEL=gpt-4
+
+  Models are configured in models.yaml in the same directory:
+  providers:
+    openai:
+      baseURL: https://api.openai.com/v1
+      models:
+        gpt-4o:
+          name: GPT-4o
+          contextWindow: 128000
+  default: openai/gpt-4o
 `);
 }
 
@@ -242,9 +287,15 @@ ${colors.bright}Configuration:${colors.reset}
 function showVersion(): void {
     try {
         const content = fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8");
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const raw: { version?: string } = JSON.parse(content);
-        console.log(`Diogenes v${raw.version}`);
+        const raw: unknown = JSON.parse(content);
+        const version =
+            typeof raw === "object" &&
+            raw !== null &&
+            "version" in raw &&
+            typeof raw.version === "string"
+                ? raw.version
+                : "unknown";
+        console.log(`Diogenes v${version}`);
     } catch {
         console.log("Diogenes (version unknown)");
     }
@@ -409,22 +460,6 @@ function mergeConfig(
 }
 
 /**
- * Get API key from options or environment
- */
-function getApiKey(options: CLIOptions): string | undefined {
-    if (options.apiKey) {
-        return options.apiKey;
-    }
-
-    // Check environment variable
-    if (process.env.OPENAI_API_KEY) {
-        return process.env.OPENAI_API_KEY;
-    }
-
-    return undefined;
-}
-
-/**
  * Create Diogenes configuration from CLI options
  */
 function createConfig(options: CLIOptions): DiogenesConfig {
@@ -432,10 +467,16 @@ function createConfig(options: CLIOptions): DiogenesConfig {
     const configPath = ensureDefaultConfigFileSync();
     const fileConfig = configPath ? loadConfig(configPath) : {};
 
+    if (fileConfig.llm?.apiKey && fileConfig.llm) {
+        delete fileConfig.llm.apiKey;
+    }
+
+    const modelsPath = ensureDefaultModelsConfigSync();
+    const modelsConfig = loadModelsConfig(modelsPath);
+
     const envConfig: Partial<DiogenesConfig> = {};
-    if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL || process.env.DIOGENES_MODEL) {
+    if (process.env.OPENAI_BASE_URL || process.env.DIOGENES_MODEL) {
         envConfig.llm = {};
-        if (process.env.OPENAI_API_KEY) envConfig.llm.apiKey = process.env.OPENAI_API_KEY;
         if (process.env.OPENAI_BASE_URL) envConfig.llm.baseURL = process.env.OPENAI_BASE_URL;
         if (process.env.DIOGENES_MODEL) envConfig.llm.model = process.env.DIOGENES_MODEL;
     }
@@ -446,9 +487,8 @@ function createConfig(options: CLIOptions): DiogenesConfig {
     }
 
     const cliConfig: Partial<DiogenesConfig> = {};
-    if (options.apiKey || options.baseUrl || options.model) {
+    if (options.baseUrl || options.model) {
         cliConfig.llm = {};
-        if (options.apiKey) cliConfig.llm.apiKey = options.apiKey;
         if (options.baseUrl) cliConfig.llm.baseURL = options.baseUrl;
         if (options.model) cliConfig.llm.model = options.model;
     }
@@ -459,6 +499,40 @@ function createConfig(options: CLIOptions): DiogenesConfig {
     }
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
+
+    if (modelsConfig && merged.llm?.model) {
+        const modelRef = merged.llm.model;
+        const available = listAvailableModels(modelsConfig);
+
+        if (available.includes(modelRef)) {
+            try {
+                const resolved = resolveModel(modelsConfig, modelRef);
+                merged.llm = {
+                    ...merged.llm,
+                    provider: resolved.provider,
+                    providerStyle: resolved.providerStyle,
+                    supportsToolRole: resolved.supportsToolRole,
+                    model: resolved.model,
+                    apiKey: resolved.apiKey,
+                    baseURL: resolved.baseURL || merged.llm.baseURL,
+                    maxTokens: resolved.maxTokens ?? merged.llm.maxTokens,
+                    temperature: resolved.temperature ?? merged.llm.temperature,
+                };
+            } catch (error) {
+                console.error(
+                    `${colors.yellow}Warning: Could not resolve model ${modelRef}: ${error instanceof Error ? error.message : String(error)}${colors.reset}`,
+                );
+            }
+        }
+    }
+
+    if (merged.llm && !merged.llm.apiKey) {
+        const apiKey = getProviderEnvApiKey(merged.llm.provider);
+        if (apiKey) {
+            merged.llm.apiKey = apiKey;
+        }
+    }
+
     const interactiveToolsEnabled = options.interactive
         ? (merged.security?.interaction?.enabled ?? DEFAULT_SECURITY_CONFIG.interaction.enabled)
         : false;
@@ -979,24 +1053,23 @@ async function main(): Promise<void> {
     }
 
     if (command.kind !== "run") {
-        await handleSessionCommand(command);
+        await handleCommand(command);
         return;
     }
 
-    // Check if API key is available
-    const apiKey = getApiKey(options);
-    if (!apiKey) {
-        console.error(`${colors.red}Error: OpenAI API key is required.${colors.reset}`);
-        console.error(`Set it via --api-key option or OPENAI_API_KEY environment variable.`);
+    // Create configuration first so provider/model resolution can inject the correct key.
+    const config = createConfig(options);
+
+    if (!config.llm?.apiKey) {
+        const expectedEnvVar = getProviderApiKeyEnvVarName(config.llm?.provider || "openai");
+        console.error(`${colors.red}Error: API key is required.${colors.reset}`);
+        console.error(`Expected environment variable: ${expectedEnvVar}`);
         console.error(`\n${colors.yellow}Troubleshooting tips:${colors.reset}`);
-        console.error(`1. Get an API key from https://platform.openai.com/api-keys`);
-        console.error(`2. Export it: export OPENAI_API_KEY="your-key-here"`);
-        console.error(`3. Or use: diogenes --api-key "your-key-here" "your task"`);
+        console.error(`1. Export ${expectedEnvVar} for the selected provider.`);
+        console.error(`2. Example: export ${expectedEnvVar}="your-key-here"`);
+        console.error(`3. Check the provider name in models.yaml or config.yaml.`);
         process.exit(1);
     }
-
-    // Create configuration
-    const config = createConfig(options);
 
     // Validate workspace exists
     if (config.security?.workspaceRoot) {
@@ -1040,7 +1113,12 @@ async function main(): Promise<void> {
     }
 }
 
-async function handleSessionCommand(command: Exclude<CLICommand, { kind: "run" }>): Promise<void> {
+async function handleCommand(command: Exclude<CLICommand, { kind: "run" }>): Promise<void> {
+    if (command.kind === "models.list" || command.kind === "models.default") {
+        handleModelsCommand(command);
+        return;
+    }
+
     const sessionStore = new SessionStore();
 
     switch (command.kind) {
@@ -1080,6 +1158,50 @@ async function handleSessionCommand(command: Exclude<CLICommand, { kind: "run" }
     }
 }
 
+function handleModelsCommand(
+    command: Extract<CLICommand, { kind: "models.list" | "models.default" }>,
+): void {
+    const modelsPath = ensureDefaultModelsConfigSync();
+    const modelsConfig = loadModelsConfig(modelsPath);
+
+    if (!modelsConfig) {
+        console.error(`${colors.red}Error: Could not load models configuration${colors.reset}`);
+        process.exit(1);
+    }
+
+    switch (command.kind) {
+        case "models.list": {
+            console.log(`${colors.bright}Available Models:${colors.reset}`);
+            console.log(formatModelsList(modelsConfig));
+            return;
+        }
+        case "models.default": {
+            if (command.model) {
+                const available = listAvailableModels(modelsConfig);
+                if (!available.includes(command.model)) {
+                    console.error(
+                        `${colors.red}Error: Unknown model: ${command.model}${colors.reset}`,
+                    );
+                    console.error(
+                        `${colors.dim}Available models: ${available.join(", ")}${colors.reset}`,
+                    );
+                    process.exit(1);
+                }
+                modelsConfig.default = command.model;
+                fs.writeFileSync(modelsPath, yaml.stringify(modelsConfig), "utf8");
+                console.log(`${colors.green}Default model set to: ${command.model}${colors.reset}`);
+            } else {
+                if (modelsConfig.default) {
+                    console.log(modelsConfig.default);
+                } else {
+                    console.log(`${colors.yellow}No default model configured${colors.reset}`);
+                }
+            }
+            return;
+        }
+    }
+}
+
 // Run the CLI
 if (require.main === module) {
     main().catch((error: unknown) => {
@@ -1088,4 +1210,4 @@ if (require.main === module) {
     });
 }
 
-export { main, parseArgs, clearDiogenesAppData, handleSessionCommand, CLEAR_APP_DATA_PASSPHRASE }; // For testing
+export { main, parseArgs, clearDiogenesAppData, handleCommand, CLEAR_APP_DATA_PASSPHRASE }; // For testing

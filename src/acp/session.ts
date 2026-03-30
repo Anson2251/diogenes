@@ -1645,7 +1645,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
 
     private handleEvent(event: TaskRunEvent): void {
         if (event.type === "llm.stream.delta") {
-            if (event.chunk.type === "content" && this.activeRun) {
+            if (this.activeRun) {
                 this.activeRun.streamedContent += event.chunk.content;
                 const visibleText = getVisibleAssistantText(this.activeRun.streamedContent);
                 const nextChunk = visibleText.slice(this.activeRun.emittedContentLength);

@@ -88,6 +88,36 @@ describe("executeTask", () => {
         expect(secondCallMessages.at(-1)?.content).toContain("Total notepad lines: 1");
     });
 
+    it("uses tool role for tool results when supportsToolRole is enabled", async () => {
+        const streamSpy = vi
+            .spyOn(OpenAIClient.prototype, "createChatCompletionStream")
+            .mockResolvedValueOnce({
+                content:
+                    '```tool-call\n[{"tool":"task.notepad","params":{"mode":"append","content":["first note"]}}]\n```',
+                reasoning: "",
+            })
+            .mockResolvedValueOnce({
+                content:
+                    '```tool-call\n[{"tool":"task.end","params":{"reason":"done","summary":"completed after writing a note"}}]\n```',
+                reasoning: "",
+            });
+
+        await executeTask(
+            "test task",
+            {
+                llm: { apiKey: "test-key", model: "gpt-4", supportsToolRole: true },
+                security: { workspaceRoot: process.cwd() },
+            },
+            {
+                maxIterations: 3,
+                logger: new SilentLogger(),
+            },
+        );
+
+        const secondCallMessages = streamSpy.mock.calls[1]?.[0] ?? [];
+        expect(secondCallMessages.at(-1)?.role).toBe("tool");
+    });
+
     it("should insert a NEW TASK user message when continuing after completion", async () => {
         const streamSpy = vi
             .spyOn(OpenAIClient.prototype, "createChatCompletionStream")

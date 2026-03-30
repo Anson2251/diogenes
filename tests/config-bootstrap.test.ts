@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as appPaths from "../src/utils/app-paths";
 import { ensureDefaultConfigFileSync } from "../src/utils/config-bootstrap";
 
 describe("config bootstrap", () => {
@@ -19,7 +20,29 @@ describe("config bootstrap", () => {
     it("creates a default config.yaml on first run", () => {
         const home = fs.mkdtempSync(path.join(os.tmpdir(), "config-bootstrap-"));
         tempDirs.push(home);
-        vi.stubEnv("HOME", home);
+
+        const configDir = path.join(home, "Library", "Application Support", "diogenes");
+        const dataDir = configDir;
+        const sessionsDir = path.join(dataDir, "sessions");
+
+        vi.spyOn(appPaths, "ensureDiogenesAppDirsSync").mockImplementation(() => {
+            fs.mkdirSync(configDir, { recursive: true });
+            fs.mkdirSync(dataDir, { recursive: true });
+            fs.mkdirSync(sessionsDir, { recursive: true });
+            return {
+                homeDir: home,
+                configDir,
+                dataDir,
+                sessionsDir,
+                defaultConfigCandidates: [
+                    path.join(configDir, "config.yaml"),
+                    path.join(configDir, "config.yml"),
+                    path.join(configDir, "config.json"),
+                ],
+                modelsConfigPath: path.join(configDir, "models.yaml"),
+            };
+        });
+        vi.spyOn(appPaths, "findDefaultConfigFileSync").mockReturnValue(null);
 
         const configPath = ensureDefaultConfigFileSync();
         const content = fs.readFileSync(configPath, "utf8");
@@ -37,12 +60,27 @@ describe("config bootstrap", () => {
     it("does not overwrite an existing managed config file", () => {
         const home = fs.mkdtempSync(path.join(os.tmpdir(), "config-bootstrap-existing-"));
         tempDirs.push(home);
-        vi.stubEnv("HOME", home);
 
         const configDir = path.join(home, "Library", "Application Support", "diogenes");
+        const dataDir = configDir;
+        const sessionsDir = path.join(dataDir, "sessions");
         fs.mkdirSync(configDir, { recursive: true });
         const configPath = path.join(configDir, "config.yaml");
         fs.writeFileSync(configPath, "llm:\n  model: custom\n", "utf8");
+
+        vi.spyOn(appPaths, "ensureDiogenesAppDirsSync").mockReturnValue({
+            homeDir: home,
+            configDir,
+            dataDir,
+            sessionsDir,
+            defaultConfigCandidates: [
+                path.join(configDir, "config.yaml"),
+                path.join(configDir, "config.yml"),
+                path.join(configDir, "config.json"),
+            ],
+            modelsConfigPath: path.join(configDir, "models.yaml"),
+        });
+        vi.spyOn(appPaths, "findDefaultConfigFileSync").mockReturnValue(configPath);
 
         const returnedPath = ensureDefaultConfigFileSync();
         const content = fs.readFileSync(configPath, "utf8");

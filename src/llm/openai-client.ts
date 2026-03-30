@@ -121,11 +121,6 @@ export interface OpenAIStreamChunk {
 
 export type StreamChunkType = "content" | "reasoning";
 
-export interface StreamChunk {
-    type: StreamChunkType;
-    content: string;
-}
-
 export interface StreamCompletionResult {
     content: string;
     reasoning: string;
@@ -158,12 +153,14 @@ function isOpenAIStreamChunk(val: unknown): val is OpenAIStreamChunk {
     return result.success;
 }
 
-export class OpenAIClient {
-    private config: Required<OpenAIClientConfig>;
+import type { LLMClient, LLMClientConfig, StreamChunk } from "./anthropic-client";
+
+export class OpenAIClient implements LLMClient {
+    private config: Required<LLMClientConfig>;
     private abortController: AbortController | null = null;
     private abortReason: "timeout" | "cancelled" | null = null;
 
-    constructor(config: OpenAIClientConfig) {
+    constructor(config: LLMClientConfig) {
         this.config = {
             baseURL: config.baseURL || "https://api.openai.com/v1",
             model: config.model || "gpt-4",
@@ -403,7 +400,11 @@ export class OpenAIClient {
 
                         if (delta?.reasoning_content) {
                             reasoning_text += delta.reasoning_content;
-                            onChunk({ type: "reasoning", content: delta.reasoning_content });
+                            onChunk({
+                                content: delta.reasoning_content,
+                                reasoning_content: delta.reasoning_content,
+                                finishReason: null,
+                            });
                         }
 
                         if (delta?.content) {
@@ -413,7 +414,7 @@ export class OpenAIClient {
                             // reasoning-style text in its history and continuing to generate
                             // reasoning instead of proper tool calls.
                             fullContent += delta.content;
-                            onChunk({ type: "content", content: delta.content });
+                            onChunk({ content: delta.content, finishReason: null });
                         }
                     } catch {
                         // Ignore parse errors for malformed chunks
@@ -492,7 +493,7 @@ export class OpenAIClient {
     /**
      * Update configuration
      */
-    updateConfig(config: Partial<OpenAIClientConfig>): void {
+    updateConfig(config: Partial<LLMClientConfig>): void {
         this.config = {
             ...this.config,
             ...config,
@@ -502,7 +503,7 @@ export class OpenAIClient {
     /**
      * Get current configuration
      */
-    getConfig(): Required<OpenAIClientConfig> {
+    getConfig(): Required<LLMClientConfig> {
         return { ...this.config };
     }
 }

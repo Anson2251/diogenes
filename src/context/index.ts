@@ -4,6 +4,8 @@
 
 import { z } from "zod";
 
+import type { StreamChunk, LLMClient } from "../llm/anthropic-client";
+
 import {
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_SECURITY_CONFIG,
@@ -12,7 +14,8 @@ import {
     DEFAULT_TOKEN_LIMIT,
     getContextWindowForModel,
 } from "../config/default-prompts";
-import { OpenAIClient, StreamChunk } from "../llm/openai-client";
+import { AnthropicClient } from "../llm/anthropic-client";
+import { OpenAIClient } from "../llm/openai-client";
 import { ToolRegistry } from "../tools";
 import { BaseTool } from "../tools/base-tool";
 import {
@@ -33,7 +36,7 @@ export class DiogenesContextManager {
     private promptBuilder: PromptBuilder;
     private toolRegistry: ToolRegistry;
     private state: DiogenesState;
-    private llmClient: OpenAIClient | null = null;
+    private llmClient: LLMClient | null = null;
     private task: string = "";
 
     constructor(config: DiogenesConfig = {}) {
@@ -52,15 +55,30 @@ export class DiogenesContextManager {
 
         // Initialize LLM client if API key is provided
         if (this.config.llm.apiKey) {
-            this.llmClient = new OpenAIClient({
-                apiKey: this.config.llm.apiKey,
-                baseURL: this.config.llm.baseURL,
-                model: this.config.llm.model,
-                timeout: this.config.llm.timeout,
-            });
+            this.llmClient = this.createLLMClient(this.config.llm);
         }
     }
 
+    private createLLMClient(llmConfig: Partial<LLMConfig>): LLMClient {
+        if (!llmConfig.apiKey) {
+            throw new Error("API key is required");
+        }
+
+        const providerStyle = llmConfig.providerStyle || "openai";
+
+        const config = {
+            apiKey: llmConfig.apiKey,
+            baseURL: llmConfig.baseURL,
+            model: llmConfig.model,
+            timeout: llmConfig.timeout,
+        };
+
+        if (providerStyle === "anthropic") {
+            return new AnthropicClient(config);
+        }
+
+        return new OpenAIClient(config);
+    }
     private mergeWithDefaults(config: DiogenesConfig): Required<DiogenesConfig> {
         const model = config.llm?.model || DEFAULT_LLM_CONFIG.model;
         const modelContextWindow = getContextWindowForModel(model);
@@ -406,12 +424,7 @@ export class DiogenesContextManager {
 
         // Reinitialize LLM client if API key is provided
         if (this.config.llm.apiKey) {
-            this.llmClient = new OpenAIClient({
-                apiKey: this.config.llm.apiKey,
-                baseURL: this.config.llm.baseURL,
-                model: this.config.llm.model,
-                timeout: this.config.llm.timeout,
-            });
+            this.llmClient = this.createLLMClient(this.config.llm);
         } else {
             this.llmClient = null;
         }
@@ -429,6 +442,9 @@ export class DiogenesContextManager {
             timeout: llm.timeout,
             temperature: llm.temperature,
             maxTokens: llm.maxTokens,
+            provider: llm.provider,
+            providerStyle: llm.providerStyle,
+            supportsToolRole: llm.supportsToolRole,
         };
     }
 
@@ -442,7 +458,7 @@ export class DiogenesContextManager {
     /**
      * Get the LLM client instance
      */
-    getLLMClient(): OpenAIClient | null {
+    getLLMClient(): LLMClient | null {
         return this.llmClient;
     }
 
@@ -470,24 +486,16 @@ export class DiogenesContextManager {
             },
         ];
 
-        let response: string;
-        if (onStreamChunk) {
-            const result = await this.llmClient.createChatCompletionStream(
-                messages,
-                onStreamChunk,
-                {
-                    temperature: this.config.llm.temperature,
-                    max_tokens: this.config.llm.maxTokens,
-                },
-            );
-            // Reasoning is kept separate - only use content for the assistant message
-            response = result.content;
-        } else {
-            response = await this.llmClient.createChatCompletion(messages, {
+        const result = await this.llmClient.createChatCompletionStream(
+            messages,
+            onStreamChunk || (() => {}),
+            {
                 temperature: this.config.llm.temperature,
                 max_tokens: this.config.llm.maxTokens,
-            });
-        }
+            },
+        );
+        // Reasoning is kept separate - only use content for the assistant message
+        const response = result.content;
 
         const parseResult = parseToolCalls(response);
 

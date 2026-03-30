@@ -282,6 +282,106 @@ Notes:
 - `security.interaction.enabled` disables `task.ask` and `task.choose`
 - in the CLI, those tools are still only available in `--interactive`
 
+### Models Configuration
+
+Models are configured in `models.yaml` in the config directory:
+
+```yaml
+providers:
+  openai:
+    style: openai
+    baseURL: https://api.openai.com/v1
+    supportsToolRole: false
+    models:
+      gpt-4o:
+        name: GPT-4o
+        description: Most capable GPT-4 model
+        contextWindow: 128000
+        maxTokens: 4096
+        temperature: 0.7
+
+  claude-proxy:
+    style: anthropic
+    baseURL: https://your-provider.example.com/v1
+    supportsToolRole: false
+    models:
+      claude-sonnet:
+        name: Claude Sonnet
+        contextWindow: 200000
+
+  openrouter:
+    style: openai
+    baseURL: https://openrouter.ai/api/v1
+    supportsToolRole: false
+    models:
+      auto:
+        name: Auto
+        description: Let OpenRouter choose
+        contextWindow: 128000
+
+default: openai/gpt-4o
+```
+
+#### Provider Style
+
+Each provider must declare which wire protocol it speaks:
+
+- `style: openai`
+- `style: anthropic`
+
+Optional provider capability flags:
+
+- `supportsToolRole: true | false`
+
+Diogenes only uses `style` to choose the client. It does not infer protocol style from the provider name or `baseURL`.
+
+#### API Key Convention
+
+API keys are loaded from environment variables derived from the provider name:
+
+- `openai` -> `OPENAI_API_KEY`
+- `claude-proxy` -> `CLAUDE_PROXY_API_KEY`
+- `openrouter` -> `OPENROUTER_API_KEY`
+
+#### Model Reference Format
+
+Models are referenced as `provider/model`, e.g.:
+
+- `openai/gpt-4o`
+- `claude-proxy/claude-sonnet`
+- `openrouter/auto`
+
+#### CLI Models Commands
+
+List available models:
+
+```bash
+diogenes models
+diogenes models list
+```
+
+Show or set the default model:
+
+```bash
+diogenes models default
+diogenes models default openai/gpt-4o
+```
+
+Use a specific model for a task:
+
+```bash
+diogenes -m claude-proxy/claude-sonnet "your task"
+```
+
+#### Resolution Order
+
+1. CLI `-m` or `--model` flag
+2. `DIOGENES_MODEL` environment variable
+3. `default` in `models.yaml`
+4. `llm.model` in `config.yaml`
+
+When a `provider/model` format is used, the config from `models.yaml` is applied, including `style`, `baseURL`, token settings, and provider-specific API key lookup.
+
 ## Advanced: Tool-Call Format
 
 Most users do not need to think about the raw tool-call format unless they are working in socratic mode, testing prompts, or debugging parser behavior.

@@ -8,7 +8,7 @@
 import { TRON } from "@tron-format/tron";
 import { z } from "zod";
 
-import { StreamChunk } from "../llm/openai-client";
+import { StreamChunk } from "../llm/anthropic-client";
 
 const stringRecordSchema = z.record(z.string(), z.unknown());
 
@@ -290,8 +290,8 @@ export class TUILogger implements Logger {
     }
 
     streamChunk(chunk: StreamChunk): void {
-        if (chunk.type === "reasoning") {
-            process.stdout.write(`${colors.dim}${chunk.content}${colors.reset}`);
+        if (chunk.reasoning_content) {
+            process.stdout.write(`${colors.dim}${chunk.reasoning_content}${colors.reset}`);
         } else {
             process.stdout.write(chunk.content);
         }

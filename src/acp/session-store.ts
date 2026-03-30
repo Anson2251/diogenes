@@ -12,7 +12,7 @@ import { StoredSessionMetadataSchema } from "./types";
 
 // Zod schemas for persisted state
 const PersistedDiogenesMessageSchema = z.object({
-    role: z.enum(["user", "assistant"]),
+    role: z.enum(["user", "assistant", "tool"]),
     content: z.string(),
 });
 

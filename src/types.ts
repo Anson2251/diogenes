@@ -207,6 +207,8 @@ export interface LoggerConfig {
 
 // ==================== LLM Configuration ====================
 
+export type LLMProviderStyle = "openai" | "anthropic";
+
 export interface LLMConfig {
     apiKey: string;
     baseURL?: string;
@@ -214,6 +216,44 @@ export interface LLMConfig {
     timeout?: number;
     temperature?: number;
     maxTokens?: number;
+    provider?: string;
+    providerStyle?: LLMProviderStyle;
+    supportsToolRole?: boolean;
+}
+
+// ==================== Models Configuration ====================
+
+export interface ModelDefinition {
+    name: string;
+    description?: string;
+    contextWindow?: number;
+    maxTokens?: number;
+    temperature?: number;
+}
+
+export interface ProviderDefinition {
+    style: LLMProviderStyle;
+    baseURL?: string;
+    supportsToolRole?: boolean;
+    models: Record<string, ModelDefinition>;
+}
+
+export interface ModelsConfig {
+    providers: Record<string, ProviderDefinition>;
+    default?: string;
+}
+
+export interface ResolvedModel {
+    provider: string;
+    providerStyle: LLMProviderStyle;
+    supportsToolRole: boolean;
+    model: string;
+    fullName: string;
+    apiKey: string;
+    baseURL?: string;
+    contextWindow?: number;
+    maxTokens?: number;
+    temperature?: number;
 }
 
 // ==================== Framework Configuration ====================

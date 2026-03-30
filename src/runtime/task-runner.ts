@@ -1,11 +1,11 @@
 import type { DiogenesContextManager } from "../context";
-import type { StreamChunk } from "../llm/openai-client";
+import type { StreamChunk } from "../llm/anthropic-client";
 import type { ToolCall, ToolResult } from "../types";
 
 import { formatParseError, formatToolResults, parseToolCalls } from "../utils/tool-parser";
 
 export interface ConversationMessage {
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "tool";
     content: string;
 }
 
@@ -98,7 +98,9 @@ export async function runTaskLoop(
     emitMessageHistory(options, messageHistory);
 
     if (!diogenes.hasLLMClient()) {
-        throw new Error("LLM client not configured. Please provide API key in config.llm.apiKey");
+        throw new Error(
+            "LLM client not configured. Provide an API key via the selected provider environment variable.",
+        );
     }
 
     let iterations = 0;
@@ -120,13 +122,14 @@ export async function runTaskLoop(
             emit(options, { type: "run.iteration.started", iteration: iterations });
 
             const contextOnly = diogenes.buildContextOnly();
-            const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
-                {
-                    role: "system",
-                    content: `${systemPrompt}\n${contextOnly}`,
-                },
-                ...messageHistory,
-            ];
+            const messages: { role: "system" | "user" | "assistant" | "tool"; content: string }[] =
+                [
+                    {
+                        role: "system",
+                        content: `${systemPrompt}\n${contextOnly}`,
+                    },
+                    ...messageHistory,
+                ];
 
             const llmClient = diogenes.getLLMClient();
             if (!llmClient) {
@@ -163,7 +166,7 @@ export async function runTaskLoop(
                 type: "llm.stream.completed",
                 iteration: iterations,
                 response: streamResult.content,
-                reasoning: streamResult.reasoning,
+                reasoning: streamResult.reasoning || "",
             });
 
             messageHistory.push({
@@ -294,7 +297,7 @@ export async function runTaskLoop(
                 }
 
                 messageHistory.push({
-                    role: "user",
+                    role: diogenes.getLLMConfig().supportsToolRole ? "tool" : "user",
                     content: resultContent,
                 });
                 emitMessageHistory(options, messageHistory);

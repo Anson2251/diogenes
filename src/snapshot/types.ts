@@ -48,7 +48,7 @@ export interface SnapshotSummary {
 }
 
 export interface PersistedDiogenesMessage {
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "tool";
     content: string;
 }
 

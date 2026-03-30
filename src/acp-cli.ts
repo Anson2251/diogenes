@@ -10,16 +10,28 @@ import type { DiogenesConfig } from "./types";
 
 import { startACPServer } from "./index";
 import { resolveDiogenesAppPaths } from "./utils/app-paths";
-import { ensureDefaultConfigFileSync } from "./utils/config-bootstrap";
+import {
+    ensureDefaultConfigFileSync,
+    ensureDefaultModelsConfigSync,
+} from "./utils/config-bootstrap";
+import {
+    getProviderApiKeyEnvVarName,
+    loadModelsConfig,
+    listAvailableModels,
+    resolveModel,
+} from "./utils/models-config";
 
 interface ACPCLIOptions {
-    apiKey?: string;
     model?: string;
     baseUrl?: string;
     workspace?: string;
     envFile?: string;
     maxIterations?: number;
     debugStdioFile?: string;
+}
+
+function getProviderEnvApiKey(providerName?: string): string | undefined {
+    return process.env[getProviderApiKeyEnvVarName(providerName || "openai")];
 }
 
 function parseArgs(): ACPCLIOptions {
@@ -32,8 +44,6 @@ function parseArgs(): ACPCLIOptions {
         if (arg === "--help" || arg === "-h") {
             showHelp();
             process.exit(0);
-        } else if (arg === "--api-key" || arg === "-k") {
-            options.apiKey = args[++i];
         } else if (arg === "--model" || arg === "-m") {
             options.model = args[++i];
         } else if (arg === "--base-url" || arg === "-b") {
@@ -64,7 +74,6 @@ Usage:
 
 Options:
   -h, --help                    Show this help message
-  -k, --api-key <key>           OpenAI API key
   -m, --model <model>           LLM model
   -b, --base-url <url>          OpenAI-compatible API base URL
   -w, --workspace <path>        Workspace directory
@@ -74,6 +83,7 @@ Options:
 
 Environment Variables:
   OPENAI_API_KEY
+  ANTHROPIC_API_KEY
   OPENAI_BASE_URL
   DIOGENES_MODEL
   DIOGENES_WORKSPACE
@@ -152,10 +162,16 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
     const configPath = ensureDefaultConfigFileSync();
     const fileConfig = configPath ? loadConfig(configPath) : {};
 
+    if (fileConfig.llm?.apiKey && fileConfig.llm) {
+        delete fileConfig.llm.apiKey;
+    }
+
+    const modelsPath = ensureDefaultModelsConfigSync();
+    const modelsConfig = loadModelsConfig(modelsPath);
+
     const envConfig: Partial<DiogenesConfig> = {};
-    if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL || process.env.DIOGENES_MODEL) {
+    if (process.env.OPENAI_BASE_URL || process.env.DIOGENES_MODEL) {
         envConfig.llm = {};
-        if (process.env.OPENAI_API_KEY) envConfig.llm.apiKey = process.env.OPENAI_API_KEY;
         if (process.env.OPENAI_BASE_URL) envConfig.llm.baseURL = process.env.OPENAI_BASE_URL;
         if (process.env.DIOGENES_MODEL) envConfig.llm.model = process.env.DIOGENES_MODEL;
     }
@@ -166,9 +182,8 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
     }
 
     const cliConfig: Partial<DiogenesConfig> = {};
-    if (options.apiKey || options.baseUrl || options.model) {
+    if (options.baseUrl || options.model) {
         cliConfig.llm = {};
-        if (options.apiKey) cliConfig.llm.apiKey = options.apiKey;
         if (options.baseUrl) cliConfig.llm.baseURL = options.baseUrl;
         if (options.model) cliConfig.llm.model = options.model;
     }
@@ -179,6 +194,38 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
     }
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
+
+    if (modelsConfig && merged.llm?.model) {
+        const modelRef = merged.llm.model;
+        const available = listAvailableModels(modelsConfig);
+
+        if (available.includes(modelRef)) {
+            try {
+                const resolved = resolveModel(modelsConfig, modelRef);
+                merged.llm = {
+                    ...merged.llm,
+                    provider: resolved.provider,
+                    providerStyle: resolved.providerStyle,
+                    supportsToolRole: resolved.supportsToolRole,
+                    model: resolved.model,
+                    apiKey: resolved.apiKey,
+                    baseURL: resolved.baseURL || merged.llm.baseURL,
+                    maxTokens: resolved.maxTokens ?? merged.llm.maxTokens,
+                    temperature: resolved.temperature ?? merged.llm.temperature,
+                };
+            } catch {
+                // Ignore resolution errors, use as-is
+            }
+        }
+    }
+
+    if (merged.llm && !merged.llm.apiKey) {
+        const apiKey = getProviderEnvApiKey(merged.llm.provider);
+        if (apiKey) {
+            merged.llm.apiKey = apiKey;
+        }
+    }
+
     const snapshotConfig = merged.security?.snapshot;
     merged.security = {
         ...(merged.security || {}),

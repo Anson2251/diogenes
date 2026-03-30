@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { handleSessionCommand, parseArgs } from "../src/cli";
+import { handleCommand, parseArgs } from "../src/cli";
 import * as appPaths from "../src/utils/app-paths";
 
 describe("CLI session commands", () => {
@@ -46,6 +46,54 @@ describe("CLI session commands", () => {
         try {
             const parsed = parseArgs();
             expect(parsed.command).toEqual({ kind: "sessions.prune", dryRun: true });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses models list command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "models"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "models.list" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses models list command explicitly", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "models", "list"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "models.list" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses models default command without model", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "models", "default"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "models.default", model: undefined });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses models default command with model", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "models", "default", "openai/gpt-4o-mini"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "models.default", model: "openai/gpt-4o-mini" });
         } finally {
             process.argv = originalArgv;
         }
@@ -113,11 +161,12 @@ describe("CLI session commands", () => {
             dataDir,
             sessionsDir,
             defaultConfigCandidates: [],
+            modelsConfigPath: path.join(configDir, "models.yaml"),
         });
 
         const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-        await handleSessionCommand({ kind: "sessions.get", sessionId });
+        await handleCommand({ kind: "sessions.get", sessionId });
 
         const output = JSON.parse(consoleSpy.mock.calls[0]?.[0] ?? "{}");
 
@@ -166,11 +215,12 @@ describe("CLI session commands", () => {
             dataDir,
             sessionsDir,
             defaultConfigCandidates: [],
+            modelsConfigPath: path.join(configDir, "models.yaml"),
         });
 
         const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-        await handleSessionCommand({ kind: "sessions.prune", dryRun: false });
+        await handleCommand({ kind: "sessions.prune", dryRun: false });
 
         const output = JSON.parse(consoleSpy.mock.calls[0]?.[0] ?? "{}");
         expect(output).toEqual(

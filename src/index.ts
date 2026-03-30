@@ -27,9 +27,11 @@ export { TaskEndTool } from "./tools/task/task-end";
 export { ShellExecTool } from "./tools/shell/shell-exec";
 export { SnapshotCreateTool } from "./tools/snapshot/snapshot-create";
 
-// LLM Client
+// LLM Clients
 export { OpenAIClient } from "./llm/openai-client";
-export type { StreamChunk, StreamChunkType } from "./llm/openai-client";
+export { AnthropicClient } from "./llm/anthropic-client";
+export type { StreamChunk, LLMClient } from "./llm/anthropic-client";
+export type { StreamChunkType } from "./llm/openai-client";
 export { ACPServer } from "./acp/server";
 export { startACPServer } from "./acp/stdio-transport";
 export { runTaskLoop } from "./runtime/task-runner";

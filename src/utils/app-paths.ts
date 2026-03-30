@@ -8,6 +8,7 @@ export interface DiogenesAppPaths {
     dataDir: string;
     sessionsDir: string;
     defaultConfigCandidates: string[];
+    modelsConfigPath: string;
 }
 
 type Platform = NodeJS.Platform;
@@ -37,6 +38,7 @@ export function resolveDiogenesAppPaths(options: ResolveOptions = {}): DiogenesA
             path.join(configDir, "config.yml"),
             path.join(configDir, "config.json"),
         ],
+        modelsConfigPath: path.join(configDir, "models.yaml"),
     };
 }
 

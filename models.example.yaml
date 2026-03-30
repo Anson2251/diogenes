@@ -1,0 +1,90 @@
+# Diogenes models configuration
+#
+# Rules:
+# - Each provider must declare a protocol style:
+#   - openai
+#   - anthropic
+# - API keys are loaded from environment variables:
+#   - openai       -> OPENAI_API_KEY
+#   - anthropic    -> ANTHROPIC_API_KEY
+#   - claude-proxy -> CLAUDE_PROXY_API_KEY
+# - Default model format is: provider/model
+
+providers:
+  openai:
+    # Which API wire format this provider speaks.
+    style: openai
+
+    # Whether tool results should be sent back in conversation history
+    # as role="tool". Leave false unless the provider truly supports it.
+    supportsToolRole: false
+
+    # OpenAI-compatible base URL.
+    baseURL: https://api.openai.com/v1
+
+    models:
+      gpt-4o:
+        name: GPT-4o
+        description: Most capable OpenAI general model
+        contextWindow: 128000
+        maxTokens: 4096
+        temperature: 0.7
+
+      gpt-4o-mini:
+        name: GPT-4o Mini
+        description: Faster and cheaper OpenAI model
+        contextWindow: 128000
+
+  anthropic:
+    # Anthropic Messages API style.
+    style: anthropic
+
+    # Anthropic does not use OpenAI-style role="tool" messages here,
+    # so keep this disabled.
+    supportsToolRole: false
+
+    baseURL: https://api.anthropic.com/v1
+
+    models:
+      claude-sonnet-4-20250514:
+        name: Claude Sonnet 4
+        description: Strong default Anthropic model
+        contextWindow: 200000
+        maxTokens: 8192
+
+      claude-3-5-haiku-20241022:
+        name: Claude 3.5 Haiku
+        description: Faster Anthropic model
+        contextWindow: 200000
+
+  openrouter:
+    # OpenRouter exposes an OpenAI-compatible API.
+    style: openai
+    supportsToolRole: false
+    baseURL: https://openrouter.ai/api/v1
+
+    models:
+      auto:
+        name: OpenRouter Auto
+        description: Let OpenRouter pick the model
+        contextWindow: 128000
+
+      openai/gpt-4o:
+        name: OpenAI GPT-4o via OpenRouter
+        description: Routed through OpenRouter
+        contextWindow: 128000
+
+  claude-proxy:
+    # Example of a custom provider that speaks Anthropic-style protocol.
+    style: anthropic
+    supportsToolRole: false
+    baseURL: https://your-provider.example.com/v1
+
+    models:
+      claude-sonnet:
+        name: Claude Sonnet via Proxy
+        description: Custom proxy endpoint
+        contextWindow: 200000
+
+# Default model used when CLI/env/config does not override it.
+default: openai/gpt-4o
