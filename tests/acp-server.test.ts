@@ -9,6 +9,7 @@ import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
 import { resolveDiogenesAppPaths } from "../src/utils/app-paths";
+import * as configBootstrap from "../src/utils/config-bootstrap";
 import { formatToolResults } from "../src/utils/tool-parser";
 
 function createStreamingResponse(chunks: string[]): Response {
@@ -64,6 +65,15 @@ function setAppEnvHome(homeDir: string) {
     vi.stubEnv("XDG_DATA_HOME", path.join(homeDir, ".local", "share"));
 }
 
+function writeModelsConfig(homeDir: string, config: Record<string, unknown>): string {
+    const configDir = getAppPathsForHome(homeDir).configDir;
+    const modelsPath = path.join(configDir, "models.yaml");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(modelsPath, yaml.stringify(config), "utf8");
+    vi.spyOn(configBootstrap, "ensureDefaultModelsConfigSync").mockReturnValue(modelsPath);
+    return modelsPath;
+}
+
 describe("ACPServer", () => {
     const sandboxHomes: string[] = [];
     let originalHome: string | undefined;
@@ -117,33 +127,27 @@ describe("ACPServer", () => {
     });
 
     it("supports ACP model config options and model switching", async () => {
-        const configDir = getAppPathsForHome(process.env.HOME!).configDir;
-        fs.mkdirSync(configDir, { recursive: true });
-        fs.writeFileSync(
-            path.join(configDir, "models.yaml"),
-            yaml.stringify({
-                providers: {
-                    openai: {
-                        style: "openai",
-                        supportsToolRole: false,
-                        baseURL: "https://api.openai.com/v1",
-                        models: {
-                            "gpt-4o": { name: "GPT-4o" },
-                        },
-                    },
-                    anthropic: {
-                        style: "anthropic",
-                        supportsToolRole: false,
-                        baseURL: "https://api.anthropic.com/v1",
-                        models: {
-                            "claude-sonnet-4-20250514": { name: "Claude Sonnet 4" },
-                        },
+        writeModelsConfig(process.env.HOME!, {
+            providers: {
+                openai: {
+                    style: "openai",
+                    supportsToolRole: false,
+                    baseURL: "https://api.openai.com/v1",
+                    models: {
+                        "gpt-4o": { name: "GPT-4o" },
                     },
                 },
-                default: "openai/gpt-4o",
-            }),
-            "utf8",
-        );
+                anthropic: {
+                    style: "anthropic",
+                    supportsToolRole: false,
+                    baseURL: "https://api.anthropic.com/v1",
+                    models: {
+                        "claude-sonnet-4-20250514": { name: "Claude Sonnet 4" },
+                    },
+                },
+            },
+            default: "openai/gpt-4o",
+        });
         vi.stubEnv("OPENAI_API_KEY", "sk-openai");
         vi.stubEnv("ANTHROPIC_API_KEY", "sk-anthropic");
 
@@ -3793,25 +3797,19 @@ describe("ACPServer", () => {
         setAppEnvHome(root);
 
         try {
-            const configDir = getAppPathsForHome(root).configDir;
-            fs.mkdirSync(configDir, { recursive: true });
-            fs.writeFileSync(
-                path.join(configDir, "models.yaml"),
-                yaml.stringify({
-                    providers: {
-                        openai: {
-                            style: "openai",
-                            supportsToolRole: false,
-                            baseURL: "https://api.openai.com/v1",
-                            models: {
-                                "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
-                            },
+            writeModelsConfig(root, {
+                providers: {
+                    openai: {
+                        style: "openai",
+                        supportsToolRole: false,
+                        baseURL: "https://api.openai.com/v1",
+                        models: {
+                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
                         },
                     },
-                    default: "openai/gpt-4o",
-                }),
-                "utf8",
-            );
+                },
+                default: "openai/gpt-4o",
+            });
             vi.stubEnv("OPENAI_API_KEY", "sk-openai");
 
             const firstServer = new ACPServer({
@@ -3916,25 +3914,19 @@ describe("ACPServer", () => {
         setAppEnvHome(root);
 
         try {
-            const configDir = getAppPathsForHome(root).configDir;
-            fs.mkdirSync(configDir, { recursive: true });
-            fs.writeFileSync(
-                path.join(configDir, "models.yaml"),
-                yaml.stringify({
-                    providers: {
-                        openai: {
-                            style: "openai",
-                            supportsToolRole: false,
-                            baseURL: "https://api.openai.com/v1",
-                            models: {
-                                "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
-                            },
+            writeModelsConfig(root, {
+                providers: {
+                    openai: {
+                        style: "openai",
+                        supportsToolRole: false,
+                        baseURL: "https://api.openai.com/v1",
+                        models: {
+                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
                         },
                     },
-                    default: "openai/gpt-4o",
-                }),
-                "utf8",
-            );
+                },
+                default: "openai/gpt-4o",
+            });
 
             const firstServer = new ACPServer({
                 config: {
@@ -4037,25 +4029,19 @@ describe("ACPServer", () => {
         setAppEnvHome(root);
 
         try {
-            const configDir = getAppPathsForHome(root).configDir;
-            fs.mkdirSync(configDir, { recursive: true });
-            fs.writeFileSync(
-                path.join(configDir, "models.yaml"),
-                yaml.stringify({
-                    providers: {
-                        openai: {
-                            style: "openai",
-                            supportsToolRole: false,
-                            baseURL: "https://api.openai.com/v1",
-                            models: {
-                                "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
-                            },
+            writeModelsConfig(root, {
+                providers: {
+                    openai: {
+                        style: "openai",
+                        supportsToolRole: false,
+                        baseURL: "https://api.openai.com/v1",
+                        models: {
+                            "gpt-4o": { name: "GPT-4o", contextWindow: 128000 },
                         },
                     },
-                    default: "openai/gpt-4o",
-                }),
-                "utf8",
-            );
+                },
+                default: "openai/gpt-4o",
+            });
 
             const firstServer = new ACPServer({
                 config: { llm: { apiKey: "test-key" } },
