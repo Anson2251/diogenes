@@ -33,6 +33,15 @@ jobs:
       - name: Install restic
         run: sudo apt-get update && sudo apt-get install -y restic
 
+      - name: Verify restic
+        run: |
+          which restic
+          restic version
+          export RESTIC_PASSWORD=test-password
+          export RESTIC_REPOSITORY="$(mktemp -d)"
+          restic init
+          restic snapshots
+
       - name: Lint
         run: pnpm lint
 
