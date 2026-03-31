@@ -47,7 +47,21 @@ async function waitFor<T>(getValue: () => T | undefined, timeoutMs = 200): Promi
 }
 
 function getAppPathsForHome(homeDir: string) {
-    return resolveDiogenesAppPaths({ homeDir });
+    return resolveDiogenesAppPaths({
+        homeDir,
+        env: {
+            ...process.env,
+            HOME: homeDir,
+            XDG_CONFIG_HOME: path.join(homeDir, ".config"),
+            XDG_DATA_HOME: path.join(homeDir, ".local", "share"),
+        },
+    });
+}
+
+function setAppEnvHome(homeDir: string) {
+    vi.stubEnv("HOME", homeDir);
+    vi.stubEnv("XDG_CONFIG_HOME", path.join(homeDir, ".config"));
+    vi.stubEnv("XDG_DATA_HOME", path.join(homeDir, ".local", "share"));
 }
 
 describe("ACPServer", () => {
@@ -58,7 +72,7 @@ describe("ACPServer", () => {
         originalHome = process.env.HOME;
         const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "acp-server-home-"));
         sandboxHomes.push(sandboxHome);
-        process.env.HOME = sandboxHome;
+        setAppEnvHome(sandboxHome);
     });
 
     afterEach(() => {
@@ -237,7 +251,7 @@ describe("ACPServer", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-new-commands-"));
         const originalHome = process.env.HOME;
         const appPaths = getAppPathsForHome(root);
-        process.env.HOME = root;
+        setAppEnvHome(root);
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
 
         try {
@@ -287,7 +301,7 @@ describe("ACPServer", () => {
     it("loads a stored session by replaying persisted ACP updates", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-"));
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const firstServer = new ACPServer({
@@ -467,7 +481,7 @@ describe("ACPServer", () => {
     it("returns session/load response before replay notifications", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-order-"));
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const firstServer = new ACPServer({
@@ -555,7 +569,7 @@ describe("ACPServer", () => {
         const workspaceDir = fs.mkdtempSync(
             path.join(os.tmpdir(), "acp-session-load-tools-workspace-"),
         );
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const firstServer = new ACPServer({
@@ -775,7 +789,7 @@ describe("ACPServer", () => {
             path.join(os.tmpdir(), "acp-session-load-user-prompt-workspace-"),
         );
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockResolvedValue({
             content:
@@ -870,7 +884,7 @@ describe("ACPServer", () => {
         const originalHome = process.env.HOME;
         const appPaths = getAppPathsForHome(root);
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const firstServer = new ACPServer({
@@ -997,7 +1011,7 @@ describe("ACPServer", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-management-"));
         const originalHome = process.env.HOME;
         const appPaths = getAppPathsForHome(root);
-        process.env.HOME = root;
+        setAppEnvHome(root);
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
 
         try {
@@ -1249,7 +1263,7 @@ describe("ACPServer", () => {
         const sessionsRoot = getAppPathsForHome(root).sessionsDir;
         const sessionDir = path.join(sessionsRoot, sessionId);
 
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             fs.mkdirSync(sessionDir, { recursive: true });
@@ -1416,7 +1430,7 @@ describe("ACPServer", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-pagination-"));
         const originalHome = process.env.HOME;
         const sessionsDir = getAppPathsForHome(root).sessionsDir;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             fs.mkdirSync(sessionsDir, { recursive: true });
@@ -1522,7 +1536,7 @@ describe("ACPServer", () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-prune-"));
         const originalHome = process.env.HOME;
         const sessionsDir = getAppPathsForHome(root).sessionsDir;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             fs.mkdirSync(path.join(sessionsDir, "broken-session"), { recursive: true });
@@ -2677,7 +2691,7 @@ describe("ACPServer", () => {
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
         process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(process.cwd());
         process.env.FAKE_RESTIC_RESTORE_HELLO = "restored via acp\n";
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const appPaths = getAppPathsForHome(root);
@@ -2737,7 +2751,7 @@ describe("ACPServer", () => {
         const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         const llmSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream");
 
@@ -2923,7 +2937,7 @@ describe("ACPServer", () => {
         const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = logPath;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const server = new ACPServer({
@@ -2991,7 +3005,7 @@ describe("ACPServer", () => {
         const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const server = new ACPServer({
@@ -3130,7 +3144,7 @@ describe("ACPServer", () => {
         const appPaths = getAppPathsForHome(root);
 
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const server = new ACPServer({
@@ -3236,7 +3250,7 @@ describe("ACPServer", () => {
         process.env.FAKE_RESTIC_LOG = path.join(root, "restic.log");
         process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(workspaceDir);
         process.env.FAKE_RESTIC_RESTORE_HELLO = "restored via acp\n";
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             fs.mkdirSync(workspaceDir, { recursive: true });
@@ -3488,7 +3502,7 @@ describe("ACPServer", () => {
         process.env.FAKE_RESTIC_RESTORE_ROOTNAME = path.basename(workspaceDir);
         process.env.FAKE_RESTIC_RESTORE_HELLO = "restored via acp\n";
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const server = new ACPServer({
@@ -3702,7 +3716,7 @@ describe("ACPServer", () => {
     it("returns sessionId in session/load response", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-response-"));
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const firstServer = new ACPServer({
@@ -3776,7 +3790,7 @@ describe("ACPServer", () => {
     it("returns configOptions in session/load when model is configured", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-config-options-"));
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const configDir = getAppPathsForHome(root).configDir;
@@ -3899,7 +3913,7 @@ describe("ACPServer", () => {
     it("falls back to config default when session has unsupported model", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-unsupported-model-"));
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const configDir = getAppPathsForHome(root).configDir;
@@ -4020,7 +4034,7 @@ describe("ACPServer", () => {
     it("falls back to config default when session has no model configured", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-no-model-fallback-"));
         const originalHome = process.env.HOME;
-        process.env.HOME = root;
+        setAppEnvHome(root);
 
         try {
             const configDir = getAppPathsForHome(root).configDir;
