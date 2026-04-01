@@ -5,6 +5,7 @@ import { PassThrough } from "stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as yaml from "yaml";
 
+import { getACPLogFileName, getACPLogPaths } from "../src/acp/logger";
 import { ACPServer } from "../src/acp/server";
 import { startACPServer } from "../src/acp/stdio-transport";
 import { OpenAIClient } from "../src/llm/openai-client";
@@ -124,6 +125,83 @@ describe("ACPServer", () => {
             sessionId: expect.any(String),
         });
         expect(notifications).toHaveLength(0);
+    });
+
+    it("sends a ready message after session/new succeeds", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+        });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
+
+        await waitFor(() =>
+            notifications.find(
+                (item) =>
+                    item.params?.sessionId === sessionId &&
+                    item.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                    typeof item.params?.update?.content?.text === "string" &&
+                    item.params.update.content.text.includes("Session ready."),
+            ),
+        );
+    });
+
+    it("includes classified degraded snapshot details in the ready message", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+                security: {
+                    snapshot: {
+                        enabled: false,
+                        requestedEnabled: true,
+                        unavailableReason: "init:timeout: restic command timed out",
+                    },
+                },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+        });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
+
+        await waitFor(() =>
+            notifications.find(
+                (item) =>
+                    item.params?.sessionId === sessionId &&
+                    item.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                    typeof item.params?.update?.content?.text === "string" &&
+                    item.params.update.content.text.includes("Snapshots degraded (init/timeout)"),
+            ),
+        );
     });
 
     it("supports ACP model config options and model switching", async () => {
@@ -2686,6 +2764,49 @@ describe("ACPServer", () => {
         expect(toolCallChunk).toBeUndefined();
     });
 
+    it("writes ACP logs under the managed storage logs path", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-logs-"));
+        setAppEnvHome(root);
+
+        const input = new PassThrough();
+        const output = new PassThrough();
+        const error = new PassThrough();
+
+        try {
+            startACPServer({
+                config: {
+                    llm: { apiKey: "test-key", model: "gpt-4" },
+                },
+                input: input as NodeJS.ReadStream,
+                output: output as NodeJS.WriteStream,
+                error: error as NodeJS.WriteStream,
+            });
+
+            input.write(
+                `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: 1 } })}\n`,
+            );
+
+            await waitFor(() => {
+                const logPath = getACPLogPaths(getAppPathsForHome(root)).currentLogFilePath;
+                if (!fs.existsSync(logPath)) {
+                    return null;
+                }
+
+                const content = fs.readFileSync(logPath, "utf8");
+                return content.includes("ACP stdio server started") &&
+                    content.includes("Handling ACP request")
+                    ? content
+                    : null;
+            });
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("uses daily ACP log filenames", () => {
+        expect(getACPLogFileName(new Date("2026-04-01T10:00:00Z"))).toBe("acp-2026-04-01.log");
+    });
+
     it("advertises available slash commands after session/new returns", async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-slash-order-"));
         const originalHome = process.env.HOME;
@@ -2907,6 +3028,8 @@ describe("ACPServer", () => {
                             sessionUpdate: "available_commands_update",
                             availableCommands: expect.arrayContaining([
                                 expect.objectContaining({ name: "help" }),
+                                expect.objectContaining({ name: "init" }),
+                                expect.objectContaining({ name: "doctor" }),
                                 expect.objectContaining({ name: "session" }),
                             ]),
                         }),
@@ -2925,6 +3048,211 @@ describe("ACPServer", () => {
                             content: expect.objectContaining({
                                 type: "text",
                                 text: expect.stringContaining("## ACP Slash Commands"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining(
+                                    "Model definitions are managed outside ACP with `diogenes model ...` commands.",
+                                ),
+                            }),
+                        }),
+                    }),
+                }),
+            ]),
+        );
+    });
+
+    it("handles /doctor locally and reports degraded snapshots", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const llmSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream");
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+                security: {
+                    snapshot: {
+                        enabled: false,
+                        requestedEnabled: true,
+                        unavailableReason: "init:timeout: restic command timed out",
+                        resticBinary: "/tmp/restic-managed",
+                    },
+                },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+        });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
+
+        const response = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "/doctor" }],
+            },
+        });
+
+        expect(response && "result" in response ? response.result.stopReason : null).toBe(
+            "end_turn",
+        );
+        expect(llmSpy).not.toHaveBeenCalled();
+        expect(notifications).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("**Mode:** degraded"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("**ACP Logs Dir:**"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("**ACP Current Log:**"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("**Phase:** init"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("**Kind:** timeout"),
+                            }),
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining(
+                                    "init:timeout: restic command timed out",
+                                ),
+                            }),
+                        }),
+                    }),
+                }),
+            ]),
+        );
+    });
+
+    it("handles /init locally", async () => {
+        const notifications: Array<{ method: string; params: any }> = [];
+        const llmSpy = vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream");
+        const server = new ACPServer({
+            config: {
+                llm: { apiKey: "test-key", model: "gpt-4" },
+            },
+            notify: (method, params) => notifications.push({ method, params }),
+        });
+
+        await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: { protocolVersion: 1 },
+        });
+        const sessionNew = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "session/new",
+            params: { cwd: process.cwd() },
+        });
+        const sessionId =
+            sessionNew && "result" in sessionNew ? (sessionNew.result.sessionId as string) : "";
+
+        const response = await server.handleMessage({
+            jsonrpc: "2.0",
+            id: 3,
+            method: "session/prompt",
+            params: {
+                sessionId,
+                prompt: [{ type: "text", text: "/init" }],
+            },
+        });
+
+        expect(response && "result" in response ? response.result.stopReason : null).toBe(
+            "end_turn",
+        );
+        expect(llmSpy).not.toHaveBeenCalled();
+        expect(notifications).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    method: "session/update",
+                    params: expect.objectContaining({
+                        sessionId,
+                        update: expect.objectContaining({
+                            sessionUpdate: "agent_message_chunk",
+                            content: expect.objectContaining({
+                                type: "text",
+                                text: expect.stringContaining("## ACP Init"),
                             }),
                         }),
                     }),
@@ -3785,6 +4113,67 @@ describe("ACPServer", () => {
                 sessionId,
             });
             expect(result.sessionId).toBe(sessionId);
+        } finally {
+            process.env.HOME = originalHome;
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("sends a loaded message after session/load succeeds", async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), "acp-session-load-message-"));
+        const originalHome = process.env.HOME;
+        const notifications: Array<{ method: string; params: any }> = [];
+        setAppEnvHome(root);
+
+        try {
+            const firstServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+            });
+
+            await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            const created = await firstServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 2,
+                method: "session/new",
+                params: { cwd: process.cwd() },
+            });
+            const sessionId =
+                created && "result" in created ? (created.result.sessionId as string) : "";
+
+            const secondServer = new ACPServer({
+                config: { llm: { apiKey: "test-key", model: "gpt-4" } },
+                notify: (method, params) => notifications.push({ method, params }),
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 3,
+                method: "initialize",
+                params: { protocolVersion: 1 },
+            });
+
+            await secondServer.handleMessage({
+                jsonrpc: "2.0",
+                id: 4,
+                method: "session/load",
+                params: { sessionId, cwd: process.cwd(), mcpServers: [] },
+            });
+
+            await waitFor(() =>
+                notifications.find(
+                    (item) =>
+                        item.params?.sessionId === sessionId &&
+                        item.params?.update?.sessionUpdate === "agent_message_chunk" &&
+                        typeof item.params?.update?.content?.text === "string" &&
+                        item.params.update.content.text.includes("Session loaded."),
+                ),
+            );
         } finally {
             process.env.HOME = originalHome;
             fs.rmSync(root, { recursive: true, force: true });

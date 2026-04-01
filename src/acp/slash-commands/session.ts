@@ -19,6 +19,7 @@ export function createSessionSlashCommand(): SlashCommandDefinition {
             context.runLocalCommand(parsed, async (historyBeforeCommand, userMessage) => {
                 await Promise.resolve();
                 const metadata = context.getMetadata();
+                const diagnostics = context.getSetupDiagnostics();
                 const hydratedState = context.getHydratedStateMeta();
                 const loadedDirectories = Array.isArray(hydratedState.loadedDirectories)
                     ? hydratedState.loadedDirectories.length
@@ -29,6 +30,11 @@ export function createSessionSlashCommand(): SlashCommandDefinition {
                 const notepadLines = Array.isArray(hydratedState.notepad)
                     ? hydratedState.notepad.length
                     : 0;
+                const snapshotStatus =
+                    diagnostics.snapshot.mode === "degraded" &&
+                    diagnostics.snapshot.unavailableReason
+                        ? `degraded (${diagnostics.snapshot.unavailableReason})`
+                        : diagnostics.snapshot.mode;
                 const summary = context.renderMarkdownSections([
                     {
                         title: "Session",
@@ -38,7 +44,7 @@ export function createSessionSlashCommand(): SlashCommandDefinition {
                             `**Workspace:** \`${metadata.cwd}\``,
                             `**Title:** ${metadata.title || "(none)"}`,
                             `**Description:** ${metadata.description || "(none)"}`,
-                            `**Snapshots:** ${context.snapshotEnabled ? "enabled" : "disabled"}`,
+                            `**Snapshots:** ${snapshotStatus}`,
                             `**Updated At:** ${metadata.updatedAt}`,
                         ],
                     },

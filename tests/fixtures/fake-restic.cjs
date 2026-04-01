@@ -49,6 +49,11 @@ async function main() {
     return;
   }
 
+  if (subcommand === "version") {
+    process.stdout.write("restic 0.18.1 compiled with go1.25\n");
+    return;
+  }
+
   if (subcommand === "backup") {
     process.stdout.write(
       JSON.stringify({

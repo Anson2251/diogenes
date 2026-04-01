@@ -61,7 +61,12 @@ function formatHelpSummary(context: SlashCommandContext, definitions: AvailableC
         },
         {
             title: "Usage",
-            bullets: ["Use `/help <command>` for command-specific details."],
+            bullets: [
+                "Use `/help <command>` for command-specific details.",
+                "Use `/init` for ACP setup steps and config examples.",
+                "Use `/doctor` for config, logs, provider, and snapshot diagnostics.",
+                "Model definitions are managed outside ACP with `diogenes model ...` commands.",
+            ],
         },
     ]);
 }

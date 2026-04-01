@@ -164,6 +164,8 @@ describe("ResticClient", () => {
         await expect(client.backup({ paths: ["/workspace"] })).rejects.toMatchObject({
             name: "ResticCommandError",
             exitCode: 3,
+            kind: "exit",
+            phase: "backup",
         });
 
         try {
@@ -173,6 +175,8 @@ describe("ResticClient", () => {
             const resticError = error as ResticCommandError;
             expect(resticError.stderr).toContain("forced failure for backup");
             expect(resticError.args).toEqual(["backup", "--json", "/workspace"]);
+            expect(resticError.kind).toBe("exit");
+            expect(resticError.phase).toBe("backup");
         }
     });
 
@@ -193,6 +197,8 @@ describe("ResticClient", () => {
             name: "ResticCommandError",
             exitCode: -1,
             message: "restic command timed out",
+            kind: "timeout",
+            phase: "init",
         });
 
         await client.initRepo();

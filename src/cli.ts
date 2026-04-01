@@ -44,6 +44,8 @@ import {
     resolveModelWithFallback,
     getProviderApiKeyEnvVarName,
 } from "./utils/model-resolver";
+import { ensureSnapshotResticConfigured } from "./utils/restic-manager";
+import { collectSetupDiagnostics } from "./utils/setup-diagnostics";
 import { parseSocraticToolInput } from "./utils/socratic-parser";
 
 // ANSI color codes for terminal output
@@ -63,6 +65,7 @@ interface CLIOptions {
     model?: string;
     baseUrl?: string;
     workspace?: string;
+    resticBinary?: string;
     verbose?: boolean;
     maxIterations?: number;
     socratic?: boolean;
@@ -73,13 +76,34 @@ interface CLIOptions {
 
 type CLICommand =
     | { kind: "run" }
+    | { kind: "init" }
+    | { kind: "doctor" }
     | { kind: "sessions.list" }
     | { kind: "sessions.get"; sessionId: string }
     | { kind: "sessions.snapshots"; sessionId: string }
     | { kind: "sessions.delete"; sessionId: string }
     | { kind: "sessions.prune"; dryRun: boolean; tempOnly: boolean }
     | { kind: "models.list" }
-    | { kind: "models.default"; model?: string };
+    | { kind: "models.default"; model?: string; clear?: boolean }
+    | { kind: "models.path" }
+    | { kind: "models.providers" }
+    | { kind: "models.show"; model: string }
+    | {
+          kind: "models.addProvider";
+          provider: string;
+          style: "openai" | "anthropic";
+          baseUrl?: string;
+          supportsToolRole: boolean;
+      }
+    | {
+          kind: "models.add";
+          model: string;
+          name: string;
+          description?: string;
+          contextWindow?: number;
+          maxTokens?: number;
+          temperature?: number;
+      };
 
 function getProviderEnvApiKey(providerName?: string): string | undefined {
     return getProviderApiKey(providerName || "openai");
@@ -110,6 +134,7 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
         .option("-m, --model <model>", "Model to use (provider/model or model name)")
         .option("-b, --base-url <url>", "OpenAI-compatible API base URL")
         .option("-w, --workspace <path>", "Workspace directory")
+        .option("--restic-binary <path>", "Path to the restic binary")
         .option("-V, --verbose", "Enable verbose output")
         .option("-i, --max-iterations <n>", "Maximum LLM iterations", (value: string) => {
             const parsed = Number.parseInt(value, 10);
@@ -135,6 +160,20 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
         .action((taskParts: string[]) => {
             command = { kind: "run" };
             task = taskParts.join(" ");
+        });
+
+    program
+        .command("init")
+        .summary("Show setup state and next steps")
+        .action(() => {
+            command = { kind: "init" };
+        });
+
+    program
+        .command("doctor")
+        .summary("Inspect setup readiness and snapshot state")
+        .action(() => {
+            command = { kind: "doctor" };
         });
 
     program
@@ -224,19 +263,121 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
     models
         .command("default [model]")
         .summary("Get or set the default model")
-        .action((model?: string) => {
-            command = { kind: "models.default", model };
+        .option("--clear", "Clear the configured default model")
+        .action((model?: string, subOptions?: { clear?: boolean }) => {
+            command = { kind: "models.default", model, clear: Boolean(subOptions?.clear) };
         });
+    models
+        .command("path")
+        .summary("Show the managed models.yaml path")
+        .action(() => {
+            command = { kind: "models.path" };
+        });
+    models
+        .command("providers")
+        .summary("List configured providers")
+        .action(() => {
+            command = { kind: "models.providers" };
+        });
+    models
+        .command("show <model>")
+        .summary("Show one configured model definition")
+        .action((model: string) => {
+            command = { kind: "models.show", model };
+        });
+    models
+        .command("add-provider <provider>")
+        .summary("Add a provider entry to models.yaml")
+        .requiredOption("--style <style>", "Provider style: openai or anthropic")
+        .option("--base-url <url>", "Provider base URL")
+        .option("--supports-tool-role", "Mark provider as supporting tool-role messages")
+        .action(
+            (
+                provider: string,
+                _subOptions: {
+                    style: "openai" | "anthropic";
+                    baseUrl?: string;
+                    supportsToolRole?: boolean;
+                },
+                subCommand: Command,
+            ) => {
+                const subOptions = subCommand.opts<{
+                    style: "openai" | "anthropic";
+                    baseUrl?: string;
+                    supportsToolRole?: boolean;
+                }>();
+                command = {
+                    kind: "models.addProvider",
+                    provider,
+                    style: subOptions.style,
+                    baseUrl: subOptions.baseUrl,
+                    supportsToolRole: Boolean(subOptions.supportsToolRole),
+                };
+            },
+        );
+    models
+        .command("add <model>")
+        .summary("Add a model definition under an existing provider")
+        .requiredOption("--name <name>", "Human-readable model name")
+        .option("--description <text>", "Model description")
+        .option("--context-window <n>", "Context window size", (value: string) =>
+            parseInt(value, 10),
+        )
+        .option("--max-tokens <n>", "Default max tokens", (value: string) => parseInt(value, 10))
+        .option("--temperature <n>", "Default temperature", (value: string) => parseFloat(value))
+        .action(
+            (
+                model: string,
+                _subOptions: {
+                    name: string;
+                    description?: string;
+                    contextWindow?: number;
+                    maxTokens?: number;
+                    temperature?: number;
+                },
+                subCommand: Command,
+            ) => {
+                const subOptions = subCommand.opts<{
+                    name: string;
+                    description?: string;
+                    contextWindow?: number;
+                    maxTokens?: number;
+                    temperature?: number;
+                }>();
+                command = {
+                    kind: "models.add",
+                    model,
+                    name: subOptions.name,
+                    description: subOptions.description,
+                    contextWindow: subOptions.contextWindow,
+                    maxTokens: subOptions.maxTokens,
+                    temperature: subOptions.temperature,
+                };
+            },
+        );
 
     program.parse(process.argv);
 
     const parsedOptions = program.opts<CLIOptions>();
+    let finalCommand = command as CLICommand;
+    if (
+        finalCommand.kind === "models.addProvider" &&
+        parsedOptions.baseUrl &&
+        !finalCommand.baseUrl
+    ) {
+        finalCommand = {
+            ...finalCommand,
+            baseUrl: parsedOptions.baseUrl,
+        };
+    }
+
     return {
         task,
         options: {
             model: commandOptions.model ?? parsedOptions.model,
             baseUrl: commandOptions.baseUrl ?? parsedOptions.baseUrl,
             workspace: commandOptions.workspace ?? parsedOptions.workspace,
+            resticBinary: commandOptions.resticBinary ?? parsedOptions.resticBinary,
             verbose: commandOptions.verbose ?? parsedOptions.verbose,
             maxIterations: commandOptions.maxIterations ?? parsedOptions.maxIterations,
             socratic: commandOptions.socratic ?? parsedOptions.socratic,
@@ -244,7 +385,7 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
             acp: commandOptions.acp ?? parsedOptions.acp,
             clearAppData: commandOptions.clearAppData ?? parsedOptions.clearAppData,
         },
-        command,
+        command: finalCommand,
     };
 }
 
@@ -450,6 +591,15 @@ function createConfig(options: CLIOptions): DiogenesConfig {
             workspaceRoot: path.resolve(process.env.DIOGENES_WORKSPACE),
         };
     }
+    if (process.env.DIOGENES_RESTIC_BINARY) {
+        envConfig.security = {
+            ...(envConfig.security || {}),
+            snapshot: {
+                ...(envConfig.security?.snapshot || {}),
+                resticBinary: path.resolve(process.env.DIOGENES_RESTIC_BINARY),
+            },
+        };
+    }
 
     const cliConfig: Partial<DiogenesConfig> = {};
     if (options.baseUrl || options.model) {
@@ -457,10 +607,19 @@ function createConfig(options: CLIOptions): DiogenesConfig {
         if (options.baseUrl) cliConfig.llm.baseURL = options.baseUrl;
         if (options.model) cliConfig.llm.model = options.model;
     }
-    if (options.workspace) {
+    if (options.workspace || options.resticBinary) {
         cliConfig.security = {
-            workspaceRoot: path.resolve(options.workspace),
+            ...(cliConfig.security || {}),
         };
+        if (options.workspace) {
+            cliConfig.security.workspaceRoot = path.resolve(options.workspace);
+        }
+        if (options.resticBinary) {
+            cliConfig.security.snapshot = {
+                ...(cliConfig.security.snapshot || {}),
+                resticBinary: path.resolve(options.resticBinary),
+            };
+        }
     }
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
@@ -1011,7 +1170,9 @@ async function main(): Promise<void> {
     }
 
     if (options.acp) {
+        const configPath = ensureDefaultConfigFileSync();
         const config = createConfig(options);
+        await ensureSnapshotResticConfigured(config, { configPath });
         startACPServer({
             config,
             maxIterations: options.maxIterations || 20,
@@ -1023,7 +1184,7 @@ async function main(): Promise<void> {
     }
 
     if (command.kind !== "run") {
-        await handleCommand(command);
+        await handleCommand(command, options);
         return;
     }
 
@@ -1083,9 +1244,34 @@ async function main(): Promise<void> {
     }
 }
 
-async function handleCommand(command: Exclude<CLICommand, { kind: "run" }>): Promise<void> {
-    if (command.kind === "models.list" || command.kind === "models.default") {
+async function handleCommand(
+    command: Exclude<CLICommand, { kind: "run" }>,
+    options: CLIOptions = {},
+): Promise<void> {
+    if (
+        command.kind === "models.list" ||
+        command.kind === "models.default" ||
+        command.kind === "models.path" ||
+        command.kind === "models.providers" ||
+        command.kind === "models.show" ||
+        command.kind === "models.addProvider" ||
+        command.kind === "models.add"
+    ) {
         handleModelsCommand(command);
+        return;
+    }
+
+    if (command.kind === "init" || command.kind === "doctor") {
+        const configPath = ensureDefaultConfigFileSync();
+        const config = createConfig(options);
+        await ensureSnapshotResticConfigured(config, { configPath });
+        const diagnostics = collectSetupDiagnostics(config);
+
+        console.log(
+            command.kind === "init"
+                ? formatInitSummary(diagnostics)
+                : formatDoctorSummary(diagnostics),
+        );
         return;
     }
 
@@ -1161,6 +1347,59 @@ function formatTimeToMinute(dateString: string): string {
         hour: "2-digit",
         minute: "2-digit",
     });
+}
+
+function formatInitSummary(diagnostics: ReturnType<typeof collectSetupDiagnostics>): string {
+    const configuredProviders = diagnostics.providers.filter((provider) => provider.configured);
+
+    return [
+        `${colors.bright}Diogenes Init${colors.reset}`,
+        configuredProviders.length > 0
+            ? `Configured providers: ${configuredProviders.map((provider) => provider.provider).join(", ")}`
+            : `Set one provider API key, for example ${diagnostics.providers[0]?.envVarName || "OPENAI_API_KEY"}`,
+        diagnostics.snapshot.mode === "enabled"
+            ? "Snapshots are ready."
+            : diagnostics.snapshot.mode === "degraded"
+              ? `Snapshots are degraded: ${diagnostics.snapshot.unavailableReason}`
+              : "Snapshots are disabled.",
+        `Config file: ${diagnostics.configPath}`,
+        `Models file: ${diagnostics.modelsPath}`,
+        "Run `diogenes doctor` for a detailed readiness report.",
+    ].join("\n");
+}
+
+function formatDoctorSummary(diagnostics: ReturnType<typeof collectSetupDiagnostics>): string {
+    return [
+        `${colors.bright}Diogenes Doctor${colors.reset}`,
+        `Config Dir: ${diagnostics.configDir}`,
+        `Data Dir: ${diagnostics.dataDir}`,
+        `ACP Logs Dir: ${diagnostics.acpLogsDir}`,
+        `ACP Current Log: ${diagnostics.acpCurrentLogFile}`,
+        `Config File: ${diagnostics.configExists ? "present" : "missing"} (${diagnostics.configPath})`,
+        `Models File: ${diagnostics.modelsExists ? "present" : "missing"} (${diagnostics.modelsPath})`,
+        "",
+        "Providers:",
+        ...diagnostics.providers.map(
+            (provider) =>
+                `- ${provider.provider}: ${provider.configured ? "configured" : "missing"} via ${provider.envVarName}`,
+        ),
+        "",
+        "Snapshots:",
+        `- mode: ${diagnostics.snapshot.mode}`,
+        `- requested: ${diagnostics.snapshot.requested ? "yes" : "no"}`,
+        `- binary: ${diagnostics.snapshot.resticBinary || "(not set)"}`,
+        diagnostics.snapshot.unavailablePhase
+            ? `- phase: ${diagnostics.snapshot.unavailablePhase}`
+            : undefined,
+        diagnostics.snapshot.unavailableKind
+            ? `- kind: ${diagnostics.snapshot.unavailableKind}`
+            : undefined,
+        diagnostics.snapshot.unavailableReason
+            ? `- reason: ${diagnostics.snapshot.unavailableReason}`
+            : undefined,
+    ]
+        .filter((line): line is string => typeof line === "string")
+        .join("\n");
 }
 
 function formatSessionList(sessions: StoredSessionMetadata[]): string {
@@ -1319,8 +1558,81 @@ function formatModelList(modelsConfig: NonNullable<ReturnType<typeof loadModelsC
     return `${colors.bright}Available Models${colors.reset}\n${table.toString()}`;
 }
 
+function formatModelProviders(
+    modelsConfig: NonNullable<ReturnType<typeof loadModelsConfig>>,
+): string {
+    const table = new Table({
+        head: ["Provider", "Style", "Models", "Default API Key Env"],
+        style: {
+            head: ["cyan"],
+            border: [],
+        },
+        wordWrap: true,
+    });
+
+    for (const [providerName, provider] of Object.entries(modelsConfig.providers)) {
+        table.push([
+            providerName,
+            provider.style,
+            Object.keys(provider.models).length,
+            getProviderApiKeyEnvVarName(providerName),
+        ]);
+    }
+
+    return `${colors.bright}Configured Providers${colors.reset}\n${table.toString()}`;
+}
+
+function formatModelDetails(
+    modelsConfig: NonNullable<ReturnType<typeof loadModelsConfig>>,
+    model: string,
+): string {
+    const [providerName, modelName] = model.split("/", 2);
+    const provider = modelsConfig.providers[providerName];
+    const definition = provider?.models?.[modelName];
+
+    if (!provider || !definition) {
+        const available = listAvailableModels(modelsConfig);
+        throw new Error(`Unknown model: ${model}\nAvailable models: ${available.join(", ")}`);
+    }
+
+    return [
+        `${colors.bright}Model${colors.reset} ${model}`,
+        `provider: ${providerName}`,
+        `style: ${provider.style}`,
+        `name: ${definition.name}`,
+        `description: ${definition.description || "-"}`,
+        `context window: ${definition.contextWindow ?? "-"}`,
+        `max tokens: ${definition.maxTokens ?? "-"}`,
+        `temperature: ${definition.temperature ?? "-"}`,
+        `base URL: ${provider.baseURL || "-"}`,
+        `supports tool role: ${provider.supportsToolRole === true ? "yes" : "no"}`,
+        `api key env: ${getProviderApiKeyEnvVarName(providerName)}`,
+        `default: ${modelsConfig.default === model ? "yes" : "no"}`,
+    ].join("\n");
+}
+
+function formatModelProviderAdded(provider: string): string {
+    return `${colors.green}Added provider:${colors.reset} ${provider}`;
+}
+
+function formatModelAdded(model: string): string {
+    return `${colors.green}Added model:${colors.reset} ${model}`;
+}
+
 function handleModelsCommand(
-    command: Extract<CLICommand, { kind: "models.list" | "models.default" }>,
+    command: Extract<
+        CLICommand,
+        {
+            kind:
+                | "models.list"
+                | "models.default"
+                | "models.path"
+                | "models.providers"
+                | "models.show"
+                | "models.addProvider"
+                | "models.add";
+        }
+    >,
 ): void {
     const modelsPath = ensureDefaultModelsConfigSync();
     const modelsConfig = loadModelsConfig(modelsPath);
@@ -1335,8 +1647,75 @@ function handleModelsCommand(
             console.log(formatModelList(modelsConfig));
             return;
         }
+        case "models.path": {
+            console.log(modelsPath);
+            return;
+        }
+        case "models.providers": {
+            console.log(formatModelProviders(modelsConfig));
+            return;
+        }
+        case "models.show": {
+            console.log(formatModelDetails(modelsConfig, command.model));
+            return;
+        }
+        case "models.addProvider": {
+            if (modelsConfig.providers[command.provider]) {
+                console.error(
+                    `${colors.red}Error: Provider already exists: ${command.provider}${colors.reset}`,
+                );
+                process.exit(1);
+            }
+
+            modelsConfig.providers[command.provider] = {
+                style: command.style,
+                ...(command.baseUrl ? { baseURL: command.baseUrl } : {}),
+                ...(command.supportsToolRole ? { supportsToolRole: true } : {}),
+                models: {},
+            };
+            fs.writeFileSync(modelsPath, yaml.stringify(modelsConfig), "utf8");
+            console.log(formatModelProviderAdded(command.provider));
+            return;
+        }
+        case "models.add": {
+            const [providerName, modelName] = command.model.split("/", 2);
+            const provider = providerName ? modelsConfig.providers[providerName] : undefined;
+
+            if (!provider || !modelName) {
+                console.error(
+                    `${colors.red}Error: Unknown provider for model: ${command.model}${colors.reset}`,
+                );
+                process.exit(1);
+            }
+
+            if (provider.models[modelName]) {
+                console.error(
+                    `${colors.red}Error: Model already exists: ${command.model}${colors.reset}`,
+                );
+                process.exit(1);
+            }
+
+            provider.models[modelName] = {
+                name: command.name,
+                ...(command.description ? { description: command.description } : {}),
+                ...(typeof command.contextWindow === "number"
+                    ? { contextWindow: command.contextWindow }
+                    : {}),
+                ...(typeof command.maxTokens === "number" ? { maxTokens: command.maxTokens } : {}),
+                ...(typeof command.temperature === "number"
+                    ? { temperature: command.temperature }
+                    : {}),
+            };
+            fs.writeFileSync(modelsPath, yaml.stringify(modelsConfig), "utf8");
+            console.log(formatModelAdded(command.model));
+            return;
+        }
         case "models.default": {
-            if (command.model) {
+            if (command.clear) {
+                delete modelsConfig.default;
+                fs.writeFileSync(modelsPath, yaml.stringify(modelsConfig), "utf8");
+                console.log(`${colors.green}Default model cleared${colors.reset}`);
+            } else if (command.model) {
                 const available = listAvailableModels(modelsConfig);
                 if (!available.includes(command.model)) {
                     console.error(
@@ -1370,4 +1749,11 @@ if (require.main === module) {
     });
 }
 
-export { main, parseArgs, clearDiogenesAppData, handleCommand, CLEAR_APP_DATA_PASSPHRASE }; // For testing
+export {
+    main,
+    parseArgs,
+    createConfig,
+    clearDiogenesAppData,
+    handleCommand,
+    CLEAR_APP_DATA_PASSPHRASE,
+}; // For testing

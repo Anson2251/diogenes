@@ -100,10 +100,56 @@ Supported options:
 
 ### Environment Variables
 
-- `OPENAI_API_KEY`
+- `<PROVIDER>_API_KEY`
 - `OPENAI_BASE_URL`
 - `DIOGENES_MODEL`
 - `DIOGENES_WORKSPACE`
+
+API keys are resolved from the provider name in `models.yaml`.
+Examples:
+
+- `openai` -> `OPENAI_API_KEY`
+- `claude-proxy` -> `CLAUDE_PROXY_API_KEY`
+
+### Setup Commands
+
+Use these helpers before wiring an editor/client to the ACP server:
+
+```bash
+diogenes-acp init
+diogenes-acp doctor
+```
+
+`diogenes-acp init` prints:
+
+- the exact launch command as `node <path-to-acp-cli>`
+- the environment variable keys to provide
+- a JSON ACP config example you can copy into the client config file
+
+ACP setup commands do not edit model definitions directly. Model/provider definitions are managed with the main CLI, for example:
+
+```bash
+diogenes model path
+diogenes model providers
+diogenes model show openai/gpt-4o
+diogenes model add-provider proxy --style openai --base-url https://example.com/v1
+diogenes model add proxy/gpt-4.1 --name "GPT 4.1 Proxy"
+diogenes model default openai/gpt-4o
+```
+
+If you run `diogenes-acp` with no subcommand, it starts the stdio ACP server directly.
+
+### Logging
+
+ACP now writes file logs under the managed data storage path:
+
+- macOS: `~/Library/Application Support/diogenes/storage/logs/acp-YYYY-MM-DD.log`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/diogenes/storage/logs/acp-YYYY-MM-DD.log`
+- Windows: `%LOCALAPPDATA%\diogenes\storage\logs\acp-YYYY-MM-DD.log`
+
+Logs are rotated daily. Older ACP log files are automatically gzip-compressed.
+
+These logs are written to file only and do not use ACP stdout, so they do not interfere with the stdio protocol stream.
 
 ### Config Files
 
@@ -175,8 +221,19 @@ ACP sessions expose a small set of local slash commands through `available_comma
 Current built-ins:
 
 - `/help`
+- `/init`
+- `/doctor`
 - `/session`
 - `/restore`
+- `/snapshots`
+- `/snapshot`
+
+`/init` shows the managed config paths and the shortest next steps.
+
+`/doctor` reports provider environment readiness, config file presence, and snapshot readiness.
+
+If snapshots are enabled, ACP first tries an explicit `resticBinary`, then `PATH`, then a managed download of the latest matching GitHub release into the Diogenes data directory. If all of those fail, ACP keeps running and snapshots are marked degraded/disabled for that runtime.
+
 - `/snapshots`
 - `/snapshot`
 

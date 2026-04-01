@@ -3,8 +3,9 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { handleCommand, parseArgs } from "../src/cli";
+import { createConfig, handleCommand, parseArgs } from "../src/cli";
 import * as appPaths from "../src/utils/app-paths";
+import * as resticManager from "../src/utils/restic-manager";
 
 describe("CLI session commands", () => {
     const tempDirs: string[] = [];
@@ -38,6 +39,73 @@ describe("CLI session commands", () => {
         } finally {
             process.argv = originalArgv;
         }
+    });
+
+    it("parses init command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "init"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "init" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses doctor command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "doctor"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "doctor" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses restic binary option", () => {
+        const originalArgv = process.argv;
+        process.argv = [
+            "node",
+            "diogenes",
+            "--restic-binary",
+            "/tmp/restic",
+            "run",
+            "inspect",
+            "src",
+        ];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "run" });
+            expect(parsed.options.resticBinary).toBe("/tmp/restic");
+            expect(parsed.task).toBe("inspect src");
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("creates config with restic binary from environment", () => {
+        const originalValue = process.env.DIOGENES_RESTIC_BINARY;
+        process.env.DIOGENES_RESTIC_BINARY = "relative/restic";
+
+        try {
+            const config = createConfig({});
+            expect(config.security?.snapshot?.resticBinary).toBe(path.resolve("relative/restic"));
+        } finally {
+            if (originalValue === undefined) {
+                delete process.env.DIOGENES_RESTIC_BINARY;
+            } else {
+                process.env.DIOGENES_RESTIC_BINARY = originalValue;
+            }
+        }
+    });
+
+    it("creates config with restic binary from CLI option", () => {
+        const config = createConfig({ resticBinary: "relative/restic" });
+        expect(config.security?.snapshot?.resticBinary).toBe(path.resolve("relative/restic"));
     });
 
     it("rejects bare task input", () => {
@@ -133,7 +201,11 @@ describe("CLI session commands", () => {
 
         try {
             const parsed = parseArgs();
-            expect(parsed.command).toEqual({ kind: "models.default", model: undefined });
+            expect(parsed.command).toEqual({
+                kind: "models.default",
+                model: undefined,
+                clear: false,
+            });
         } finally {
             process.argv = originalArgv;
         }
@@ -145,7 +217,128 @@ describe("CLI session commands", () => {
 
         try {
             const parsed = parseArgs();
-            expect(parsed.command).toEqual({ kind: "models.default", model: "openai/gpt-4o-mini" });
+            expect(parsed.command).toEqual({
+                kind: "models.default",
+                model: "openai/gpt-4o-mini",
+                clear: false,
+            });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses model path command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "model", "path"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "models.path" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses model providers command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "model", "providers"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "models.providers" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses model show command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "model", "show", "openai/gpt-4o"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "models.show", model: "openai/gpt-4o" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses model default clear command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "model", "default", "--clear"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({
+                kind: "models.default",
+                model: undefined,
+                clear: true,
+            });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses model add-provider command", () => {
+        const originalArgv = process.argv;
+        process.argv = [
+            "node",
+            "diogenes",
+            "model",
+            "add-provider",
+            "proxy",
+            "--style",
+            "openai",
+            "--base-url",
+            "https://example.com/v1",
+            "--supports-tool-role",
+        ];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({
+                kind: "models.addProvider",
+                provider: "proxy",
+                style: "openai",
+                baseUrl: "https://example.com/v1",
+                supportsToolRole: true,
+            });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses model add command", () => {
+        const originalArgv = process.argv;
+        process.argv = [
+            "node",
+            "diogenes",
+            "model",
+            "add",
+            "proxy/gpt-4.1",
+            "--name",
+            "GPT 4.1 Proxy",
+            "--description",
+            "Proxy-backed model",
+            "--context-window",
+            "128000",
+            "--max-tokens",
+            "4096",
+            "--temperature",
+            "0.2",
+        ];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({
+                kind: "models.add",
+                model: "proxy/gpt-4.1",
+                name: "GPT 4.1 Proxy",
+                description: "Proxy-backed model",
+                contextWindow: 128000,
+                maxTokens: 4096,
+                temperature: 0.2,
+            });
         } finally {
             process.argv = originalArgv;
         }
@@ -227,6 +420,255 @@ describe("CLI session commands", () => {
         expect(output).toContain("title: Session title");
         expect(output).toContain("snapshots: 1");
         expect(output).toContain("snapshot-1");
+    });
+
+    it("prints init summary", async () => {
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+        vi.spyOn(resticManager, "ensureSnapshotResticConfigured").mockImplementation(
+            async (config) => {
+                config.security = {
+                    ...(config.security || {}),
+                    snapshot: {
+                        ...(config.security?.snapshot || {}),
+                        enabled: false,
+                    },
+                };
+                return { enabled: false, reason: "snapshots disabled" };
+            },
+        );
+
+        await handleCommand({ kind: "init" });
+
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Diogenes Init"));
+    });
+
+    it("prints doctor summary with degraded snapshots", async () => {
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+        vi.spyOn(resticManager, "ensureSnapshotResticConfigured").mockImplementation(
+            async (config) => {
+                config.security = {
+                    ...(config.security || {}),
+                    snapshot: {
+                        ...(config.security?.snapshot || {}),
+                        requestedEnabled: true,
+                        enabled: false,
+                        unavailableReason: "init:timeout: restic command timed out",
+                        resticBinary: "/tmp/restic-managed",
+                    },
+                };
+                return { enabled: false, reason: "init:timeout: restic command timed out" };
+            },
+        );
+
+        await handleCommand({ kind: "doctor" });
+
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Diogenes Doctor"));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("ACP Logs Dir:"));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("ACP Current Log:"));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("mode: degraded"));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("phase: init"));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("kind: timeout"));
+    });
+
+    it("prints model path", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-path-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        try {
+            await handleCommand({ kind: "models.path" });
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("models.yaml"));
+        } finally {
+            process.env.HOME = originalHome;
+        }
+    });
+
+    it("prints configured providers", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-providers-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        try {
+            await handleCommand({ kind: "models.providers" });
+            expect(consoleSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Configured Providers"),
+            );
+        } finally {
+            process.env.HOME = originalHome;
+        }
+    });
+
+    it("prints one model definition", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-show-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        try {
+            await handleCommand({ kind: "models.show", model: "openai/gpt-4o" });
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Model"));
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("openai/gpt-4o"));
+        } finally {
+            process.env.HOME = originalHome;
+        }
+    });
+
+    it("clears the default model", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-clear-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        try {
+            await handleCommand({ kind: "models.default", clear: true });
+            expect(consoleSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Default model cleared"),
+            );
+        } finally {
+            process.env.HOME = originalHome;
+        }
+    });
+
+    it("adds a provider to models.yaml", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-add-provider-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        try {
+            await handleCommand({
+                kind: "models.addProvider",
+                provider: "proxy",
+                style: "openai",
+                baseUrl: "https://example.com/v1",
+                supportsToolRole: true,
+            });
+
+            const modelsPath = appPaths.resolveDiogenesAppPaths({ homeDir: root }).modelsConfigPath;
+            const content = await fs.readFile(modelsPath, "utf8");
+
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Added provider:"));
+            expect(content).toContain("proxy:");
+            expect(content).toContain("style: openai");
+            expect(content).toContain("baseURL: https://example.com/v1");
+            expect(content).toContain("supportsToolRole: true");
+        } finally {
+            process.env.HOME = originalHome;
+        }
+    });
+
+    it("rejects adding an existing provider", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-add-provider-existing-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
+            throw new Error("process.exit:1");
+        }) as never);
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+        try {
+            const modelsPath = appPaths.resolveDiogenesAppPaths({ homeDir: root }).modelsConfigPath;
+            await fs.mkdir(path.dirname(modelsPath), { recursive: true });
+            await fs.writeFile(
+                modelsPath,
+                ["providers:", "  proxy:", "    style: openai", "    models: {}", ""].join("\n"),
+                "utf8",
+            );
+
+            await expect(
+                handleCommand({
+                    kind: "models.addProvider",
+                    provider: "proxy",
+                    style: "openai",
+                    baseUrl: undefined,
+                    supportsToolRole: false,
+                }),
+            ).rejects.toThrow("process.exit:1");
+
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Provider already exists"),
+            );
+        } finally {
+            process.env.HOME = originalHome;
+        }
+    });
+
+    it("adds a model to an existing provider", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-add-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+        const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        try {
+            const modelsPath = appPaths.resolveDiogenesAppPaths({ homeDir: root }).modelsConfigPath;
+            await fs.mkdir(path.dirname(modelsPath), { recursive: true });
+            await fs.writeFile(
+                modelsPath,
+                ["providers:", "  proxy:", "    style: openai", "    models: {}", ""].join("\n"),
+                "utf8",
+            );
+
+            await handleCommand({
+                kind: "models.add",
+                model: "proxy/gpt-4.1",
+                name: "GPT 4.1 Proxy",
+                description: "Proxy-backed model",
+                contextWindow: 128000,
+                maxTokens: 4096,
+                temperature: 0.2,
+            });
+
+            const content = await fs.readFile(modelsPath, "utf8");
+            expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Added model:"));
+            expect(content).toContain("gpt-4.1:");
+            expect(content).toContain("name: GPT 4.1 Proxy");
+            expect(content).toContain("description: Proxy-backed model");
+            expect(content).toContain("contextWindow: 128000");
+            expect(content).toContain("maxTokens: 4096");
+            expect(content).toContain("temperature: 0.2");
+        } finally {
+            process.env.HOME = originalHome;
+        }
+    });
+
+    it("rejects adding a model to an unknown provider", async () => {
+        const originalHome = process.env.HOME;
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-add-missing-provider-"));
+        tempDirs.push(root);
+        process.env.HOME = root;
+
+        const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
+            throw new Error("process.exit:1");
+        }) as never);
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+        try {
+            await expect(
+                handleCommand({
+                    kind: "models.add",
+                    model: "proxy/gpt-4.1",
+                    name: "GPT 4.1 Proxy",
+                }),
+            ).rejects.toThrow("process.exit:1");
+
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(errorSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Unknown provider for model"),
+            );
+        } finally {
+            process.env.HOME = originalHome;
+        }
     });
 
     it("prints session snapshots in table format", async () => {

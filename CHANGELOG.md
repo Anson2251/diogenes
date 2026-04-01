@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project currently tracks alpha-stage releases.
 
+## [0.1.0-alpha.2] - 2026-04-01
+
+### Added
+
+**Setup & Diagnostics**
+
+- `diogenes init` and `diogenes doctor` commands for managed config discovery, provider readiness, and snapshot diagnostics
+- `diogenes-acp init` and `diogenes-acp doctor` commands for ACP setup, config examples, and health checks
+- ACP slash commands `/init` and `/doctor`
+- Post-connect ACP status messages after `session/new` and `session/load`
+
+**Model Management**
+
+- `diogenes model path`, `model providers`, and `model show <provider/model>`
+- `diogenes model add-provider <provider> --style ...`
+- `diogenes model add <provider/model> --name ...`
+- `diogenes model default --clear`
+
+**ACP Logging**
+
+- File-based ACP logging with `pino`
+- Managed ACP log files under `storage/logs/`
+- Daily ACP log rotation with `acp-YYYY-MM-DD.log`
+- Automatic gzip compression for older ACP logs
+
+### Changed
+
+- ACP setup and help flows now describe managed config files and the current model-management workflow
+- `diogenes-acp` now uses `commander` for argument parsing and help output
+- ACP diagnostics now show the active log directory and current log file path
+- README now includes a file-based configuration guide for `config.yaml` and `models.yaml`
+- Provider API key help now documents the generic `<PROVIDER>_API_KEY` convention instead of a fixed provider list
+
+### Fixed
+
+- ACP session creation and startup no longer fail hard when `restic` is unavailable; snapshots degrade cleanly instead
+- ACP can automatically acquire `restic` from the latest GitHub release and persist the resolved binary path in managed config
+- Snapshot diagnostics now classify `restic` failures by phase and kind, such as `init/timeout` or `verify/spawn`
+- Windows managed `restic` extraction now uses `Expand-Archive` for `.zip` assets instead of relying on `tar`
+
+### Notes
+
+- `models.yaml` remains the source of truth for provider/model definitions, but is now intended to be managed through `diogenes model ...` commands or advanced manual edits
+- Provider API keys continue to resolve from environment variables derived from the provider name, such as `OPENAI_API_KEY` or `CLAUDE_PROXY_API_KEY`
+
 ## [0.1.0-alpha.1] - 2026-03-30
 
 ### Added

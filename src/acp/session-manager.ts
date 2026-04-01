@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 
 import type { DiogenesConfig } from "../types";
+import type { ACPLogger } from "./logger";
 import type { LoadSessionParams, StoredSessionMetadata } from "./types";
 
 import { getDefaultSessionsStorageRoot, SessionSnapshotManager } from "../snapshot/manager";
@@ -30,6 +31,7 @@ export class SessionManager {
         private readonly config: DiogenesConfig,
         private readonly maxIterations: number | undefined,
         private readonly notify: ACPNotificationSink,
+        private readonly logger?: ACPLogger,
     ) {}
 
     async createSession(cwd: string): Promise<ACPSession> {
@@ -62,6 +64,14 @@ export class SessionManager {
             try {
                 await snapshotManager.initialize();
             } catch (error) {
+                this.logger?.warn(
+                    {
+                        sessionId,
+                        cwd: resolvedCwd,
+                        err: error instanceof Error ? error : undefined,
+                    },
+                    "ACP snapshot initialization failed during session creation",
+                );
                 await snapshotManager.cleanup().catch(() => undefined);
                 await this.sessionStore.removeSession(sessionId).catch(() => undefined);
                 throw error;
@@ -125,6 +135,10 @@ export class SessionManager {
                 stateRestorer: session,
             });
             session.attachSnapshotManager(snapshotManager);
+            this.logger?.info(
+                { sessionId: params.sessionId, cwd: resolvedCwd },
+                "ACP snapshot manager attached during session load",
+            );
         }
 
         await session.restorePersistedState(

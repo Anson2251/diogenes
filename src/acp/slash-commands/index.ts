@@ -1,4 +1,6 @@
+import { createDoctorSlashCommand } from "./doctor";
 import { createHelpSlashCommand } from "./help";
+import { createInitSlashCommand } from "./init";
 import { SlashCommandRegistry } from "./registry";
 import { createRestoreSlashCommand } from "./restore";
 import { createSessionSlashCommand } from "./session";
@@ -7,7 +9,12 @@ import { createSnapshotsSlashCommand } from "./snapshots";
 
 export function createBaseSlashCommandRegistry(): SlashCommandRegistry {
     const registry = new SlashCommandRegistry();
-    registry.registerAll([createHelpSlashCommand(), createSessionSlashCommand()]);
+    registry.registerAll([
+        createHelpSlashCommand(),
+        createSessionSlashCommand(),
+        createInitSlashCommand(),
+        createDoctorSlashCommand(),
+    ]);
     return registry;
 }
 

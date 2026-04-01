@@ -189,6 +189,8 @@ export interface SecurityConfig {
     };
     snapshot?: {
         enabled?: boolean;
+        requestedEnabled?: boolean;
+        unavailableReason?: string;
         includeDiogenesState?: boolean;
         autoBeforePrompt?: boolean;
         storageRoot?: string;

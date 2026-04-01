@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { Command } from "commander";
 import { config as loadDotenv } from "dotenv";
 import * as fs from "fs";
 import * as path from "path";
@@ -16,74 +17,144 @@ import {
     ensureDefaultModelsConfigSync,
 } from "./utils/config-bootstrap";
 import { loadModelsConfig, resolveModelWithFallback } from "./utils/model-resolver";
+import { ensureSnapshotResticConfigured } from "./utils/restic-manager";
+import { collectSetupDiagnostics } from "./utils/setup-diagnostics";
 
 interface ACPCLIOptions {
     model?: string;
     baseUrl?: string;
     workspace?: string;
+    resticBinary?: string;
     envFile?: string;
     maxIterations?: number;
     debugStdioFile?: string;
 }
 
+type ACPCLICommand = "server" | "init" | "doctor";
+
 function getProviderEnvApiKey(providerName?: string): string | undefined {
     return getProviderApiKey(providerName || "openai");
 }
 
-function parseArgs(): ACPCLIOptions {
-    const args = process.argv.slice(2);
-    const options: ACPCLIOptions = {};
+function parseArgs(): { options: ACPCLIOptions; command: ACPCLICommand } {
+    let options: ACPCLIOptions = {};
+    let command: ACPCLICommand = "server";
 
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
+    const program = new Command()
+        .name("diogenes-acp")
+        .usage("[OPTIONS] [COMMAND]")
+        .description("Start or inspect the Diogenes ACP stdio server")
+        .configureOutput({
+            writeErr: (str: string) => {
+                console.error(str.trimEnd());
+            },
+        })
+        .showHelpAfterError("\nRun with --help for usage.")
+        .showSuggestionAfterError(true)
+        .allowExcessArguments(false)
+        .helpOption("-h, --help", "Print help")
+        .version(getVersion(), "-v, --version", "Print version")
+        .action(() => {
+            command = "server";
+        });
 
-        if (arg === "--help" || arg === "-h") {
-            showHelp();
-            process.exit(0);
-        } else if (arg === "--model" || arg === "-m") {
-            options.model = args[++i];
-        } else if (arg === "--base-url" || arg === "-b") {
-            options.baseUrl = args[++i];
-        } else if (arg === "--workspace" || arg === "-w") {
-            options.workspace = args[++i];
-        } else if (arg === "--env-file" || arg === "-e") {
-            options.envFile = args[++i];
-        } else if (arg === "--max-iterations" || arg === "-i") {
-            options.maxIterations = parseInt(args[++i], 10);
-        } else if (arg === "--debug-stdio-file") {
-            options.debugStdioFile = args[++i];
-        } else {
-            console.error(`Unknown option: ${arg}`);
-            showHelp();
-            process.exit(1);
-        }
+    applyCommonOptions(program);
+    program.addHelpText("after", `\n${formatACPCLIHelp()}`);
+
+    const initCommand = program
+        .command("init")
+        .summary("Show ACP setup state and config examples")
+        .action((_args, subCommand: Command) => {
+            command = "init";
+            options = getCommandOptions(subCommand);
+        });
+    applyCommonOptions(initCommand);
+
+    const doctorCommand = program
+        .command("doctor")
+        .summary("Inspect ACP config, logs, providers, and snapshots")
+        .action((_args, subCommand: Command) => {
+            command = "doctor";
+            options = getCommandOptions(subCommand);
+        });
+    applyCommonOptions(doctorCommand);
+
+    program.parse(process.argv);
+
+    if (command === "server") {
+        options = program.opts<ACPCLIOptions>();
     }
 
-    return options;
+    return { options, command };
 }
 
-function showHelp(): void {
-    console.log(`Diogenes ACP Server
+function applyCommonOptions(command: Command): void {
+    command
+        .option("-m, --model <model>", "LLM model")
+        .option("-b, --base-url <url>", "OpenAI-compatible API base URL")
+        .option("-w, --workspace <path>", "Workspace directory")
+        .option("--restic-binary <path>", "Path to the restic binary")
+        .option("-e, --env-file <path>", "Env file to load before reading environment variables")
+        .option(
+            "-i, --max-iterations <n>",
+            "Maximum iterations per session/prompt run",
+            (value: string) => {
+                const parsed = Number.parseInt(value, 10);
+                if (Number.isNaN(parsed)) {
+                    throw new Error(`Invalid integer value for --max-iterations: ${value}`);
+                }
+                return parsed;
+            },
+        )
+        .option("--debug-stdio-file <path>", "Mirror ACP stdin/stdout/stderr to a debug log file");
+}
 
-Usage:
-  diogenes-acp [options]
+function getCommandOptions(command: Command): ACPCLIOptions {
+    return command.optsWithGlobals<ACPCLIOptions>();
+}
 
-Options:
-  -h, --help                    Show this help message
-  -m, --model <model>           LLM model
-  -b, --base-url <url>          OpenAI-compatible API base URL
-  -w, --workspace <path>        Workspace directory
-  -e, --env-file <path>         Env file to load before reading environment variables
-  -i, --max-iterations <n>      Maximum iterations per session/prompt run
-      --debug-stdio-file <path> Mirror ACP stdin/stdout/stderr to a debug log file
+function formatACPCLIHelp(): string {
+    return `Behavior:
+  No subcommand starts the ACP stdio server.
+  Use 'init' to print ACP config examples and setup hints.
+  Use 'doctor' to inspect config, logs, providers, and snapshot readiness.
 
 Environment Variables:
-  OPENAI_API_KEY
-  ANTHROPIC_API_KEY
+  <PROVIDER>_API_KEY
   OPENAI_BASE_URL
   DIOGENES_MODEL
   DIOGENES_WORKSPACE
-`);
+  DIOGENES_RESTIC_BINARY
+
+API Key Rule:
+  Provider API keys are resolved from the provider name in models.yaml.
+  Example: openai -> OPENAI_API_KEY, claude-proxy -> CLAUDE_PROXY_API_KEY
+
+Model Management:
+  models.yaml is managed under the Diogenes config directory and is auto-generated on first run.
+  Use the main CLI to inspect or edit model definitions:
+    diogenes model path
+    diogenes model providers
+    diogenes model show <provider/model>
+    diogenes model add-provider <provider> --style <openai|anthropic>
+    diogenes model add <provider/model> --name <name>
+    diogenes model default [provider/model]
+`;
+}
+
+function getVersion(): string {
+    try {
+        const content = fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8");
+        const raw: unknown = JSON.parse(content);
+        return typeof raw === "object" &&
+            raw !== null &&
+            "version" in raw &&
+            typeof raw.version === "string"
+            ? raw.version
+            : "unknown";
+    } catch {
+        return "unknown";
+    }
 }
 
 function loadConfig(configPath: string): Partial<DiogenesConfig> {
@@ -176,6 +247,15 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
             workspaceRoot: path.resolve(process.env.DIOGENES_WORKSPACE),
         };
     }
+    if (process.env.DIOGENES_RESTIC_BINARY) {
+        envConfig.security = {
+            ...(envConfig.security || {}),
+            snapshot: {
+                ...(envConfig.security?.snapshot || {}),
+                resticBinary: path.resolve(process.env.DIOGENES_RESTIC_BINARY),
+            },
+        };
+    }
 
     const cliConfig: Partial<DiogenesConfig> = {};
     if (options.baseUrl || options.model) {
@@ -183,10 +263,19 @@ function createConfig(options: ACPCLIOptions): DiogenesConfig {
         if (options.baseUrl) cliConfig.llm.baseURL = options.baseUrl;
         if (options.model) cliConfig.llm.model = options.model;
     }
-    if (options.workspace) {
+    if (options.workspace || options.resticBinary) {
         cliConfig.security = {
-            workspaceRoot: path.resolve(options.workspace),
+            ...(cliConfig.security || {}),
         };
+        if (options.workspace) {
+            cliConfig.security.workspaceRoot = path.resolve(options.workspace);
+        }
+        if (options.resticBinary) {
+            cliConfig.security.snapshot = {
+                ...(cliConfig.security.snapshot || {}),
+                resticBinary: path.resolve(options.resticBinary),
+            };
+        }
     }
 
     const merged = mergeConfig(mergeConfig(fileConfig, envConfig), cliConfig);
@@ -303,8 +392,9 @@ export function createDebugStdio(
     };
 }
 
-function main(): void {
-    const options = parseArgs();
+async function main(): Promise<void> {
+    const parsed = parseArgs();
+    const options = parsed.options;
 
     // Load .env file - check both provided path and default locations
     if (options.envFile) {
@@ -320,7 +410,19 @@ function main(): void {
         }
     }
 
+    const configPath = ensureDefaultConfigFileSync();
     const config = createConfig(options);
+    await ensureSnapshotResticConfigured(config, { configPath });
+
+    if (parsed.command === "init" || parsed.command === "doctor") {
+        const diagnostics = collectSetupDiagnostics(config);
+        console.log(
+            parsed.command === "init"
+                ? formatACPInitSummary(diagnostics)
+                : formatACPDoctorSummary(diagnostics),
+        );
+        return;
+    }
 
     let input: NodeJS.ReadStream | PassThrough = process.stdin;
     let output: NodeJS.WriteStream | Writable = process.stdout;
@@ -351,8 +453,97 @@ function main(): void {
     });
 }
 
-if (require.main === module) {
-    main();
+function formatACPInitSummary(diagnostics: ReturnType<typeof collectSetupDiagnostics>): string {
+    const acpCliPath = path.resolve(process.argv[1] || "dist/acp-cli.js");
+    const configuredProviders = diagnostics.providers.filter((provider) => provider.configured);
+    const preferredEnvVars =
+        configuredProviders.length > 0
+            ? configuredProviders.map((provider) => provider.envVarName)
+            : diagnostics.providers.slice(0, 3).map((provider) => provider.envVarName);
+    const envObject = Object.fromEntries(preferredEnvVars.map((key) => [key, "$" + `{${key}}`]));
+
+    return [
+        "Diogenes ACP Init",
+        "",
+        configuredProviders.length > 0
+            ? `Configured providers: ${configuredProviders.map((provider) => provider.provider).join(", ")}`
+            : `Set one provider API key, for example ${diagnostics.providers[0]?.envVarName || "OPENAI_API_KEY"}`,
+        diagnostics.snapshot.mode === "enabled"
+            ? "Snapshots are ready for ACP."
+            : diagnostics.snapshot.mode === "degraded"
+              ? `Snapshots are degraded: ${diagnostics.snapshot.unavailableReason}`
+              : "Snapshots are disabled.",
+        `Config file: ${diagnostics.configPath}`,
+        `Models file: ${diagnostics.modelsPath}`,
+        "",
+        "ACP command:",
+        `node ${acpCliPath}`,
+        "",
+        "Environment variable keys:",
+        ...preferredEnvVars.map((key) => `- ${key}`),
+        "",
+        "ACP config example:",
+        JSON.stringify(
+            {
+                command: "node",
+                args: [acpCliPath],
+                env: envObject,
+            },
+            null,
+            2,
+        ),
+        "",
+        "Run `diogenes-acp doctor` for a detailed readiness report.",
+    ].join("\n");
 }
 
-export { main, parseArgs };
+function formatACPDoctorSummary(diagnostics: ReturnType<typeof collectSetupDiagnostics>): string {
+    return [
+        "Diogenes ACP Doctor",
+        "",
+        `Config Dir: ${diagnostics.configDir}`,
+        `Data Dir: ${diagnostics.dataDir}`,
+        `ACP Logs Dir: ${diagnostics.acpLogsDir}`,
+        `ACP Current Log: ${diagnostics.acpCurrentLogFile}`,
+        `Config File: ${diagnostics.configExists ? "present" : "missing"} (${diagnostics.configPath})`,
+        `Models File: ${diagnostics.modelsExists ? "present" : "missing"} (${diagnostics.modelsPath})`,
+        "",
+        "Providers:",
+        ...diagnostics.providers.map(
+            (provider) =>
+                `- ${provider.provider}: ${provider.configured ? "configured" : "missing"} via ${provider.envVarName}`,
+        ),
+        "",
+        "Snapshots:",
+        `- mode: ${diagnostics.snapshot.mode}`,
+        `- requested: ${diagnostics.snapshot.requested ? "yes" : "no"}`,
+        `- binary: ${diagnostics.snapshot.resticBinary || "(not set)"}`,
+        diagnostics.snapshot.unavailablePhase
+            ? `- phase: ${diagnostics.snapshot.unavailablePhase}`
+            : undefined,
+        diagnostics.snapshot.unavailableKind
+            ? `- kind: ${diagnostics.snapshot.unavailableKind}`
+            : undefined,
+        diagnostics.snapshot.unavailableReason
+            ? `- reason: ${diagnostics.snapshot.unavailableReason}`
+            : undefined,
+    ]
+        .filter((line): line is string => typeof line === "string")
+        .join("\n");
+}
+
+if (require.main === module) {
+    main().catch((error: unknown) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+    });
+}
+
+export {
+    main,
+    parseArgs,
+    createConfig,
+    formatACPCLIHelp,
+    formatACPInitSummary,
+    formatACPDoctorSummary,
+};

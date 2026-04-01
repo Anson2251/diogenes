@@ -48,12 +48,19 @@ export class ACPServer {
 
     constructor(private readonly options: ACPServerOptions = {}) {
         const config: DiogenesConfig = options.config || {};
-        this.sessionManager = new SessionManager(config, options.maxIterations, (method, params) =>
-            this.options.notify?.(method, params),
+        this.sessionManager = new SessionManager(
+            config,
+            options.maxIterations,
+            (method, params) => this.options.notify?.(method, params),
+            this.options.logger,
         );
     }
 
     async handleMessage(message: JsonRpcRequest): Promise<JsonRpcResponse | null> {
+        this.options.logger?.info(
+            { method: message.method, id: message.id ?? null },
+            "Handling ACP request",
+        );
         if (message.jsonrpc !== JSON_RPC_VERSION) {
             return this.error(message.id ?? null, -32600, "Invalid Request");
         }
@@ -82,6 +89,10 @@ export class ACPServer {
                         );
                     }
                     const session = await this.handleNewSession(newSessionResult.data);
+                    this.options.logger?.info(
+                        { sessionId: session.sessionId, cwd: newSessionResult.data.cwd },
+                        "ACP session created",
+                    );
                     const configOptions = session.getConfigOptions();
                     const response = this.success(message.id ?? null, {
                         sessionId: session.sessionId,
@@ -92,6 +103,7 @@ export class ACPServer {
                             session.emitConfigOptionsUpdate();
                         }
                         session.emitAvailableCommandsUpdate();
+                        session.emitClientReadyMessage("new");
                     }, 0);
                     return response;
                 }
@@ -113,6 +125,10 @@ export class ACPServer {
                         );
                     }
                     const session = await this.handleLoadSession(loadResult.data);
+                    this.options.logger?.info(
+                        { sessionId: session.sessionId, cwd: loadResult.data.cwd },
+                        "ACP session loaded",
+                    );
                     const configOptions = session.getConfigOptions();
                     const response = this.success(message.id ?? null, {
                         sessionId: session.sessionId,
@@ -131,6 +147,7 @@ export class ACPServer {
                             session.emitConfigOptionsUpdate({ record: false });
                         }
                         session.emitAvailableCommandsUpdate({ record: false });
+                        session.emitClientReadyMessage("load");
                     }, 0);
                     return response;
                 }
@@ -275,6 +292,7 @@ export class ACPServer {
                     );
                 }
                 default:
+                    this.options.logger?.warn({ method: message.method }, "Unknown ACP method");
                     return this.error(
                         message.id ?? null,
                         -32601,
@@ -282,6 +300,14 @@ export class ACPServer {
                     );
             }
         } catch (error) {
+            this.options.logger?.error(
+                {
+                    method: message.method,
+                    id: message.id ?? null,
+                    err: error instanceof Error ? error : undefined,
+                },
+                "ACP request failed",
+            );
             if (error instanceof ACPServerError) {
                 return this.error(message.id ?? null, error.code, error.message, error.data);
             }

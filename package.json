@@ -1,6 +1,6 @@
 {
   "name": "diogenes",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "A minimal LLM-controlled agent framework with explicit context management",
   "keywords": [
     "agent",
@@ -17,7 +17,6 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "setup:hooks": "git config core.hooksPath .githooks",
     "typecheck": "pnpm tsgo --noEmit",
     "fmt": "pnpm oxfmt",
     "build": "pnpm tsgo",
@@ -32,6 +31,8 @@
     "cli-table3": "^0.6.5",
     "commander": "^14.0.1",
     "dotenv": "^17.3.1",
+    "pino": "^10.3.1",
+    "rotating-file-stream": "^3.2.9",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
   },

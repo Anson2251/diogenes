@@ -4,7 +4,7 @@ A TypeScript framework for building LLM-driven coding agents with explicit, insp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Status**: Alpha (v0.1.0-alpha.1). Expect API and prompt changes before `1.0.0`.
+> **Status**: Alpha (v0.1.0-alpha.2). Expect API and prompt changes before `1.0.0`.
 
 ## What Diogenes Is
 
@@ -175,13 +175,55 @@ Current ACP support includes:
 - persisted ACP replay logs so loaded sessions can replay the original ACP-visible event stream
 - session-scoped snapshots with restore support and automatic safety snapshots
 - Diogenes ACP extensions such as `_diogenes/session/get`, `_diogenes/session/snapshots`, and `_diogenes/session/prune`
-- discoverable local ACP slash commands such as `/help`, `/session`, `/restore`, `/snapshots`, and `/snapshot`
+- discoverable local ACP slash commands such as `/help`, `/init`, `/doctor`, `/session`, `/restore`, `/snapshots`, and `/snapshot`
+
+When ACP snapshots are enabled, Diogenes now tries to resolve `restic` in this order:
+
+- explicit `resticBinary` / `DIOGENES_RESTIC_BINARY`
+- `restic` from `PATH`
+- automatic download of the latest matching release from GitHub into the managed data directory
+
+If that still fails, ACP stays usable and session snapshots are degraded to disabled for that runtime.
 
 ACP restore is available both through host APIs (`session/restore`, `_diogenes/session/restore`) and through `/restore <snapshot-id>` inside a session. Every restore creates a safety snapshot first so the restore itself can be undone.
 
 ACP-local slash commands are implemented through a modular registry under `src/acp/slash-commands/`.
 
 See [docs/acp-server.md](./docs/acp-server.md) for usage details and [docs/acp-integration.md](./docs/acp-integration.md) for architecture notes.
+
+### Setup Helpers
+
+Use these built-in commands to inspect first-run state:
+
+```bash
+diogenes init
+diogenes doctor
+diogenes-acp init
+diogenes-acp doctor
+```
+
+`init` prints the shortest next steps. `doctor` prints config paths, provider environment readiness, and snapshot/restic status.
+
+`diogenes-acp init` also prints:
+
+- the exact ACP launch command as `node <path-to-acp-cli>`
+- the environment variable keys to provide
+- a ready-to-copy ACP config example snippet
+
+### Model Commands
+
+Diogenes also ships local model management helpers:
+
+```bash
+diogenes model list
+diogenes model providers
+diogenes model show openai/gpt-4o
+diogenes model add-provider proxy --style openai --base-url https://example.com/v1
+diogenes model add proxy/gpt-4.1 --name "GPT 4.1 Proxy" --context-window 128000
+diogenes model default openai/gpt-4o-mini
+diogenes model default --clear
+diogenes model path
+```
 
 ## Core Concepts
 
@@ -271,6 +313,47 @@ Example:
 
 - [examples/diogenes.config.yaml](./examples/diogenes.config.yaml)
 
+### Config Files Guide
+
+Diogenes manages two user-facing config files in its config directory:
+
+- `config.yaml`: runtime and security settings
+- `models.yaml`: provider and model catalog
+
+Use these commands to find them:
+
+```bash
+diogenes init
+diogenes doctor
+diogenes model path
+diogenes-acp init
+diogenes-acp doctor
+```
+
+Typical locations:
+
+- macOS: `~/Library/Application Support/diogenes/`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/diogenes/`
+- Windows: `%APPDATA%\diogenes\`
+
+Both files are auto-generated on first run, so most users do not need to create them manually.
+
+Use `config.yaml` when you want to change runtime behavior such as:
+
+- workspace root
+- shell or watch security settings
+- snapshot defaults
+- a default `llm.model`
+
+Use `models.yaml` when you want to change model catalog data such as:
+
+- adding a provider
+- adding a model under a provider
+- changing `baseURL`
+- changing `supportsToolRole`
+- changing per-model token or temperature defaults
+- changing the default `provider/model`
+
 Useful options:
 
 - `security.watch.enabled`
@@ -282,6 +365,26 @@ Notes:
 
 - `security.interaction.enabled` disables `task.ask` and `task.choose`
 - in the CLI, those tools are still only available in `--interactive`
+
+### Runtime Config Example
+
+Example `config.yaml`:
+
+```yaml
+llm:
+  model: openai/gpt-4o
+
+security:
+  workspaceRoot: /absolute/path/to/workspace
+  interaction:
+    enabled: false
+  watch:
+    enabled: true
+    debounceMs: 250
+  snapshot:
+    enabled: true
+    autoBeforePrompt: true
+```
 
 ### Models Configuration
 
@@ -354,18 +457,22 @@ Models are referenced as `provider/model`, e.g.:
 
 #### CLI Models Commands
 
-List available models:
+The easiest way to manage `models.yaml` is through the CLI:
 
 ```bash
-diogenes models
-diogenes models list
+diogenes model list
+diogenes model providers
+diogenes model show openai/gpt-4o
+diogenes model add-provider proxy --style openai --base-url https://example.com/v1
+diogenes model add proxy/gpt-4.1 --name "GPT 4.1 Proxy" --context-window 128000
 ```
 
-Show or set the default model:
+Show, set, or clear the default model:
 
 ```bash
-diogenes models default
-diogenes models default openai/gpt-4o
+diogenes model default
+diogenes model default openai/gpt-4o
+diogenes model default --clear
 ```
 
 Use a specific model for a task:

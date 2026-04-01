@@ -1,5 +1,6 @@
 import type { ConversationMessage, TaskRunResult } from "../../runtime/task-runner";
 import type { SnapshotCreateResult, SnapshotSummary } from "../../snapshot/types";
+import type { SetupDiagnostics } from "../../utils/setup-diagnostics";
 import type { AvailableCommand, SessionMetadata } from "../types";
 
 export type { SnapshotSummary } from "../../snapshot/types";
@@ -31,6 +32,7 @@ export interface SlashCommandDefinition {
 export interface SlashCommandContext {
     readonly sessionId: string;
     readonly snapshotEnabled: boolean;
+    getSetupDiagnostics(): SetupDiagnostics;
     getAvailableCommands(): AvailableCommand[];
     getMetadata(): SessionMetadata;
     getHydratedStateMeta(): {

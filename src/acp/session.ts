@@ -26,6 +26,7 @@ import { SnapshotCreateTool } from "../tools/snapshot/snapshot-create";
 import { getProviderApiKeyEnvVarName } from "../utils/api-key-manager";
 import { ensureDefaultModelsConfigSync } from "../utils/config-bootstrap";
 import { loadModelsConfig, resolveModel } from "../utils/models-config";
+import { collectSetupDiagnostics } from "../utils/setup-diagnostics";
 import { tryParsePartialToolCalls } from "../utils/tool-parser";
 import {
     createBaseSlashCommandRegistry,
@@ -736,7 +737,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
     constructor(
         sessionId: string,
         cwd: string,
-        config: DiogenesConfig,
+        private readonly config: DiogenesConfig,
         maxIterations: number | undefined,
         notify: ACPNotificationSink,
         private readonly persistence?: SessionPersistence,
@@ -756,9 +757,9 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.title = options?.title ?? null;
         this.description = options?.description ?? null;
         this.diogenes = createDiogenes({
-            ...config,
+            ...this.config,
             security: {
-                ...(config.security || {}),
+                ...(this.config.security || {}),
                 workspaceRoot: this.cwd,
                 interaction: { enabled: false },
             },
@@ -1255,6 +1256,36 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.emitAvailableCommandsUpdate(options);
     }
 
+    emitClientReadyMessage(mode: "new" | "load"): void {
+        const diagnostics = collectSetupDiagnostics(this.config);
+        const snapshotLine =
+            diagnostics.snapshot.mode === "degraded"
+                ? `Snapshots degraded (${diagnostics.snapshot.unavailablePhase || "unknown"}/${diagnostics.snapshot.unavailableKind || "unknown"}). Use /doctor for details.`
+                : diagnostics.snapshot.mode === "enabled"
+                  ? "Snapshots ready."
+                  : "Snapshots disabled.";
+        const lines =
+            mode === "new"
+                ? [
+                      "Session ready.",
+                      snapshotLine,
+                      "Use `/init` for setup help, `/doctor` for diagnostics, or `/session` for current state.",
+                  ]
+                : [
+                      "Session loaded.",
+                      snapshotLine,
+                      "Use `/session` to inspect restored state, `/doctor` for diagnostics, or `/help` to see local commands.",
+                  ];
+
+        this.emitSessionUpdate(
+            {
+                sessionUpdate: "agent_message_chunk",
+                content: createTextContent(lines.join("\n")),
+            },
+            { record: false },
+        );
+    }
+
     isBusy(): boolean {
         return this.activeRun !== null;
     }
@@ -1507,6 +1538,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         return {
             sessionId: this.sessionId,
             snapshotEnabled: this.snapshotManager !== null,
+            getSetupDiagnostics: () => collectSetupDiagnostics(this.config),
             getAvailableCommands: () => this.getAvailableCommands(),
             getMetadata: () => this.getMetadata(),
             getHydratedStateMeta: () => this.getHydratedStateMeta(),

@@ -94,11 +94,16 @@ export interface ResticCommandResult {
     exitCode: number;
 }
 
+export type ResticFailureKind = "timeout" | "spawn" | "exit";
+export type ResticCommandPhase = "init" | "backup" | "snapshots" | "restore" | "verify" | "unknown";
+
 export class ResticCommandError extends Error {
     readonly args: string[];
     readonly exitCode: number;
     readonly stdout: string;
     readonly stderr: string;
+    readonly kind: ResticFailureKind;
+    readonly phase: ResticCommandPhase;
 
     constructor(
         message: string,
@@ -107,6 +112,8 @@ export class ResticCommandError extends Error {
             exitCode: number;
             stdout: string;
             stderr: string;
+            kind: ResticFailureKind;
+            phase: ResticCommandPhase;
         },
     ) {
         super(message);
@@ -115,6 +122,8 @@ export class ResticCommandError extends Error {
         this.exitCode = params.exitCode;
         this.stdout = params.stdout;
         this.stderr = params.stderr;
+        this.kind = params.kind;
+        this.phase = params.phase;
     }
 }
 
@@ -153,7 +162,7 @@ export class ResticClient {
     }
 
     async initRepo(options: ResticCommandOptions = {}): Promise<void> {
-        await this.run(["init"], options);
+        await this.run(["init"], options, "init");
     }
 
     async backup(options: ResticBackupOptions): Promise<ResticBackupResult> {
@@ -205,7 +214,7 @@ export class ResticClient {
 
         args.push(...options.paths);
 
-        const result = await this.run(args, options);
+        const result = await this.run(args, options, "backup");
         const snapshotId = this.parseBackupSnapshotId(result.stdout);
 
         return {
@@ -229,7 +238,7 @@ export class ResticClient {
             args.push("--host", options.host);
         }
 
-        const result = await this.run(args, options);
+        const result = await this.run(args, options, "snapshots");
         return this.parseSnapshots(result.stdout);
     }
 
@@ -252,12 +261,13 @@ export class ResticClient {
             args.push("--dry-run");
         }
 
-        await this.run(args, options);
+        await this.run(args, options, "restore");
     }
 
     private async run(
         args: string[],
         options: ResticCommandOptions = {},
+        phase: ResticCommandPhase = "unknown",
     ): Promise<ResticCommandResult> {
         this.validatePasswordSources(options);
 
@@ -292,6 +302,8 @@ export class ResticClient {
                         exitCode: -1,
                         stdout,
                         stderr,
+                        kind: "timeout",
+                        phase,
                     }),
                 );
             }, timeoutMs);
@@ -317,6 +329,8 @@ export class ResticClient {
                         exitCode: -1,
                         stdout,
                         stderr,
+                        kind: "spawn",
+                        phase,
                     }),
                 );
             });
@@ -336,6 +350,8 @@ export class ResticClient {
                             exitCode: exitCode ?? -1,
                             stdout,
                             stderr,
+                            kind: "exit",
+                            phase,
                         }),
                     );
                     return;

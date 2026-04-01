@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { TaskStopReason } from "../runtime/task-runner";
+import type { ACPLogger } from "./logger";
 
 // Zod schemas for RPC params validation
 export const InitializeParamsSchema = z.object({
@@ -191,6 +192,7 @@ export interface ACPServerOptions {
     maxIterations?: number;
     notify?: (method: string, params: any) => void;
     respond?: (response: JsonRpcResponse) => void;
+    logger?: ACPLogger;
 }
 
 export interface InitializeParams {

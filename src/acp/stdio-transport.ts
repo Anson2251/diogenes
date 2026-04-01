@@ -2,6 +2,7 @@ import { Readable, Writable } from "stream";
 
 import type { ACPServerOptions } from "./types";
 
+import { createACPLogger } from "./logger";
 import { ACPServer } from "./server";
 import { SessionStore } from "./session-store";
 import { JsonRpcRequestSchema } from "./types";
@@ -16,15 +17,18 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
     const input = options.input || process.stdin;
     const output = options.output || process.stdout;
     const error = options.error || process.stderr;
+    const logger = options.logger || createACPLogger();
 
     // Auto-cleanup temporary sessions on startup
     const sessionStore = new SessionStore();
     void sessionStore.cleanupTempSessions().catch(() => {
         // Ignore cleanup errors
     });
+    logger.info({ pid: process.pid }, "ACP stdio server started");
 
     const server = new ACPServer({
         ...options,
+        logger,
         notify: (method, params) => {
             output.write(
                 `${JSON.stringify({ jsonrpc: "2.0", method, params: params as unknown })}\n`,
@@ -45,6 +49,10 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
 
         disposeStarted = true;
         void server.dispose().catch((disposeError: unknown) => {
+            logger.error(
+                { err: disposeError instanceof Error ? disposeError : undefined },
+                "ACP transport dispose error",
+            );
             error.write(
                 `ACP transport dispose error: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}\n`,
             );
@@ -70,14 +78,26 @@ export function startACPServer(options: ACPStdioOptions = {}): ACPServer {
                     const rawMessage: unknown = JSON.parse(rawLine);
                     const parseResult = JsonRpcRequestSchema.safeParse(rawMessage);
                     if (!parseResult.success) {
+                        logger.warn(
+                            { rawLine },
+                            "ACP transport parse error: invalid JSON-RPC message format",
+                        );
                         error.write(`ACP transport parse error: Invalid JSON-RPC message format\n`);
                         return;
                     }
+                    logger.debug(
+                        { method: parseResult.data.method, id: parseResult.data.id ?? null },
+                        "ACP transport received message",
+                    );
                     const response = await server.handleMessage(parseResult.data);
                     if (response) {
                         output.write(`${JSON.stringify(response)}\n`);
                     }
                 } catch (parseError: unknown) {
+                    logger.warn(
+                        { err: parseError instanceof Error ? parseError : undefined, rawLine },
+                        "ACP transport parse error",
+                    );
                     error.write(
                         `ACP transport parse error: ${parseError instanceof Error ? parseError.message : String(parseError)}\n`,
                     );
