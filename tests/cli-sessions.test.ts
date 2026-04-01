@@ -644,9 +644,13 @@ describe("CLI session commands", () => {
 
     it("rejects adding a model to an unknown provider", async () => {
         const originalHome = process.env.HOME;
+        const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+        const originalXdgDataHome = process.env.XDG_DATA_HOME;
         const root = await fs.mkdtemp(path.join(os.tmpdir(), "cli-model-add-missing-provider-"));
         tempDirs.push(root);
         process.env.HOME = root;
+        process.env.XDG_CONFIG_HOME = path.join(root, ".config");
+        process.env.XDG_DATA_HOME = path.join(root, ".local", "share");
 
         const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
             throw new Error("process.exit:1");
@@ -654,6 +658,25 @@ describe("CLI session commands", () => {
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
         try {
+            const modelsPath = appPaths.resolveDiogenesAppPaths({
+                homeDir: root,
+                env: process.env,
+            }).modelsConfigPath;
+            await fs.mkdir(path.dirname(modelsPath), { recursive: true });
+            await fs.writeFile(
+                modelsPath,
+                [
+                    "providers:",
+                    "  openai:",
+                    "    style: openai",
+                    "    models:",
+                    "      gpt-4o:",
+                    '        name: "GPT-4o"',
+                    "",
+                ].join("\n"),
+                "utf8",
+            );
+
             await expect(
                 handleCommand({
                     kind: "models.add",
@@ -668,6 +691,16 @@ describe("CLI session commands", () => {
             );
         } finally {
             process.env.HOME = originalHome;
+            if (originalXdgConfigHome === undefined) {
+                delete process.env.XDG_CONFIG_HOME;
+            } else {
+                process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+            }
+            if (originalXdgDataHome === undefined) {
+                delete process.env.XDG_DATA_HOME;
+            } else {
+                process.env.XDG_DATA_HOME = originalXdgDataHome;
+            }
         }
     });
 
