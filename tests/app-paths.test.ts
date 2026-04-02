@@ -7,6 +7,7 @@ import {
     ensureDiogenesAppDirs,
     findDefaultConfigFileSync,
     getDefaultSessionsStorageRoot,
+    getDefaultTreeSitterStorageRoot,
     resolveDiogenesAppPaths,
 } from "../src/utils/app-paths";
 
@@ -79,6 +80,8 @@ describe("app paths", () => {
         await expect(fs.access(paths.configDir)).resolves.toBeUndefined();
         await expect(fs.access(paths.dataDir)).resolves.toBeUndefined();
         await expect(fs.access(paths.sessionsDir)).resolves.toBeUndefined();
+        await expect(fs.access(paths.treeSitterDir)).resolves.toBeUndefined();
+        await expect(fs.access(paths.treeSitterGrammarsDir)).resolves.toBeUndefined();
     });
 
     it("finds the default config file when present", async () => {
@@ -119,5 +122,17 @@ describe("app paths", () => {
         });
 
         expect(storageRoot).toBe(path.join("/xdg/data", "diogenes", "sessions"));
+    });
+
+    it("returns the platform tree-sitter storage root", () => {
+        const storageRoot = getDefaultTreeSitterStorageRoot({
+            platform: "linux",
+            homeDir: "/home/alice",
+            env: {
+                XDG_DATA_HOME: "/xdg/data",
+            },
+        });
+
+        expect(storageRoot).toBe(path.join("/xdg/data", "diogenes", "tree-sitter"));
     });
 });

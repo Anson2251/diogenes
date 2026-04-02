@@ -7,6 +7,8 @@ export interface DiogenesAppPaths {
     configDir: string;
     dataDir: string;
     sessionsDir: string;
+    treeSitterDir: string;
+    treeSitterGrammarsDir: string;
     defaultConfigCandidates: string[];
     modelsConfigPath: string;
 }
@@ -27,12 +29,16 @@ export function resolveDiogenesAppPaths(options: ResolveOptions = {}): DiogenesA
     const configDir = resolveConfigDir(platform, env, homeDir);
     const dataDir = resolveDataDir(platform, env, homeDir);
     const sessionsDir = path.join(dataDir, "sessions");
+    const treeSitterDir = path.join(dataDir, "tree-sitter");
+    const treeSitterGrammarsDir = path.join(treeSitterDir, "grammars");
 
     return {
         homeDir,
         configDir,
         dataDir,
         sessionsDir,
+        treeSitterDir,
+        treeSitterGrammarsDir,
         defaultConfigCandidates: [
             path.join(configDir, "config.yaml"),
             path.join(configDir, "config.yml"),
@@ -47,6 +53,8 @@ export function ensureDiogenesAppDirsSync(options: ResolveOptions = {}): Diogene
     fs.mkdirSync(paths.configDir, { recursive: true });
     fs.mkdirSync(paths.dataDir, { recursive: true });
     fs.mkdirSync(paths.sessionsDir, { recursive: true });
+    fs.mkdirSync(paths.treeSitterDir, { recursive: true });
+    fs.mkdirSync(paths.treeSitterGrammarsDir, { recursive: true });
     return paths;
 }
 
@@ -57,6 +65,8 @@ export async function ensureDiogenesAppDirs(
     await fs.promises.mkdir(paths.configDir, { recursive: true });
     await fs.promises.mkdir(paths.dataDir, { recursive: true });
     await fs.promises.mkdir(paths.sessionsDir, { recursive: true });
+    await fs.promises.mkdir(paths.treeSitterDir, { recursive: true });
+    await fs.promises.mkdir(paths.treeSitterGrammarsDir, { recursive: true });
     return paths;
 }
 
@@ -72,6 +82,10 @@ export function findDefaultConfigFileSync(options: ResolveOptions = {}): string 
 
 export function getDefaultSessionsStorageRoot(options: ResolveOptions = {}): string {
     return resolveDiogenesAppPaths(options).sessionsDir;
+}
+
+export function getDefaultTreeSitterStorageRoot(options: ResolveOptions = {}): string {
+    return resolveDiogenesAppPaths(options).treeSitterDir;
 }
 
 function resolveHomeDir(env: NodeJS.ProcessEnv): string {

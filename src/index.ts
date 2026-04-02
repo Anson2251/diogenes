@@ -12,9 +12,12 @@ export { BaseTool, ToolOutputFormatter } from "./tools/base-tool";
 export { DirListTool } from "./tools/dir/dir-list";
 export { DirUnloadTool } from "./tools/dir/dir-unload";
 export { FileLoadTool } from "./tools/file/file-load";
+export { FileLoadSymbolTool } from "./tools/file/file-load-symbol";
+export { FileNodeAtTool } from "./tools/file/file-node-at";
 export { FileUnloadTool } from "./tools/file/file-unload";
 export { FileEditTool } from "./tools/file/file-edit";
 export { FilePeekTool } from "./tools/file/file-peek";
+export { FileSymbolsTool } from "./tools/file/file-symbols";
 export { FileCreateTool } from "./tools/file/file-create";
 export { FileRemoveTool } from "./tools/file/file-remove";
 export { FileOverwriteTool } from "./tools/file/file-overwrite";
@@ -26,6 +29,30 @@ export { TaskNotepadTool } from "./tools/task/task-notepad";
 export { TaskEndTool } from "./tools/task/task-end";
 export { ShellExecTool } from "./tools/shell/shell-exec";
 export { SnapshotCreateTool } from "./tools/snapshot/snapshot-create";
+export { AstService, AstServiceError } from "./ast/service";
+export { TreeSitterAssetManager } from "./utils/tree-sitter-asset-manager";
+export type {
+    AstGrammarStatus,
+    AstNodeLookupResult,
+    AstSymbolMatchResult,
+    ParsedAstFile,
+} from "./ast/service";
+export type {
+    AstLanguageId,
+} from "./ast/languages";
+export type {
+    AstLineRange,
+    AstNodeSummary,
+    AstPosition,
+    AstSymbol,
+    AstSymbolKind,
+} from "./ast/symbols";
+export type {
+    ManagedGrammarDefinition,
+    ManagedGrammarLanguage,
+    ManagedGrammarStatus,
+    TreeSitterManifest,
+} from "./utils/tree-sitter-asset-manager";
 
 // LLM Clients
 export { OpenAIClient } from "./llm/openai-client";
@@ -67,6 +94,7 @@ export {
     ensureDiogenesAppDirsSync,
     findDefaultConfigFileSync,
     getDefaultSessionsStorageRoot as getDefaultSessionsStorageRootFromAppPaths,
+    getDefaultTreeSitterStorageRoot,
 } from "./utils/app-paths";
 export {
     ensureDefaultConfigFileSync,

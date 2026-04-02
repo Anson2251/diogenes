@@ -11,6 +11,9 @@ importers:
       '@tron-format/tron':
         specifier: ^0.1.3
         version: 0.1.3
+      '@vscode/tree-sitter-wasm':
+        specifier: 0.3.0
+        version: 0.3.0
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -26,6 +29,9 @@ importers:
       rotating-file-stream:
         specifier: ^3.2.9
         version: 3.2.9
+      web-tree-sitter:
+        specifier: ^0.26.8
+        version: 0.26.8
       yaml:
         specifier: ^2.8.3
         version: 2.8.3
@@ -864,6 +870,9 @@ packages:
   '@vitest/utils@4.1.2':
     resolution: {integrity: sha512-xw2/TiX82lQHA06cgbqRKFb5lCAy3axQ4H4SoUFhUsg+wztiet+co86IAMDtF6Vm1hc7J6j09oh/rgDn+JdKIQ==}
 
+  '@vscode/tree-sitter-wasm@0.3.0':
+    resolution: {integrity: sha512-4kjB1jgLyG9VimGfyJb1F8/GFdrx55atsBCH/9r2D/iZHAUDCvZ5zhWXB7sRQ2z2WkkuNYm/0pgQtUm1jhdf7A==}
+
   ansi-regex@5.0.1:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
     engines: {node: '>=8'}
@@ -1232,6 +1241,9 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  web-tree-sitter@0.26.8:
+    resolution: {integrity: sha512-4sUwi7ZyOrIk5KLgYLkc2A/F0LFMQnBhfb+2Cdl7ik4ePJ6JD+fk4ofI2sA5eGawBKBaK4Vntt7Ww5KcEsay4A==}
 
   why-is-node-running@2.3.0:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
@@ -1771,6 +1783,8 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
+  '@vscode/tree-sitter-wasm@0.3.0': {}
+
   ansi-regex@5.0.1: {}
 
   ansi-styles@4.3.0:
@@ -2184,6 +2198,8 @@ snapshots:
       '@types/node': 25.5.0
     transitivePeerDependencies:
       - msw
+
+  web-tree-sitter@0.26.8: {}
 
   why-is-node-running@2.3.0:
     dependencies:
