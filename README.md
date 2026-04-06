@@ -183,6 +183,8 @@ When ACP snapshots are enabled, Diogenes now tries to resolve `restic` in this o
 - `restic` from `PATH`
 - automatic download of the latest matching release from GitHub into the managed data directory
 
+Diogenes treats `restic` as an external CLI dependency, so this resolution path prioritizes availability and platform compatibility over pinning one exact version. This is intentional: newer `restic` builds can add support for newer systems without requiring Diogenes to ship new per-platform download logic.
+
 If that still fails, ACP stays usable and session snapshots are degraded to disabled for that runtime.
 
 ACP restore is available both through host APIs (`session/restore`, `_diogenes/session/restore`) and through `/restore <snapshot-id>` inside a session. Every restore creates a safety snapshot first so the restore itself can be undone.
@@ -276,7 +278,10 @@ If a watched file changes on disk:
 ### File Tools
 
 - `file.load`
+- `file.load_symbol`
+- `file.node_at`
 - `file.peek`
+- `file.symbols`
 - `file.edit`
 - `file.create`
 - `file.overwrite`
@@ -297,6 +302,9 @@ If a watched file changes on disk:
 
 ### Choosing The Right File Tool
 
+- use `file.symbols` to inspect top-level structure in supported source files before guessing line ranges
+- use `file.load_symbol` to load a whole function, class, or declaration by name
+- use `file.node_at` when you are starting from a line number or error location and need syntax context
 - use `file.edit` for small, local changes
 - use `file.overwrite` when replacing most of a file or a large contiguous block
 - use `file.create` when the target file does not exist
@@ -304,6 +312,9 @@ If a watched file changes on disk:
 - use `file.load` when the content needs to remain available in context
 
 As a rule of thumb, a single `file.edit` operation should stay relatively small. Around 30 lines is a good target.
+
+AST-backed file tools currently support JavaScript and TypeScript-family files. When AST support is unavailable for a file type, continue using the normal line-based file tools.
+AST-backed file tools currently support JavaScript, TypeScript-family files, and Python. When AST support is unavailable for a file type, continue using the normal line-based file tools.
 
 ## Configuration
 
