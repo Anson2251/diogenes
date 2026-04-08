@@ -1601,7 +1601,9 @@ function formatModelDetails(
 
     if (!provider || !definition) {
         const available = listAvailableModels(modelsConfig);
-        throw new Error(`Unknown model: ${model}\nAvailable models: ${available.join(", ")}`);
+        console.error(`${colors.red}Error: Model "${model}" not found${colors.reset}`);
+        console.error(`${colors.dim}Available models: ${available.join(", ")}${colors.reset}`);
+        process.exit(1);
     }
 
     return [
@@ -1793,7 +1795,27 @@ function handleModelsCommand(
 // Run the CLI
 if (require.main === module) {
     main().catch((error: unknown) => {
-        console.error(`${colors.red}Fatal error:${colors.reset}`, error);
+        if (error instanceof Error) {
+            // Don't show stack trace for known user errors
+            const userErrorPatterns = [
+                "Unknown managed session",
+                "Unknown model",
+                "API key is required",
+                "Error: Provider already exists",
+                "Error: Model already exists",
+                "Error: Unknown provider",
+            ];
+            const isUserError = userErrorPatterns.some((pattern) =>
+                error.message.includes(pattern),
+            );
+            if (isUserError) {
+                console.error(`${colors.red}Error:${colors.reset} ${error.message}`);
+            } else {
+                console.error(`${colors.red}Fatal error:${colors.reset}`, error);
+            }
+        } else {
+            console.error(`${colors.red}Fatal error:${colors.reset}`, error);
+        }
         process.exit(1);
     });
 }

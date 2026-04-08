@@ -24,8 +24,8 @@
     "dev": "pnpm tsgo --watch",
     "test": "vitest run",
     "lint": "npx oxlint",
-    "bundle": "pnpm build && npx rolldown -c rolldown.cli.config.ts --minify",
-    "bundle:acp": "pnpm build && npx rolldown -c rolldown.acp.config.ts --minify",
+    "bundle": "npx rolldown -c rolldown.cli.config.ts --minify",
+    "bundle:acp": "npx rolldown -c rolldown.acp.config.ts --minify",
     "bundle:all": "pnpm build && pnpm bundle && pnpm bundle:acp"
   },
   "dependencies": {

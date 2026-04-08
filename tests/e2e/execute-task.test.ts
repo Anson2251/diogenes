@@ -2,9 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { executeTask } from "../src/index";
-import { OpenAIClient } from "../src/llm/openai-client";
-import { Logger, LogLevel } from "../src/utils/logger";
+import { executeTask } from "../../src/index";
+import { OpenAIClient } from "../../src/llm/openai-client";
+import { Logger, LogLevel } from "../../src/utils/logger";
 
 class SilentLogger implements Logger {
     private level = LogLevel.SILENT;
