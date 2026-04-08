@@ -75,7 +75,7 @@ pnpm run build
 Run a one-shot task:
 
 ```bash
-node dist/cli.js "List all files in src"
+node dist/cli.js run "List all files in src"
 ```
 
 Start an interactive session:
@@ -87,7 +87,7 @@ node dist/cli.js --interactive
 Start socratic mode:
 
 ```bash
-node dist/cli.js --socratic "Debug the failing test"
+node dist/cli.js run --socratic "Debug the failing test"
 ```
 
 Start the ACP server:
