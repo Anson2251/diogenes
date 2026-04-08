@@ -73,7 +73,9 @@ function extractSymbolsFromNode(
     const defaultExportName = isExported && looksLikeDefaultExport(node) ? "default" : undefined;
 
     if (actualNode.type === "expression_statement") {
-        const internalModule = actualNode.namedChildren.find((child) => child?.type === "internal_module");
+        const internalModule = actualNode.namedChildren.find(
+            (child) => child?.type === "internal_module",
+        );
         if (internalModule) {
             return extractSymbolsFromNode(language, filePath, internalModule, isExported);
         }
@@ -160,14 +162,7 @@ function extractSymbolsFromNode(
     }
 
     if (actualNode.type === "internal_module") {
-        return createNamedSymbol(
-            language,
-            filePath,
-            actualNode,
-            "name",
-            "export",
-            isExported,
-        );
+        return createNamedSymbol(language, filePath, actualNode, "name", "export", isExported);
     }
 
     return [];

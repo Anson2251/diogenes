@@ -37,9 +37,7 @@ export type {
     AstSymbolMatchResult,
     ParsedAstFile,
 } from "./ast/service";
-export type {
-    AstLanguageId,
-} from "./ast/languages";
+export type { AstLanguageId } from "./ast/languages";
 export type {
     AstLineRange,
     AstNodeSummary,

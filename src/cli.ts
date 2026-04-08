@@ -1761,7 +1761,9 @@ function handleModelsCommand(
                 }
                 console.log(`${colors.green}Active model cleared${colors.reset}`);
                 if (modelsConfig.default) {
-                    console.log(`${colors.dim}Will use default: ${modelsConfig.default}${colors.reset}`);
+                    console.log(
+                        `${colors.dim}Will use default: ${modelsConfig.default}${colors.reset}`,
+                    );
                 }
             } else if (command.model) {
                 const available = listAvailableModels(modelsConfig);
@@ -1783,7 +1785,9 @@ function handleModelsCommand(
                 } else {
                     console.log(`${colors.yellow}No active model set${colors.reset}`);
                     if (modelsConfig.default) {
-                        console.log(`${colors.dim}Will use default: ${modelsConfig.default}${colors.reset}`);
+                        console.log(
+                            `${colors.dim}Will use default: ${modelsConfig.default}${colors.reset}`,
+                        );
                     }
                 }
             }

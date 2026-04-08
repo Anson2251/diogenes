@@ -1,13 +1,9 @@
+import * as fs from "fs/promises";
+import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as yaml from "yaml";
-import * as path from "path";
-import * as fs from "fs/promises";
-import {
-    setupTestHome,
-    teardownTestHome,
-    runCLI,
-    type TestContext,
-} from "./helpers";
+
+import { setupTestHome, teardownTestHome, runCLI, type TestContext } from "./helpers";
 
 describe("bundled CLI basic commands", () => {
     let testCtx: TestContext;
@@ -54,8 +50,14 @@ describe("bundled CLI basic commands", () => {
             const configPath = path.join(testCtx.homeDir, ".config", "diogenes", "config.yaml");
             const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
 
-            const configExists = await fs.access(configPath).then(() => true).catch(() => false);
-            const modelsExists = await fs.access(modelsPath).then(() => true).catch(() => false);
+            const configExists = await fs
+                .access(configPath)
+                .then(() => true)
+                .catch(() => false);
+            const modelsExists = await fs
+                .access(modelsPath)
+                .then(() => true)
+                .catch(() => false);
 
             expect(configExists).toBe(true);
             expect(modelsExists).toBe(true);

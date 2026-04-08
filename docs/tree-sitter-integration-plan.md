@@ -260,7 +260,7 @@ Suggested result shape:
     start: number;
     end: number;
     text_preview: string;
-  };
+  }
   parents: Array<{
     type: string;
     start: number;

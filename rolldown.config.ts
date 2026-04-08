@@ -44,6 +44,6 @@ export function createConfig(targetName: TargetName, formatName: string) {
 }
 
 const targetName = process.env.TARGET ?? "cli";
-const formatName = (process.env.FORMAT || "cjs");
+const formatName = process.env.FORMAT || "cjs";
 
 export default createConfig(targetName, formatName);

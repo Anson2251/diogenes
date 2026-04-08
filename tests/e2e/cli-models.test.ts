@@ -1,13 +1,9 @@
+import * as fs from "fs/promises";
+import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as yaml from "yaml";
-import * as path from "path";
-import * as fs from "fs/promises";
-import {
-    setupTestHome,
-    teardownTestHome,
-    runCLI,
-    type TestContext,
-} from "./helpers";
+
+import { setupTestHome, teardownTestHome, runCLI, type TestContext } from "./helpers";
 
 describe("bundled CLI model commands", () => {
     let testCtx: TestContext;
@@ -79,7 +75,10 @@ describe("bundled CLI model commands", () => {
 
         it("should set and get default model", async () => {
             // Set default
-            const { exitCode: setExit } = runCLI(["model", "default", "anthropic/claude-sonnet-4-20250514"], testCtx.env);
+            const { exitCode: setExit } = runCLI(
+                ["model", "default", "anthropic/claude-sonnet-4-20250514"],
+                testCtx.env,
+            );
             expect(setExit).toBe(0);
 
             // Verify by reading models.yaml
@@ -108,7 +107,10 @@ describe("bundled CLI model commands", () => {
     describe("active model management (use command)", () => {
         it("should set and get active model", async () => {
             // Set active model
-            const { exitCode: setExit } = runCLI(["model", "use", "openai/gpt-4o-mini"], testCtx.env);
+            const { exitCode: setExit } = runCLI(
+                ["model", "use", "openai/gpt-4o-mini"],
+                testCtx.env,
+            );
             expect(setExit).toBe(0);
 
             // Verify by reading config.yaml
@@ -137,8 +139,16 @@ describe("bundled CLI model commands", () => {
     describe("add provider and model", () => {
         it("should add a new provider", async () => {
             const { exitCode } = runCLI(
-                ["model", "add-provider", "custom-provider", "--style", "openai", "--base-url", "https://api.custom.com/v1"],
-                testCtx.env
+                [
+                    "model",
+                    "add-provider",
+                    "custom-provider",
+                    "--style",
+                    "openai",
+                    "--base-url",
+                    "https://api.custom.com/v1",
+                ],
+                testCtx.env,
             );
             expect(exitCode).toBe(0);
 
@@ -157,8 +167,18 @@ describe("bundled CLI model commands", () => {
 
             // Add a model
             const { exitCode } = runCLI(
-                ["model", "add", "custom/my-model", "--name", "My Custom Model", "--context-window", "100000", "--max-tokens", "4000"],
-                testCtx.env
+                [
+                    "model",
+                    "add",
+                    "custom/my-model",
+                    "--name",
+                    "My Custom Model",
+                    "--context-window",
+                    "100000",
+                    "--max-tokens",
+                    "4000",
+                ],
+                testCtx.env,
             );
             expect(exitCode).toBe(0);
 

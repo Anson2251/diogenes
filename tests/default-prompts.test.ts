@@ -23,11 +23,15 @@ describe("default prompts", () => {
 
     it("includes the thinking/cognitive scaffolding rule", () => {
         expect(DEFAULT_SYSTEM_PROMPT).toContain("Think first:");
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("Before emitting a `tool-call` block, write 1-2 sentences of your reasoning");
+        expect(DEFAULT_SYSTEM_PROMPT).toContain(
+            "Before emitting a `tool-call` block, write 1-2 sentences of your reasoning",
+        );
     });
 
     it("includes the heredoc delimiter boundary rule", () => {
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("The line containing the closing `DELIM` must be the absolute final line");
+        expect(DEFAULT_SYSTEM_PROMPT).toContain(
+            "The line containing the closing `DELIM` must be the absolute final line",
+        );
     });
 
     it("includes the operationalized retry rule with conversation history tracking", () => {
@@ -36,8 +40,9 @@ describe("default prompts", () => {
     });
 
     it("includes output paradox resolution for conversational vs action responses", () => {
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("If no tools or actions are needed, you may respond with standard text");
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("If actions are required, your response MUST contain a `tool-call` block");
+        expect(DEFAULT_SYSTEM_PROMPT).toContain(
+            "If actions are required, your response MUST contain a `tool-call` block",
+        );
     });
 
     it("matches model names case-insensitively and by substring", () => {

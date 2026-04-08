@@ -81,7 +81,8 @@ export class FileSymbolsTool extends BaseTool<typeof fileSymbolsSchema> {
             return undefined;
         }
 
-        const language = typeof result.data.language === "string" ? result.data.language : "unknown";
+        const language =
+            typeof result.data.language === "string" ? result.data.language : "unknown";
         const lines = result.data.symbols
             .map((symbol) => toFormattedSymbolLine(symbol))
             .filter((line): line is string => line !== null);

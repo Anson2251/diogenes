@@ -1,7 +1,7 @@
+import { execSync } from "child_process";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
-import { execSync } from "child_process";
 
 export const BUNDLE_CLI = path.resolve(__dirname, "../../bundle/cli.cjs");
 export const BUNDLE_ACP = path.resolve(__dirname, "../../bundle/acp-server.cjs");
@@ -35,7 +35,10 @@ export function escapeArg(arg: string): string {
     return arg;
 }
 
-export function runCLI(args: string[], env: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } {
+export function runCLI(
+    args: string[],
+    env: NodeJS.ProcessEnv,
+): { stdout: string; stderr: string; exitCode: number } {
     try {
         const escapedArgs = args.map(escapeArg).join(" ");
         const stdout = execSync(`node ${BUNDLE_CLI} ${escapedArgs}`, {
@@ -54,7 +57,10 @@ export function runCLI(args: string[], env: NodeJS.ProcessEnv): { stdout: string
     }
 }
 
-export function runACP(args: string[], env: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } {
+export function runACP(
+    args: string[],
+    env: NodeJS.ProcessEnv,
+): { stdout: string; stderr: string; exitCode: number } {
     try {
         const escapedArgs = args.map(escapeArg).join(" ");
         const stdout = execSync(`node ${BUNDLE_ACP} ${escapedArgs}`, {

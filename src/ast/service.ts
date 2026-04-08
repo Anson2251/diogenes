@@ -1,10 +1,15 @@
-import * as fs from "fs";
-import * as path from "path";
-
 import type { Node } from "web-tree-sitter";
 import type * as WebTreeSitter from "web-tree-sitter";
 
+import * as fs from "fs";
+import * as path from "path";
+
 import type { AstCacheEntry } from "./cache";
+
+import {
+    TreeSitterAssetManager,
+    type ManagedGrammarStatus,
+} from "../utils/tree-sitter-asset-manager";
 import { getAstLanguageForFilePath, type AstLanguageId } from "./languages";
 import {
     extractSymbols,
@@ -13,10 +18,6 @@ import {
     type AstPosition,
     type AstSymbol,
 } from "./symbols";
-import {
-    TreeSitterAssetManager,
-    type ManagedGrammarStatus,
-} from "../utils/tree-sitter-asset-manager";
 
 export type AstGrammarAvailability = "available" | "missing" | "unsupported" | "failed";
 
@@ -100,13 +101,11 @@ export class AstService {
         return extractSymbols(entry.language, filePath, entry.tree.rootNode);
     }
 
-    async findSymbol(
-        filePath: string,
-        name: string,
-        kind?: string,
-    ): Promise<AstSymbolMatchResult> {
+    async findSymbol(filePath: string, name: string, kind?: string): Promise<AstSymbolMatchResult> {
         const symbols = await this.listSymbols(filePath);
-        const matches = symbols.filter((symbol) => symbol.name === name && (!kind || symbol.kind === kind));
+        const matches = symbols.filter(
+            (symbol) => symbol.name === name && (!kind || symbol.kind === kind),
+        );
 
         if (matches.length === 0) {
             return { status: "missing" };
@@ -147,7 +146,10 @@ export class AstService {
     private async getOrParseFile(filePath: string): Promise<AstCacheEntry> {
         const language = this.getSupportedLanguageForPath(filePath);
         if (!language) {
-            throw new AstServiceError("AST_UNSUPPORTED_LANGUAGE", `AST is not supported for ${filePath}`);
+            throw new AstServiceError(
+                "AST_UNSUPPORTED_LANGUAGE",
+                `AST is not supported for ${filePath}`,
+            );
         }
 
         const absolutePath = path.resolve(filePath);

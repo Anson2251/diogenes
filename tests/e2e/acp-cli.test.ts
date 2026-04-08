@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import {
-    setupTestHome,
-    teardownTestHome,
-    runACP,
-    type TestContext,
-} from "./helpers";
+
+import { setupTestHome, teardownTestHome, runACP, type TestContext } from "./helpers";
 
 describe("bundled ACP CLI e2e", () => {
     let testCtx: TestContext;

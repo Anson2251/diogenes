@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-    setupTestHome,
-    teardownTestHome,
-    runCLI,
-    type TestContext,
-} from "./helpers";
+
+import { setupTestHome, teardownTestHome, runCLI, type TestContext } from "./helpers";
 
 describe("bundled CLI session commands", () => {
     let testCtx: TestContext;
@@ -30,13 +26,19 @@ describe("bundled CLI session commands", () => {
 
     describe("session get errors", () => {
         it("should show error for unknown session", async () => {
-            const { stderr, exitCode } = runCLI(["session", "get", "unknown-session-id"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["session", "get", "unknown-session-id"],
+                testCtx.env,
+            );
             expect(exitCode).not.toBe(0);
             expect(stderr).toContain("Unknown managed session");
         });
 
         it("should show error for unknown session snapshots", async () => {
-            const { stderr, exitCode } = runCLI(["session", "snapshots", "unknown-session-id"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["session", "snapshots", "unknown-session-id"],
+                testCtx.env,
+            );
             expect(exitCode).not.toBe(0);
             expect(stderr).toContain("Unknown managed session");
         });

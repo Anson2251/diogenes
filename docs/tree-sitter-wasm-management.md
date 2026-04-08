@@ -109,7 +109,7 @@ const TREE_SITTER_WASMS_PACKAGE = "tree-sitter-wasms";
 const TREE_SITTER_WASMS_VERSION = "0.1.13";
 const TREE_SITTER_WASMS_SOURCE_BASE_URLS = [
   `https://unpkg.com/${TREE_SITTER_WASMS_PACKAGE}@${TREE_SITTER_WASMS_VERSION}/out`,
-  `https://npm.elemecdn.com/${TREE_SITTER_WASMS_PACKAGE}@${TREE_SITTER_WASMS_VERSION}/out`
+  `https://npm.elemecdn.com/${TREE_SITTER_WASMS_PACKAGE}@${TREE_SITTER_WASMS_VERSION}/out`,
 ];
 ```
 
@@ -171,29 +171,29 @@ Example entries:
     fileName: "tree-sitter-javascript.wasm",
     sourceUrls: [
       "https://unpkg.com/tree-sitter-wasms@0.1.13/out/tree-sitter-javascript.wasm",
-      "https://npm.elemecdn.com/tree-sitter-wasms@0.1.13/out/tree-sitter-javascript.wasm"
+      "https://npm.elemecdn.com/tree-sitter-wasms@0.1.13/out/tree-sitter-javascript.wasm",
     ],
-    extensions: [".js", ".jsx", ".mjs", ".cjs"]
+    extensions: [".js", ".jsx", ".mjs", ".cjs"],
   },
   {
     language: "typescript",
     fileName: "tree-sitter-typescript.wasm",
     sourceUrls: [
       "https://unpkg.com/tree-sitter-wasms@0.1.13/out/tree-sitter-typescript.wasm",
-      "https://npm.elemecdn.com/tree-sitter-wasms@0.1.13/out/tree-sitter-typescript.wasm"
+      "https://npm.elemecdn.com/tree-sitter-wasms@0.1.13/out/tree-sitter-typescript.wasm",
     ],
-    extensions: [".ts", ".mts", ".cts"]
+    extensions: [".ts", ".mts", ".cts"],
   },
   {
     language: "tsx",
     fileName: "tree-sitter-tsx.wasm",
     sourceUrls: [
       "https://unpkg.com/tree-sitter-wasms@0.1.13/out/tree-sitter-tsx.wasm",
-      "https://npm.elemecdn.com/tree-sitter-wasms@0.1.13/out/tree-sitter-tsx.wasm"
+      "https://npm.elemecdn.com/tree-sitter-wasms@0.1.13/out/tree-sitter-tsx.wasm",
     ],
-    extensions: [".tsx"]
-  }
-]
+    extensions: [".tsx"],
+  },
+];
 ```
 
 This registry should be internal and owned by the runtime, not by the model.

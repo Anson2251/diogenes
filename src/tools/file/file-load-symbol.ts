@@ -61,11 +61,15 @@ export class FileLoadSymbolTool extends BaseTool<typeof fileLoadSymbolSchema> {
 
             const match = await this.astService.findSymbol(absolutePath, name, kind);
             if (match.status === "missing") {
-                return this.error("AST_SYMBOL_NOT_FOUND", `Symbol '${name}' not found in ${filePath}`, {
-                    path: filePath,
-                    name,
-                    kind,
-                });
+                return this.error(
+                    "AST_SYMBOL_NOT_FOUND",
+                    `Symbol '${name}' not found in ${filePath}`,
+                    {
+                        path: filePath,
+                        name,
+                        kind,
+                    },
+                );
             }
             if (match.status === "ambiguous") {
                 return this.error(
@@ -86,7 +90,11 @@ export class FileLoadSymbolTool extends BaseTool<typeof fileLoadSymbolSchema> {
             }
 
             const symbol = match.symbol!;
-            const entry = await this.workspace.loadFile(filePath, symbol.range.start, symbol.range.end);
+            const entry = await this.workspace.loadFile(
+                filePath,
+                symbol.range.start,
+                symbol.range.end,
+            );
 
             return this.success({
                 language,

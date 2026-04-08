@@ -39,7 +39,11 @@ export interface AstService {
   getGrammarStatus(language: AstLanguageId): Promise<AstGrammarStatus>;
   parseFile(filePath: string): Promise<ParsedAstFile>;
   listSymbols(filePath: string, options?: ListSymbolsOptions): Promise<AstSymbol[]>;
-  findSymbol(filePath: string, name: string, options?: FindSymbolOptions): Promise<AstSymbolMatchResult>;
+  findSymbol(
+    filePath: string,
+    name: string,
+    options?: FindSymbolOptions,
+  ): Promise<AstSymbolMatchResult>;
   getNodeAt(filePath: string, position: AstPosition): Promise<AstNodeLookupResult>;
 }
 ```
@@ -151,11 +155,7 @@ export interface AstSymbol {
 ### Grammar status
 
 ```ts
-export type AstGrammarAvailability =
-  | "available"
-  | "missing"
-  | "unsupported"
-  | "failed";
+export type AstGrammarAvailability = "available" | "missing" | "unsupported" | "failed";
 
 export interface AstGrammarStatus {
   language: AstLanguageId;
@@ -177,13 +177,16 @@ export interface TreeSitterManifest {
   version: number;
   package: string;
   packageVersion: string;
-  grammars: Record<string, {
-    file: string;
-    sourceUrl: string;
-    sourceHost: string;
-    downloadedAt: string;
-    size: number;
-  }>;
+  grammars: Record<
+    string,
+    {
+      file: string;
+      sourceUrl: string;
+      sourceHost: string;
+      downloadedAt: string;
+      size: number;
+    }
+  >;
 }
 ```
 
@@ -443,7 +446,7 @@ The public tool layer should remain stable even if the internal parser implement
     start: number;
     end: number;
     text_preview: string;
-  };
+  }
   parents: Array<{
     type: string;
     start: number;

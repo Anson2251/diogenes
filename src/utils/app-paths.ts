@@ -50,6 +50,8 @@ export function resolveDiogenesAppPaths(options: ResolveOptions = {}): DiogenesA
 
 export function ensureDiogenesAppDirsSync(options: ResolveOptions = {}): DiogenesAppPaths {
     const paths = resolveDiogenesAppPaths(options);
+    // Ensure home directory exists first (needed when home is a temp dir in tests)
+    fs.mkdirSync(paths.homeDir, { recursive: true });
     fs.mkdirSync(paths.configDir, { recursive: true });
     fs.mkdirSync(paths.dataDir, { recursive: true });
     fs.mkdirSync(paths.sessionsDir, { recursive: true });
@@ -62,11 +64,28 @@ export async function ensureDiogenesAppDirs(
     options: ResolveOptions = {},
 ): Promise<DiogenesAppPaths> {
     const paths = resolveDiogenesAppPaths(options);
-    await fs.promises.mkdir(paths.configDir, { recursive: true });
-    await fs.promises.mkdir(paths.dataDir, { recursive: true });
-    await fs.promises.mkdir(paths.sessionsDir, { recursive: true });
-    await fs.promises.mkdir(paths.treeSitterDir, { recursive: true });
-    await fs.promises.mkdir(paths.treeSitterGrammarsDir, { recursive: true });
+    try {
+        // Ensure home directory exists first (needed when home is a temp dir in tests)
+        await fs.promises.mkdir(paths.homeDir, { recursive: true });
+        await fs.promises.mkdir(paths.configDir, { recursive: true });
+        await fs.promises.mkdir(paths.dataDir, { recursive: true });
+        await fs.promises.mkdir(paths.sessionsDir, { recursive: true });
+        await fs.promises.mkdir(paths.treeSitterDir, { recursive: true });
+        await fs.promises.mkdir(paths.treeSitterGrammarsDir, { recursive: true });
+    } catch (error) {
+        // Ignore ENOENT errors that can occur during test cleanup race conditions
+        // when the home directory is deleted while async operations are in flight
+        if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ENOENT"
+        ) {
+            // Silently ignore ENOENT errors from race conditions
+        } else {
+            throw error;
+        }
+    }
     return paths;
 }
 

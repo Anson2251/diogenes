@@ -1,13 +1,9 @@
+import * as fs from "fs/promises";
+import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as yaml from "yaml";
-import * as path from "path";
-import * as fs from "fs/promises";
-import {
-    setupTestHome,
-    teardownTestHome,
-    runCLI,
-    type TestContext,
-} from "./helpers";
+
+import { setupTestHome, teardownTestHome, runCLI, type TestContext } from "./helpers";
 
 describe("bundled CLI model edge cases", () => {
     let testCtx: TestContext;
@@ -25,7 +21,10 @@ describe("bundled CLI model edge cases", () => {
 
     describe("invalid model commands", () => {
         it("should reject setting default to non-existent model", async () => {
-            const { stderr, exitCode } = runCLI(["model", "default", "fake/nonexistent"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["model", "default", "fake/nonexistent"],
+                testCtx.env,
+            );
             expect(exitCode).toBe(1);
             expect(stderr).toContain("Unknown model");
             expect(stderr).toContain("Available models:");
@@ -55,7 +54,10 @@ describe("bundled CLI model edge cases", () => {
 
         it("should reject duplicate provider", async () => {
             runCLI(["model", "add-provider", "custom", "--style", "openai"], testCtx.env);
-            const { stderr, exitCode } = runCLI(["model", "add-provider", "custom", "--style", "openai"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["model", "add-provider", "custom", "--style", "openai"],
+                testCtx.env,
+            );
             expect(exitCode).toBe(1);
             expect(stderr).toContain("already exists");
         });
@@ -63,25 +65,37 @@ describe("bundled CLI model edge cases", () => {
         it("should reject duplicate model under same provider", async () => {
             runCLI(["model", "add-provider", "custom", "--style", "openai"], testCtx.env);
             runCLI(["model", "add", "custom/my-model", "--name", "My Model"], testCtx.env);
-            const { stderr, exitCode } = runCLI(["model", "add", "custom/my-model", "--name", "Duplicate"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["model", "add", "custom/my-model", "--name", "Duplicate"],
+                testCtx.env,
+            );
             expect(exitCode).toBe(1);
             expect(stderr).toContain("already exists");
         });
 
         it("should reject model with invalid format (no slash)", async () => {
-            const { stderr, exitCode } = runCLI(["model", "add", "invalid-model-name", "--name", "Test"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["model", "add", "invalid-model-name", "--name", "Test"],
+                testCtx.env,
+            );
             expect(exitCode).toBe(1);
             expect(stderr).toContain("Unknown provider");
         });
 
         it("should reject model with empty provider name", async () => {
-            const { stderr, exitCode } = runCLI(["model", "add", "/model-name", "--name", "Test"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["model", "add", "/model-name", "--name", "Test"],
+                testCtx.env,
+            );
             expect(exitCode).toBe(1);
             expect(stderr).toContain("Unknown provider");
         });
 
         it("should reject model with empty model name", async () => {
-            const { stderr, exitCode } = runCLI(["model", "add", "provider/", "--name", "Test"], testCtx.env);
+            const { stderr, exitCode } = runCLI(
+                ["model", "add", "provider/", "--name", "Test"],
+                testCtx.env,
+            );
             expect(exitCode).toBe(1);
             expect(stderr).toContain("Unknown provider");
         });
@@ -90,9 +104,34 @@ describe("bundled CLI model edge cases", () => {
     describe("model persistence edge cases", () => {
         it("should preserve models.yaml structure after multiple modifications", async () => {
             // Add provider and model
-            runCLI(["model", "add-provider", "custom1", "--style", "openai", "--base-url", "https://api1.com"], testCtx.env);
-            runCLI(["model", "add", "custom1/model-a", "--name", "Model A", "--context-window", "100000"], testCtx.env);
-            runCLI(["model", "add", "custom1/model-b", "--name", "Model B", "--max-tokens", "4096"], testCtx.env);
+            runCLI(
+                [
+                    "model",
+                    "add-provider",
+                    "custom1",
+                    "--style",
+                    "openai",
+                    "--base-url",
+                    "https://api1.com",
+                ],
+                testCtx.env,
+            );
+            runCLI(
+                [
+                    "model",
+                    "add",
+                    "custom1/model-a",
+                    "--name",
+                    "Model A",
+                    "--context-window",
+                    "100000",
+                ],
+                testCtx.env,
+            );
+            runCLI(
+                ["model", "add", "custom1/model-b", "--name", "Model B", "--max-tokens", "4096"],
+                testCtx.env,
+            );
 
             // Set and clear default multiple times
             runCLI(["model", "default", "custom1/model-a"], testCtx.env);
@@ -128,7 +167,10 @@ describe("bundled CLI model edge cases", () => {
     describe("provider configuration edge cases", () => {
         it("should handle provider with very long name", async () => {
             const longName = "a".repeat(100);
-            const { exitCode } = runCLI(["model", "add-provider", longName, "--style", "openai"], testCtx.env);
+            const { exitCode } = runCLI(
+                ["model", "add-provider", longName, "--style", "openai"],
+                testCtx.env,
+            );
             expect(exitCode).toBe(0);
 
             // Verify it was added
@@ -140,8 +182,16 @@ describe("bundled CLI model edge cases", () => {
 
         it("should handle provider with special characters in base URL", async () => {
             const { exitCode } = runCLI(
-                ["model", "add-provider", "custom", "--style", "openai", "--base-url", "https://api.example.com/v1?param=value"],
-                testCtx.env
+                [
+                    "model",
+                    "add-provider",
+                    "custom",
+                    "--style",
+                    "openai",
+                    "--base-url",
+                    "https://api.example.com/v1?param=value",
+                ],
+                testCtx.env,
             );
             expect(exitCode).toBe(0);
 
@@ -154,8 +204,16 @@ describe("bundled CLI model edge cases", () => {
         it("should handle model with zero context window", async () => {
             runCLI(["model", "add-provider", "custom", "--style", "openai"], testCtx.env);
             const { exitCode } = runCLI(
-                ["model", "add", "custom/zero-context", "--name", "Zero Context", "--context-window", "0"],
-                testCtx.env
+                [
+                    "model",
+                    "add",
+                    "custom/zero-context",
+                    "--name",
+                    "Zero Context",
+                    "--context-window",
+                    "0",
+                ],
+                testCtx.env,
             );
             expect(exitCode).toBe(0);
 
@@ -168,8 +226,16 @@ describe("bundled CLI model edge cases", () => {
         it("should handle model with very large context window", async () => {
             runCLI(["model", "add-provider", "custom", "--style", "openai"], testCtx.env);
             const { exitCode } = runCLI(
-                ["model", "add", "custom/huge-context", "--name", "Huge Context", "--context-window", "999999999"],
-                testCtx.env
+                [
+                    "model",
+                    "add",
+                    "custom/huge-context",
+                    "--name",
+                    "Huge Context",
+                    "--context-window",
+                    "999999999",
+                ],
+                testCtx.env,
             );
             expect(exitCode).toBe(0);
 
@@ -183,8 +249,16 @@ describe("bundled CLI model edge cases", () => {
             runCLI(["model", "add-provider", "custom", "--style", "openai"], testCtx.env);
             // Temperature outside valid range (0-2)
             const { exitCode } = runCLI(
-                ["model", "add", "custom/invalid-temp", "--name", "Invalid Temp", "--temperature", "5.0"],
-                testCtx.env
+                [
+                    "model",
+                    "add",
+                    "custom/invalid-temp",
+                    "--name",
+                    "Invalid Temp",
+                    "--temperature",
+                    "5.0",
+                ],
+                testCtx.env,
             );
             // Should accept but store the value (validation happens at runtime)
             expect(exitCode).toBe(0);
@@ -199,13 +273,16 @@ describe("bundled CLI model edge cases", () => {
             const results = [];
             for (let i = 0; i < 5; i++) {
                 results.push(
-                    runCLI(["model", "add", `custom/model-${i}`, "--name", `Model ${i}`], testCtx.env)
+                    runCLI(
+                        ["model", "add", `custom/model-${i}`, "--name", `Model ${i}`],
+                        testCtx.env,
+                    ),
                 );
             }
 
             // All should succeed
             const resolved = results;
-            resolved.forEach(result => {
+            resolved.forEach((result) => {
                 expect(result.exitCode).toBe(0);
             });
 
@@ -248,7 +325,10 @@ describe("bundled CLI session edge cases", () => {
 
     it("should handle deleting non-existent session gracefully", async () => {
         // CLI may exit 0 even for non-existent sessions (idempotent behavior)
-        const { stderr, exitCode } = runCLI(["session", "delete", "nonexistent-session-12345"], testCtx.env);
+        const { stderr, exitCode } = runCLI(
+            ["session", "delete", "nonexistent-session-12345"],
+            testCtx.env,
+        );
         // Should either succeed silently or show error
         if (exitCode !== 0) {
             expect(stderr).toContain("Unknown managed session");
@@ -317,7 +397,10 @@ describe("bundled CLI CLI option validation", () => {
 
     it("should reject invalid --max-iterations value", async () => {
         // This would be caught during task execution, not parsing
-        const { stderr, exitCode } = runCLI(["run", "--max-iterations", "invalid", "test"], testCtx.env);
+        const { stderr, exitCode } = runCLI(
+            ["run", "--max-iterations", "invalid", "test"],
+            testCtx.env,
+        );
         // Should fail due to missing API key, not parsing error
         expect(exitCode).not.toBe(0);
     });

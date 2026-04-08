@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-
 import { z } from "zod";
 
 import { ensureDiogenesAppDirs, type DiogenesAppPaths } from "./app-paths";
@@ -106,7 +105,8 @@ const MANAGED_GRAMMARS: Record<ManagedGrammarLanguage, ManagedGrammarDefinition>
 export class TreeSitterAssetManager {
     private readonly fetchImpl: typeof fetch;
     private readonly appPathsPromise: Promise<DiogenesAppPaths>;
-    private readonly inFlight: Map<ManagedGrammarLanguage, Promise<ManagedGrammarStatus>> = new Map();
+    private readonly inFlight: Map<ManagedGrammarLanguage, Promise<ManagedGrammarStatus>> =
+        new Map();
 
     constructor(options: TreeSitterAssetManagerOptions = {}) {
         this.fetchImpl = options.fetchImpl ?? fetch;
@@ -126,8 +126,9 @@ export class TreeSitterAssetManager {
     getGrammarForExtension(extension: string): ManagedGrammarDefinition | null {
         const normalized = extension.toLowerCase();
         return (
-            Object.values(MANAGED_GRAMMARS).find((grammar) => grammar.extensions.includes(normalized)) ??
-            null
+            Object.values(MANAGED_GRAMMARS).find((grammar) =>
+                grammar.extensions.includes(normalized),
+            ) ?? null
         );
     }
 
@@ -174,7 +175,9 @@ export class TreeSitterAssetManager {
         }
     }
 
-    private async ensureGrammarInternal(language: ManagedGrammarLanguage): Promise<ManagedGrammarStatus> {
+    private async ensureGrammarInternal(
+        language: ManagedGrammarLanguage,
+    ): Promise<ManagedGrammarStatus> {
         await this.ensureStorageReady();
 
         const grammar = MANAGED_GRAMMARS[language];
