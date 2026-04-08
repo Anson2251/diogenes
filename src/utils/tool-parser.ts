@@ -99,14 +99,18 @@ const VALID_TOOL_NAMES = new Set([
     "file.peek",
     "file.create",
     "file.overwrite",
+    "file.remove",
+    "file.symbols",
+    "file.load_symbol",
+    "file.node_at",
     "todo.set",
     "todo.update",
     "task.ask",
     "task.choose",
     "task.notepad",
+    "task.end",
     "shell.exec",
     "snapshot.create",
-    "task.end",
 ]);
 
 // Check if tool name is valid

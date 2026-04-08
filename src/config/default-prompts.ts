@@ -425,15 +425,6 @@ export const DEFAULT_SECURITY_CONFIG = {
     },
 };
 
-export const DEFAULT_LLM_CONFIG = {
-    apiKey: "",
-    baseURL: "https://api.openai.com/v1",
-    model: "gpt-4",
-    timeout: 30000,
-    temperature: 0.7,
-    maxTokens: undefined,
-};
-
 export const DEFAULT_LOGGER_CONFIG = {
     level: "info" as const,
     style: "console" as const,
@@ -480,7 +471,10 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
     "deepseek-chat": 65536,
 };
 
-export function getContextWindowForModel(model: string): number | undefined {
+export function getContextWindowForModel(model: string | undefined): number | undefined {
+    if (!model) {
+        return undefined;
+    }
     const normalizedModel = model.toLowerCase().trim();
 
     if (MODEL_CONTEXT_WINDOWS[normalizedModel]) {

@@ -212,7 +212,7 @@ export interface LoggerConfig {
 export type LLMProviderStyle = "openai" | "anthropic";
 
 export interface LLMConfig {
-    apiKey: string;
+    apiKey?: string;
     baseURL?: string;
     model?: string;
     timeout?: number;

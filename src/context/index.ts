@@ -9,7 +9,6 @@ import type { StreamChunk, LLMClient } from "../llm/anthropic-client";
 import {
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_SECURITY_CONFIG,
-    DEFAULT_LLM_CONFIG,
     DEFAULT_LOGGER_CONFIG,
     DEFAULT_TOKEN_LIMIT,
     getContextWindowForModel,
@@ -80,12 +79,11 @@ export class DiogenesContextManager {
         return new OpenAIClient(config);
     }
     private mergeWithDefaults(config: DiogenesConfig): Required<DiogenesConfig> {
-        const model = config.llm?.model || DEFAULT_LLM_CONFIG.model;
+        const model = config.llm?.model;
         const modelContextWindow = getContextWindowForModel(model);
         const tokenLimit = config.tokenLimit || modelContextWindow || DEFAULT_TOKEN_LIMIT;
 
         const llmConfig: LLMConfig = {
-            ...DEFAULT_LLM_CONFIG,
             ...config.llm,
         };
 

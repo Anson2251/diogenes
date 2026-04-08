@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
 
-import { DEFAULT_LLM_CONFIG, DEFAULT_SECURITY_CONFIG } from "../config/default-prompts";
+import { DEFAULT_SECURITY_CONFIG } from "../config/default-prompts";
 import {
     ensureDiogenesAppDirsSync,
     findDefaultConfigFileSync,
@@ -18,10 +18,6 @@ export function ensureDefaultConfigFileSync(): string {
 
     const configPath = path.join(appPaths.configDir, "config.yaml");
     const defaultConfig = {
-        llm: {
-            model: DEFAULT_LLM_CONFIG.model,
-            baseURL: DEFAULT_LLM_CONFIG.baseURL,
-        },
         security: {
             snapshot: {
                 enabled: DEFAULT_SECURITY_CONFIG.snapshot.enabled,
@@ -32,9 +28,10 @@ export function ensureDefaultConfigFileSync(): string {
     };
 
     const banner = [
-        "# Diogenes default configuration",
+        "# Diogenes configuration",
         "# Generated automatically on first run.",
-        "# Add OPENAI_API_KEY in your shell environment or .env file.",
+        "# Use 'diogenes model use <provider/model>' to set the active model.",
+        "# Use 'diogenes model default <provider/model>' to set the fallback default model.",
         "",
     ].join("\n");
 

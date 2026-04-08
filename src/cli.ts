@@ -85,6 +85,7 @@ type CLICommand =
     | { kind: "sessions.prune"; dryRun: boolean; tempOnly: boolean }
     | { kind: "models.list" }
     | { kind: "models.default"; model?: string; clear?: boolean }
+    | { kind: "models.use"; model?: string; clear?: boolean }
     | { kind: "models.path" }
     | { kind: "models.providers" }
     | { kind: "models.show"; model: string }
@@ -261,11 +262,18 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
             command = { kind: "models.list" };
         });
     models
-        .command("default [model]")
-        .summary("Get or set the default model")
+        .command("default [provider]/[model]")
+        .summary("Get or set the fallback default model (in models.yaml)")
         .option("--clear", "Clear the configured default model")
         .action((model?: string, subOptions?: { clear?: boolean }) => {
             command = { kind: "models.default", model, clear: Boolean(subOptions?.clear) };
+        });
+    models
+        .command("use [provider]/[model]")
+        .summary("Get or set the active model (in config.yaml)")
+        .option("--clear", "Clear the active model (will use default)")
+        .action((model?: string, subOptions?: { clear?: boolean }) => {
+            command = { kind: "models.use", model, clear: Boolean(subOptions?.clear) };
         });
     models
         .command("path")
@@ -316,7 +324,7 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
             },
         );
     models
-        .command("add <model>")
+        .command("add <provider>/<model>")
         .summary("Add a model definition under an existing provider")
         .requiredOption("--name <name>", "Human-readable model name")
         .option("--description <text>", "Model description")
@@ -1251,6 +1259,7 @@ async function handleCommand(
     if (
         command.kind === "models.list" ||
         command.kind === "models.default" ||
+        command.kind === "models.use" ||
         command.kind === "models.path" ||
         command.kind === "models.providers" ||
         command.kind === "models.show" ||
@@ -1626,6 +1635,7 @@ function handleModelsCommand(
             kind:
                 | "models.list"
                 | "models.default"
+                | "models.use"
                 | "models.path"
                 | "models.providers"
                 | "models.show"
@@ -1734,6 +1744,45 @@ function handleModelsCommand(
                     console.log(modelsConfig.default);
                 } else {
                     console.log(`${colors.yellow}No default model configured${colors.reset}`);
+                }
+            }
+            return;
+        }
+        case "models.use": {
+            const configPath = ensureDefaultConfigFileSync();
+            const fileConfig = loadConfig(configPath);
+
+            if (command.clear) {
+                if (fileConfig.llm) {
+                    delete fileConfig.llm;
+                    fs.writeFileSync(configPath, yaml.stringify(fileConfig), "utf8");
+                }
+                console.log(`${colors.green}Active model cleared${colors.reset}`);
+                if (modelsConfig.default) {
+                    console.log(`${colors.dim}Will use default: ${modelsConfig.default}${colors.reset}`);
+                }
+            } else if (command.model) {
+                const available = listAvailableModels(modelsConfig);
+                if (!available.includes(command.model)) {
+                    console.error(
+                        `${colors.red}Error: Unknown model: ${command.model}${colors.reset}`,
+                    );
+                    console.error(
+                        `${colors.dim}Available models: ${available.join(", ")}${colors.reset}`,
+                    );
+                    process.exit(1);
+                }
+                fileConfig.llm = { model: command.model };
+                fs.writeFileSync(configPath, yaml.stringify(fileConfig), "utf8");
+                console.log(`${colors.green}Active model set to: ${command.model}${colors.reset}`);
+            } else {
+                if (fileConfig.llm?.model) {
+                    console.log(fileConfig.llm.model);
+                } else {
+                    console.log(`${colors.yellow}No active model set${colors.reset}`);
+                    if (modelsConfig.default) {
+                        console.log(`${colors.dim}Will use default: ${modelsConfig.default}${colors.reset}`);
+                    }
                 }
             }
             return;

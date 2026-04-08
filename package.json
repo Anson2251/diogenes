@@ -10,6 +10,7 @@
   ],
   "license": "MIT",
   "author": "",
+  "type": "commonjs",
   "bin": {
     "diogenes": "dist/cli.js",
     "diogenes-acp": "dist/acp-cli.js"
