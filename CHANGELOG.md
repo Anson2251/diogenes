@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project currently tracks alpha-stage releases.
 
+## [0.1.0-alpha.3] - 2026-04-09
+
+### Added
+
+- Tree-sitter AST navigation tools and AST-backed file exploration flows
+- Comprehensive bundled CLI e2e coverage, including command parsing, model flows, and session flows
+- Unified ACP command surface on the main CLI: `diogenes acp`, `diogenes acp init`, `diogenes acp doctor`
+- ACP stdio debug mirroring via `--debug-stdio-file`
+- ACP e2e coverage for the unified command path (`tests/e2e/acp-command.test.ts`)
+
+### Changed
+
+- Unified ACP and main CLI entrypoints around `src/cli.ts`; ACP now runs through `diogenes acp`
+- ACP options in the main CLI now include `--env-file` and `--debug-stdio-file`
+- Bundling config was split and simplified around the CLI target; release artifacts now publish `bundle/cli.cjs`
+- README and ACP docs were rewritten to use the unified ACP command surface
+- CLI-facing quick-start and setup docs were refreshed for current command behavior
+- Dependencies were updated to current pinned versions
+
+### Fixed
+
+- AST tool registration issues that could prevent AST tools from being available in some runs
+- Redundant LLM config paths in AST-related runtime setup
+- Several CLI user-error output paths now return cleaner, non-stack-trace messages
+
+### Notes
+
+- Breaking change: the dedicated ACP entrypoint has been removed (`diogenes-acp`, `dist/acp-cli.js`, `bundle/acp-server.cjs`)
+- Recommended migration:
+  - `diogenes-acp` -> `diogenes acp`
+  - `diogenes-acp init` -> `diogenes acp init`
+  - `diogenes-acp doctor` -> `diogenes acp doctor`
+  - `node dist/acp-cli.js` -> `node dist/cli.js acp`
+  - `node bundle/acp-server.cjs` -> `node bundle/cli.cjs acp`
+- The legacy `diogenes --acp` flag remains available as a compatibility shortcut
+
 ## [0.1.0-alpha.2] - 2026-04-01
 
 ### Added
