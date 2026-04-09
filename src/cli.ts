@@ -66,7 +66,7 @@ interface CLIOptions {
     workspace?: string;
     resticBinary?: string;
     envFile?: string;
-    debugStdioFile?: string;
+    debugStdioFile?: string | boolean;
     verbose?: boolean;
     maxIterations?: number;
     socratic?: boolean;
@@ -141,7 +141,10 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
         .option("-w, --workspace <path>", "Workspace directory")
         .option("--restic-binary <path>", "Path to the restic binary")
         .option("-e, --env-file <path>", "Env file to load before reading environment variables")
-        .option("--debug-stdio-file <path>", "Mirror ACP stdin/stdout/stderr to a debug log file")
+        .option(
+            "--debug-stdio-file [path]",
+            "Mirror ACP stdin/stdout/stderr to a debug log file (default path when omitted)",
+        )
         .option("-V, --verbose", "Enable verbose output")
         .option("-i, --max-iterations <n>", "Maximum LLM iterations", (value: string) => {
             const parsed = Number.parseInt(value, 10);
@@ -820,6 +823,22 @@ function createDebugStdio(
     };
 }
 
+function resolveDebugStdioFilePath(optionValue: CLIOptions["debugStdioFile"]): string | undefined {
+    if (!optionValue) {
+        return undefined;
+    }
+
+    if (typeof optionValue === "string") {
+        return optionValue;
+    }
+
+    const appPaths = resolveDiogenesAppPaths();
+    const logsDir = path.join(appPaths.dataDir, "logs");
+    fs.mkdirSync(logsDir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[.:]/g, "-");
+    return path.join(logsDir, `acp-stdio-debug-${timestamp}.log`);
+}
+
 async function clearDiogenesAppData(
     question: QuestionFn,
     output: NodeJS.WriteStream = process.stdout,
@@ -1301,9 +1320,10 @@ async function main(): Promise<void> {
         let output: NodeJS.WriteStream | Writable = process.stdout;
         let error: NodeJS.WriteStream | Writable = process.stderr;
 
-        if (options.debugStdioFile) {
+        const debugStdioFilePath = resolveDebugStdioFilePath(options.debugStdioFile);
+        if (debugStdioFilePath) {
             const debugStdio = createDebugStdio(
-                options.debugStdioFile,
+                debugStdioFilePath,
                 process.stdin,
                 process.stdout,
                 process.stderr,
