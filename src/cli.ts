@@ -4,10 +4,9 @@
  * Diogenes CLI - Simple command-line interface for task execution
  */
 
-import { config as loadDotenv } from "dotenv";
-
 import Table from "cli-table3";
 import { Command } from "commander";
+import { config as loadDotenv } from "dotenv";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
@@ -220,20 +219,17 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
     acp.action(() => {
         command = { kind: "acp.server" };
     });
-    acp
-        .command("server")
+    acp.command("server")
         .summary("Start ACP stdio server")
         .action(() => {
             command = { kind: "acp.server" };
         });
-    acp
-        .command("init")
+    acp.command("init")
         .summary("Show ACP setup state and config examples")
         .action(() => {
             command = { kind: "acp.init" };
         });
-    acp
-        .command("doctor")
+    acp.command("doctor")
         .summary("Inspect ACP config, logs, providers, and snapshots")
         .action(() => {
             command = { kind: "acp.doctor" };
@@ -1698,7 +1694,9 @@ function formatACPDoctorSummary(diagnostics: ReturnType<typeof collectSetupDiagn
         diagnostics.snapshot.unavailablePhase
             ? `- phase: ${diagnostics.snapshot.unavailablePhase}`
             : undefined,
-        diagnostics.snapshot.unavailableKind ? `- kind: ${diagnostics.snapshot.unavailableKind}` : undefined,
+        diagnostics.snapshot.unavailableKind
+            ? `- kind: ${diagnostics.snapshot.unavailableKind}`
+            : undefined,
         diagnostics.snapshot.unavailableReason
             ? `- reason: ${diagnostics.snapshot.unavailableReason}`
             : undefined,

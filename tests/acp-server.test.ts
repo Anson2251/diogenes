@@ -1164,9 +1164,13 @@ describe("ACPServer", () => {
             for (let attempt = 0; attempt < 20; attempt++) {
                 const snapshotCount =
                     listResponse && "result" in listResponse
-                        ? (listResponse.result.sessions as Array<{ sessionId: string; _meta?: { diogenes?: { snapshotCount?: number } } }>).find(
-                              (session) => session.sessionId === sessionId,
-                          )?._meta?.diogenes?.snapshotCount
+                        ? (
+                              listResponse.result.sessions as Array<{
+                                  sessionId: string;
+                                  _meta?: { diogenes?: { snapshotCount?: number } };
+                              }>
+                          ).find((session) => session.sessionId === sessionId)?._meta?.diogenes
+                              ?.snapshotCount
                         : undefined;
                 const snapshotsLength =
                     snapshotsResponse && "result" in snapshotsResponse

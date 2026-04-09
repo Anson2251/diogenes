@@ -77,8 +77,14 @@ export function runCLI(
             status?: number;
         };
         return {
-            stdout: typeof execError.stdout === "string" ? execError.stdout : execError.stdout?.toString("utf-8") || "",
-            stderr: typeof execError.stderr === "string" ? execError.stderr : execError.stderr?.toString("utf-8") || "",
+            stdout:
+                typeof execError.stdout === "string"
+                    ? execError.stdout
+                    : execError.stdout?.toString("utf-8") || "",
+            stderr:
+                typeof execError.stderr === "string"
+                    ? execError.stderr
+                    : execError.stderr?.toString("utf-8") || "",
             exitCode: execError.status ?? 1,
         };
     }

@@ -22,7 +22,9 @@ describe("default prompts", () => {
     });
 
     it("keeps tool-calling guidance concise and tool-specific", () => {
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("Tool-specific constraints live in each tool definition");
+        expect(DEFAULT_SYSTEM_PROMPT).toContain(
+            "Tool-specific constraints live in each tool definition",
+        );
         expect(DEFAULT_SYSTEM_PROMPT).not.toContain(
             "Before emitting a `tool-call` block, write 1-2 sentences of your reasoning",
         );

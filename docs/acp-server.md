@@ -302,13 +302,7 @@ If your ACP client accepts a command plus args, prefer one of:
 ```json
 {
   "command": "diogenes",
-  "args": [
-    "acp",
-    "--env-file",
-    "/path/to/.env.acp",
-    "--workspace",
-    "/path/to/repo"
-  ]
+  "args": ["acp", "--env-file", "/path/to/.env.acp", "--workspace", "/path/to/repo"]
 }
 ```
 
