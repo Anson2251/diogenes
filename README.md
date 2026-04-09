@@ -4,7 +4,7 @@ A TypeScript framework for building LLM-driven coding agents with explicit, insp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Status**: Alpha (v0.1.0-alpha.2). Expect API and prompt changes before `1.0.0`.
+> **Status**: Alpha (v0.1.0-alpha.3). Expect API and prompt changes before `1.0.0`.
 
 ## What Diogenes Is
 
