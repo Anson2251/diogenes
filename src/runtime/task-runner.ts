@@ -311,7 +311,7 @@ export async function runTaskLoop(
                 const feedback =
                     iterations > 3
                         ? `[SYSTEM]\nNo tool calls received for ${iterations} iterations.\n\nIf you believe the task is complete, use task.end:\n\`\`\`tool-call\n[{"tool": "task.end", "params": {"reason": "brief summary of why task is done", "summary": "what was accomplished"}}]\n\`\`\`\n\nIf the task is not complete, continue with your next tool call.`
-                        : `[SYSTEM]\nNo tool calls received. Please either:\n1. Continue with tool calls to make progress\n2. Use task.end if you believe the task is complete`;
+                        : `[SYSTEM]\nNo tool calls received. Please either:\n1. Continue with tool calls to make progress\n2. Use task.end if you believe the task is complete\n\nDo not provide demo narration. Respond with a valid tool-call block only when action is needed.`;
 
                 messageHistory.push({
                     role: "user",

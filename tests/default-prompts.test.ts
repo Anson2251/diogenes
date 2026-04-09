@@ -21,16 +21,16 @@ describe("default prompts", () => {
         expect(DEFAULT_SYSTEM_PROMPT).toContain("expose, print, or store secrets");
     });
 
-    it("includes the thinking/cognitive scaffolding rule", () => {
-        expect(DEFAULT_SYSTEM_PROMPT).toContain("Think first:");
-        expect(DEFAULT_SYSTEM_PROMPT).toContain(
+    it("keeps tool-calling guidance concise and tool-specific", () => {
+        expect(DEFAULT_SYSTEM_PROMPT).toContain("Tool-specific constraints live in each tool definition");
+        expect(DEFAULT_SYSTEM_PROMPT).not.toContain(
             "Before emitting a `tool-call` block, write 1-2 sentences of your reasoning",
         );
     });
 
     it("includes the heredoc delimiter boundary rule", () => {
         expect(DEFAULT_SYSTEM_PROMPT).toContain(
-            "The line containing the closing `DELIM` must be the absolute final line",
+            "For multi-line content, prefer heredoc and keep it in the same `tool-call` block.",
         );
     });
 
@@ -42,6 +42,15 @@ describe("default prompts", () => {
     it("includes output paradox resolution for conversational vs action responses", () => {
         expect(DEFAULT_SYSTEM_PROMPT).toContain(
             "If actions are required, your response MUST contain a `tool-call` block",
+        );
+        expect(DEFAULT_SYSTEM_PROMPT).toContain(
+            "Decision rule: if the request can be answered reliably",
+        );
+    });
+
+    it("keeps termination quality gate for task.end summaries", () => {
+        expect(DEFAULT_SYSTEM_PROMPT).toContain(
+            "`summary` must clearly contain one of: outcome, blocker, or the exact next question for the user",
         );
     });
 

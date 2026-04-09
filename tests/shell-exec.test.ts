@@ -21,7 +21,8 @@ describe("ShellExecTool", () => {
 
             expect(def.namespace).toBe("shell");
             expect(def.name).toBe("exec");
-            expect(def.description).toBe("Execute a shell command");
+            expect(def.description).toContain("Execute a shell command");
+            expect(def.description).toContain("most direct way to advance the task");
             expect(def.params.command.type).toBe("string");
             expect(def.params.timeout.optional).toBe(true);
             expect(def.params.cwd.optional).toBe(true);

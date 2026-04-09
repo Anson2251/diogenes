@@ -35,7 +35,12 @@ export class ShellExecTool extends BaseTool<typeof shellExecSchema> {
         super({
             namespace: "shell",
             name: "exec",
-            description: "Execute a shell command",
+            description: `Execute a shell command.
+
+Use this only when shell execution is the most direct way to advance the task.
+- Prefer narrow, deterministic commands over broad exploratory ones
+- Set cwd when needed instead of relying on shell-side directory changes
+- Do not use this tool for demos or capability showcases`,
             params: {
                 command: { type: "string", description: "Command to execute" },
                 cwd: {
