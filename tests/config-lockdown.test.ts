@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { parseArgs as parseAcpCliArgs } from "../src/acp-cli";
 import { parseArgs as parseCliArgs } from "../src/cli";
 
 function withArgv(argv: string[], run: () => void): void {
@@ -35,7 +34,7 @@ describe("config path lockdown", () => {
         expect(errorSpy).toHaveBeenCalled();
     });
 
-    it("rejects --config-file in the ACP CLI", () => {
+    it("rejects --config-file for ACP command", () => {
         const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
             code?: string | number | null,
         ) => {
@@ -43,15 +42,15 @@ describe("config path lockdown", () => {
         }) as never);
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-        withArgv(["node", "diogenes-acp", "--config-file", "/tmp/custom.yaml"], () => {
-            expect(() => parseAcpCliArgs()).toThrow("process.exit:1");
+        withArgv(["node", "diogenes", "acp", "--config-file", "/tmp/custom.yaml"], () => {
+            expect(() => parseCliArgs()).toThrow("process.exit:1");
         });
 
         expect(exitSpy).toHaveBeenCalledWith(1);
         expect(errorSpy).toHaveBeenCalled();
     });
 
-    it("rejects --config in the ACP CLI", () => {
+    it("rejects --config for ACP command", () => {
         const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
             code?: string | number | null,
         ) => {
@@ -59,8 +58,8 @@ describe("config path lockdown", () => {
         }) as never);
         const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-        withArgv(["node", "diogenes-acp", "--config", "/tmp/custom.yaml"], () => {
-            expect(() => parseAcpCliArgs()).toThrow("process.exit:1");
+        withArgv(["node", "diogenes", "acp", "--config", "/tmp/custom.yaml"], () => {
+            expect(() => parseCliArgs()).toThrow("process.exit:1");
         });
 
         expect(exitSpy).toHaveBeenCalledWith(1);

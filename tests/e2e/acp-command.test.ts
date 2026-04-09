@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { setupTestHome, teardownTestHome, runACP, type TestContext } from "./helpers";
+import { setupTestHome, teardownTestHome, runCLI, type TestContext } from "./helpers";
 
-describe("bundled ACP CLI e2e", () => {
+describe("bundled ACP command e2e", () => {
     let testCtx: TestContext;
 
     afterEach(async () => {
@@ -11,19 +11,19 @@ describe("bundled ACP CLI e2e", () => {
         }
     });
 
-    describe("basic ACP CLI commands", () => {
+    describe("basic ACP commands", () => {
         it("should display version", async () => {
             testCtx = await setupTestHome();
-            const { stdout, exitCode } = runACP(["--version"], testCtx.env);
+            const { stdout, exitCode } = runCLI(["--version"], testCtx.env);
             expect(exitCode).toBe(0);
             expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
         });
 
-        it("should display help", async () => {
+        it("should display ACP command help", async () => {
             testCtx = await setupTestHome();
-            const { stdout, exitCode } = runACP(["--help"], testCtx.env);
+            const { stdout, exitCode } = runCLI(["acp", "--help"], testCtx.env);
             expect(exitCode).toBe(0);
-            expect(stdout).toContain("Usage: diogenes-acp");
+            expect(stdout).toContain("Usage: diogenes acp");
             expect(stdout).toContain("init");
             expect(stdout).toContain("doctor");
             expect(stdout).toContain("Environment Variables:");
@@ -34,7 +34,7 @@ describe("bundled ACP CLI e2e", () => {
     describe("ACP init command", () => {
         it("should create config files and show ACP config", async () => {
             testCtx = await setupTestHome();
-            const { stdout, exitCode } = runACP(["init"], testCtx.env);
+            const { stdout, exitCode } = runCLI(["acp", "init"], testCtx.env);
             expect(exitCode).toBe(0);
             expect(stdout).toContain("Diogenes ACP Init");
             expect(stdout).toContain("Config file:");
@@ -50,9 +50,9 @@ describe("bundled ACP CLI e2e", () => {
     describe("ACP doctor command", () => {
         it("should show detailed diagnostics", async () => {
             testCtx = await setupTestHome();
-            runACP(["init"], testCtx.env);
+            runCLI(["acp", "init"], testCtx.env);
 
-            const { stdout, exitCode } = runACP(["doctor"], testCtx.env);
+            const { stdout, exitCode } = runCLI(["acp", "doctor"], testCtx.env);
             expect(exitCode).toBe(0);
             expect(stdout).toContain("Diogenes ACP Doctor");
             expect(stdout).toContain("Config Dir:");

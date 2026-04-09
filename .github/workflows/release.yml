@@ -54,19 +54,15 @@ jobs:
       - name: Build CLI bundle
         run: pnpm bundle
 
-      - name: Build ACP bundle
-        run: pnpm bundle:acp
-
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4
         with:
           name: diogenes-bundles
           path: |
             bundle/cli.cjs
-            bundle/acp-server.cjs
           if-no-files-found: error
 
       - name: Upload assets to GitHub release
-        run: gh release upload "${{ github.event.release.tag_name }}" bundle/cli.cjs bundle/acp-server.cjs --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" bundle/cli.cjs --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

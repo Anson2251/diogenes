@@ -22,13 +22,13 @@ These findings are based on the current implementation in `src/` and the current
 - first run already auto-generates managed `models.yaml`
 - default providers already exist for `openai`, `anthropic`, and `openrouter`
 - CLI and ACP both already use provider-scoped API key resolution
-- ACP already has a dedicated entrypoint through `diogenes-acp`
+- ACP is available through `diogenes acp`
 
 Relevant files:
 
 - `src/utils/config-bootstrap.ts`
 - `src/cli.ts`
-- `src/acp-cli.ts`
+- `src/cli.ts`
 - `src/utils/model-resolver.ts`
 
 ### What is causing friction
@@ -55,7 +55,7 @@ Alpha 0.2 should treat the following as the default happy path:
 
 1. user installs Diogenes
 2. user sets `OPENAI_API_KEY` or another provider key
-3. user runs `diogenes` or connects an editor to `diogenes-acp`
+3. user runs `diogenes` or connects an editor to `diogenes acp`
 4. advanced config stays optional
 
 This release should not try to redesign the runtime, ACP protocol layer, or snapshot architecture. It should focus on setup UX and failure behavior.

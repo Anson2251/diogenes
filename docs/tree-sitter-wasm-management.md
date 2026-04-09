@@ -377,7 +377,7 @@ If a future config option is added for advanced users, it should remain outside 
 The managed grammar cache should be shared by:
 
 - `diogenes`
-- `diogenes-acp`
+- `diogenes acp`
 - any internal runtime path that uses the same app data directory
 
 This means:

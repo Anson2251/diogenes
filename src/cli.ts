@@ -4,15 +4,14 @@
  * Diogenes CLI - Simple command-line interface for task execution
  */
 
-// Load environment variables from .env file
-import { config } from "dotenv";
-config({ quiet: true });
+import { config as loadDotenv } from "dotenv";
 
 import Table from "cli-table3";
 import { Command } from "commander";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
+import { PassThrough, Writable } from "stream";
 import * as yaml from "yaml";
 
 import type { StoredSessionMetadata } from "./acp/types";
@@ -66,6 +65,8 @@ interface CLIOptions {
     baseUrl?: string;
     workspace?: string;
     resticBinary?: string;
+    envFile?: string;
+    debugStdioFile?: string;
     verbose?: boolean;
     maxIterations?: number;
     socratic?: boolean;
@@ -78,6 +79,9 @@ type CLICommand =
     | { kind: "run" }
     | { kind: "init" }
     | { kind: "doctor" }
+    | { kind: "acp.server" }
+    | { kind: "acp.init" }
+    | { kind: "acp.doctor" }
     | { kind: "sessions.list" }
     | { kind: "sessions.get"; sessionId: string }
     | { kind: "sessions.snapshots"; sessionId: string }
@@ -136,6 +140,8 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
         .option("-b, --base-url <url>", "OpenAI-compatible API base URL")
         .option("-w, --workspace <path>", "Workspace directory")
         .option("--restic-binary <path>", "Path to the restic binary")
+        .option("-e, --env-file <path>", "Env file to load before reading environment variables")
+        .option("--debug-stdio-file <path>", "Mirror ACP stdin/stdout/stderr to a debug log file")
         .option("-V, --verbose", "Enable verbose output")
         .option("-i, --max-iterations <n>", "Maximum LLM iterations", (value: string) => {
             const parsed = Number.parseInt(value, 10);
@@ -192,11 +198,31 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
             task = taskParts.join(" ");
         });
 
-    program
+    const acp = program
         .command("acp")
+        .summary("Run ACP stdio server commands")
+        .description("Start ACP server and inspect ACP setup state");
+    acp.addHelpText("after", `\n${formatACPCLIHelp()}`);
+    acp.action(() => {
+        command = { kind: "acp.server" };
+    });
+    acp
+        .command("server")
         .summary("Start ACP stdio server")
         .action(() => {
-            commandOptions.acp = true;
+            command = { kind: "acp.server" };
+        });
+    acp
+        .command("init")
+        .summary("Show ACP setup state and config examples")
+        .action(() => {
+            command = { kind: "acp.init" };
+        });
+    acp
+        .command("doctor")
+        .summary("Inspect ACP config, logs, providers, and snapshots")
+        .action(() => {
+            command = { kind: "acp.doctor" };
         });
 
     program
@@ -386,6 +412,8 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
             baseUrl: commandOptions.baseUrl ?? parsedOptions.baseUrl,
             workspace: commandOptions.workspace ?? parsedOptions.workspace,
             resticBinary: commandOptions.resticBinary ?? parsedOptions.resticBinary,
+            envFile: commandOptions.envFile ?? parsedOptions.envFile,
+            debugStdioFile: commandOptions.debugStdioFile ?? parsedOptions.debugStdioFile,
             verbose: commandOptions.verbose ?? parsedOptions.verbose,
             maxIterations: commandOptions.maxIterations ?? parsedOptions.maxIterations,
             socratic: commandOptions.socratic ?? parsedOptions.socratic,
@@ -705,6 +733,91 @@ function createQuestionFn(rl: readline.Interface): QuestionFn {
         new Promise<string>((resolve) => {
             rl.question(prompt, resolve);
         });
+}
+
+function loadCliEnv(options: CLIOptions): void {
+    if (options.envFile) {
+        loadDotenv({ path: options.envFile });
+        return;
+    }
+
+    const cwdResult = loadDotenv({ quiet: true });
+    if (!cwdResult.parsed) {
+        const projectRoot = path.resolve(__dirname, "..");
+        loadDotenv({ path: path.join(projectRoot, ".env"), quiet: true });
+    }
+}
+
+function formatDebugChunk(
+    streamName: "stdin" | "stdout" | "stderr",
+    chunk: string | Buffer,
+): string {
+    const content = Buffer.isBuffer(chunk) ? chunk.toString("utf-8") : chunk;
+    return `[${new Date().toISOString()}] ${streamName}\n${content}${content.endsWith("\n") ? "" : "\n"}`;
+}
+
+function createDebugInput(input: NodeJS.ReadStream, debugLog: fs.WriteStream): PassThrough {
+    const mirroredInput = new PassThrough();
+
+    input.on("data", (chunk: string | Buffer) => {
+        debugLog.write(formatDebugChunk("stdin", chunk));
+        mirroredInput.write(chunk);
+    });
+    input.on("end", () => mirroredInput.end());
+    input.on("error", (error) => mirroredInput.destroy(error));
+
+    return mirroredInput;
+}
+
+function createDebugOutput(
+    output: NodeJS.WriteStream,
+    debugLog: fs.WriteStream,
+    streamName: "stdout" | "stderr",
+): Writable {
+    const mirroredOutput = new Writable({
+        write(chunk: Uint8Array | string, encoding: BufferEncoding, callback) {
+            const bufferChunk = Buffer.isBuffer(chunk)
+                ? chunk
+                : typeof chunk === "string"
+                  ? Buffer.from(chunk, encoding)
+                  : Buffer.from(chunk);
+            debugLog.write(formatDebugChunk(streamName, bufferChunk));
+
+            output.write(chunk, encoding, (error) => {
+                if (error) {
+                    callback(error);
+                    return;
+                }
+                callback();
+            });
+        },
+    });
+
+    return mirroredOutput;
+}
+
+function createDebugStdio(
+    filePath: string,
+    input: NodeJS.ReadStream,
+    output: NodeJS.WriteStream,
+    error: NodeJS.WriteStream,
+): {
+    input: PassThrough;
+    output: Writable;
+    error: Writable;
+    debugLog: fs.WriteStream;
+} {
+    const resolvedPath = path.resolve(filePath);
+    const debugLog = fs.createWriteStream(resolvedPath, { flags: "a" });
+
+    debugLog.write(`[${new Date().toISOString()}] debug session started\n`);
+
+    return {
+        input: createDebugInput(input, debugLog),
+        output: createDebugOutput(output, debugLog, "stdout"),
+        error: createDebugOutput(error, debugLog, "stderr"),
+        debugLog,
+    };
 }
 
 async function clearDiogenesAppData(
@@ -1148,6 +1261,8 @@ ${colors.bright}Multiline:${colors.reset}
 async function main(): Promise<void> {
     const { task, options, command } = parseArgs();
 
+    loadCliEnv(options);
+
     // Auto-cleanup temporary sessions on startup
     const sessionStore = new SessionStore();
     try {
@@ -1177,16 +1292,37 @@ async function main(): Promise<void> {
         return;
     }
 
-    if (options.acp) {
+    if (options.acp || command.kind === "acp.server") {
         const configPath = ensureDefaultConfigFileSync();
         const config = createConfig(options);
         await ensureSnapshotResticConfigured(config, { configPath });
+
+        let input: NodeJS.ReadStream | PassThrough = process.stdin;
+        let output: NodeJS.WriteStream | Writable = process.stdout;
+        let error: NodeJS.WriteStream | Writable = process.stderr;
+
+        if (options.debugStdioFile) {
+            const debugStdio = createDebugStdio(
+                options.debugStdioFile,
+                process.stdin,
+                process.stdout,
+                process.stderr,
+            );
+            input = debugStdio.input;
+            output = debugStdio.output;
+            error = debugStdio.error;
+
+            process.on("exit", () => {
+                debugStdio.debugLog.end();
+            });
+        }
+
         startACPServer({
             config,
             maxIterations: options.maxIterations || 20,
-            input: process.stdin,
-            output: process.stdout,
-            error: process.stderr,
+            input,
+            output,
+            error,
         });
         return;
     }
@@ -1253,7 +1389,7 @@ async function main(): Promise<void> {
 }
 
 async function handleCommand(
-    command: Exclude<CLICommand, { kind: "run" }>,
+    command: Exclude<CLICommand, { kind: "run" } | { kind: "acp.server" }>,
     options: CLIOptions = {},
 ): Promise<void> {
     if (
@@ -1270,7 +1406,12 @@ async function handleCommand(
         return;
     }
 
-    if (command.kind === "init" || command.kind === "doctor") {
+    if (
+        command.kind === "init" ||
+        command.kind === "doctor" ||
+        command.kind === "acp.init" ||
+        command.kind === "acp.doctor"
+    ) {
         const configPath = ensureDefaultConfigFileSync();
         const config = createConfig(options);
         await ensureSnapshotResticConfigured(config, { configPath });
@@ -1279,7 +1420,11 @@ async function handleCommand(
         console.log(
             command.kind === "init"
                 ? formatInitSummary(diagnostics)
-                : formatDoctorSummary(diagnostics),
+                : command.kind === "doctor"
+                  ? formatDoctorSummary(diagnostics)
+                  : command.kind === "acp.init"
+                    ? formatACPInitSummary(diagnostics)
+                    : formatACPDoctorSummary(diagnostics),
         );
         return;
     }
@@ -1403,6 +1548,112 @@ function formatDoctorSummary(diagnostics: ReturnType<typeof collectSetupDiagnost
         diagnostics.snapshot.unavailableKind
             ? `- kind: ${diagnostics.snapshot.unavailableKind}`
             : undefined,
+        diagnostics.snapshot.unavailableReason
+            ? `- reason: ${diagnostics.snapshot.unavailableReason}`
+            : undefined,
+    ]
+        .filter((line): line is string => typeof line === "string")
+        .join("\n");
+}
+
+function formatACPCLIHelp(): string {
+    return `Behavior:
+  Default behavior starts the ACP stdio server.
+  Use 'init' to print ACP config examples and setup hints.
+  Use 'doctor' to inspect config, logs, providers, and snapshot readiness.
+
+Environment Variables:
+  <PROVIDER>_API_KEY
+  OPENAI_BASE_URL
+  DIOGENES_MODEL
+  DIOGENES_WORKSPACE
+  DIOGENES_RESTIC_BINARY
+
+API Key Rule:
+  Provider API keys are resolved from the provider name in models.yaml.
+  Example: openai -> OPENAI_API_KEY, claude-proxy -> CLAUDE_PROXY_API_KEY
+
+Model Management:
+  models.yaml is managed under the Diogenes config directory and is auto-generated on first run.
+  Use the main CLI to inspect or edit model definitions:
+    diogenes model path
+    diogenes model providers
+    diogenes model show <provider/model>
+    diogenes model add-provider <provider> --style <openai|anthropic>
+    diogenes model add <provider/model> --name <name>
+    diogenes model default [provider/model]
+`;
+}
+
+function formatACPInitSummary(diagnostics: ReturnType<typeof collectSetupDiagnostics>): string {
+    const acpCliPath = path.resolve(process.argv[1] || "dist/cli.js");
+    const configuredProviders = diagnostics.providers.filter((provider) => provider.configured);
+    const preferredEnvVars =
+        configuredProviders.length > 0
+            ? configuredProviders.map((provider) => provider.envVarName)
+            : diagnostics.providers.slice(0, 3).map((provider) => provider.envVarName);
+    const envObject = Object.fromEntries(preferredEnvVars.map((key) => [key, "$" + `{${key}}`]));
+
+    return [
+        "Diogenes ACP Init",
+        "",
+        configuredProviders.length > 0
+            ? `Configured providers: ${configuredProviders.map((provider) => provider.provider).join(", ")}`
+            : `Set one provider API key, for example ${diagnostics.providers[0]?.envVarName || "OPENAI_API_KEY"}`,
+        diagnostics.snapshot.mode === "enabled"
+            ? "Snapshots are ready for ACP."
+            : diagnostics.snapshot.mode === "degraded"
+              ? `Snapshots are degraded: ${diagnostics.snapshot.unavailableReason}`
+              : "Snapshots are disabled.",
+        `Config file: ${diagnostics.configPath}`,
+        `Models file: ${diagnostics.modelsPath}`,
+        "",
+        "ACP command:",
+        `node ${acpCliPath}`,
+        "",
+        "Environment variable keys:",
+        ...preferredEnvVars.map((key) => `- ${key}`),
+        "",
+        "ACP config example:",
+        JSON.stringify(
+            {
+                command: "node",
+                args: [acpCliPath, "acp"],
+                env: envObject,
+            },
+            null,
+            2,
+        ),
+        "",
+        "Run `diogenes acp doctor` for a detailed readiness report.",
+    ].join("\n");
+}
+
+function formatACPDoctorSummary(diagnostics: ReturnType<typeof collectSetupDiagnostics>): string {
+    return [
+        "Diogenes ACP Doctor",
+        "",
+        `Config Dir: ${diagnostics.configDir}`,
+        `Data Dir: ${diagnostics.dataDir}`,
+        `ACP Logs Dir: ${diagnostics.acpLogsDir}`,
+        `ACP Current Log: ${diagnostics.acpCurrentLogFile}`,
+        `Config File: ${diagnostics.configExists ? "present" : "missing"} (${diagnostics.configPath})`,
+        `Models File: ${diagnostics.modelsExists ? "present" : "missing"} (${diagnostics.modelsPath})`,
+        "",
+        "Providers:",
+        ...diagnostics.providers.map(
+            (provider) =>
+                `- ${provider.provider}: ${provider.configured ? "configured" : "missing"} via ${provider.envVarName}`,
+        ),
+        "",
+        "Snapshots:",
+        `- mode: ${diagnostics.snapshot.mode}`,
+        `- requested: ${diagnostics.snapshot.requested ? "yes" : "no"}`,
+        `- binary: ${diagnostics.snapshot.resticBinary || "(not set)"}`,
+        diagnostics.snapshot.unavailablePhase
+            ? `- phase: ${diagnostics.snapshot.unavailablePhase}`
+            : undefined,
+        diagnostics.snapshot.unavailableKind ? `- kind: ${diagnostics.snapshot.unavailableKind}` : undefined,
         diagnostics.snapshot.unavailableReason
             ? `- reason: ${diagnostics.snapshot.unavailableReason}`
             : undefined,
@@ -1828,6 +2079,10 @@ export {
     main,
     parseArgs,
     createConfig,
+    createDebugStdio,
+    formatACPCLIHelp,
+    formatACPInitSummary,
+    formatACPDoctorSummary,
     clearDiogenesAppData,
     handleCommand,
     CLEAR_APP_DATA_PASSPHRASE,

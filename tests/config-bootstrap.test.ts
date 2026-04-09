@@ -49,8 +49,8 @@ describe("config bootstrap", () => {
         const content = fs.readFileSync(configPath, "utf8");
 
         expect(configPath).toBe(path.join(configDir, "config.yaml"));
-        expect(content).toContain("# Diogenes default configuration");
-        expect(content).toContain("llm:");
+        expect(content).toContain("# Diogenes configuration");
+        expect(content).toContain("Generated automatically on first run.");
         expect(content).toContain("security:");
         expect(content).toContain("snapshot:");
         expect(content).toContain("enabled: true");

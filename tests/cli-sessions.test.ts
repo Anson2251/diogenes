@@ -65,6 +65,42 @@ describe("CLI session commands", () => {
         }
     });
 
+    it("parses acp server command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "acp"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "acp.server" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses acp init command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "acp", "init"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "acp.init" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses acp doctor command", () => {
+        const originalArgv = process.argv;
+        process.argv = ["node", "diogenes", "acp", "doctor"];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "acp.doctor" });
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
     it("parses restic binary option", () => {
         const originalArgv = process.argv;
         process.argv = [
@@ -82,6 +118,28 @@ describe("CLI session commands", () => {
             expect(parsed.command).toEqual({ kind: "run" });
             expect(parsed.options.resticBinary).toBe("/tmp/restic");
             expect(parsed.task).toBe("inspect src");
+        } finally {
+            process.argv = originalArgv;
+        }
+    });
+
+    it("parses ACP env/debug options", () => {
+        const originalArgv = process.argv;
+        process.argv = [
+            "node",
+            "diogenes",
+            "--env-file",
+            "/tmp/.env",
+            "--debug-stdio-file",
+            "/tmp/acp-debug.log",
+            "acp",
+        ];
+
+        try {
+            const parsed = parseArgs();
+            expect(parsed.command).toEqual({ kind: "acp.server" });
+            expect(parsed.options.envFile).toBe("/tmp/.env");
+            expect(parsed.options.debugStdioFile).toBe("/tmp/acp-debug.log");
         } finally {
             process.argv = originalArgv;
         }

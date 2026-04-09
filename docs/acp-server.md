@@ -30,27 +30,19 @@ Not yet supported:
 
 ## Recommended Entry Point
 
-Use the dedicated ACP binary:
+Use the ACP subcommand on the main CLI:
 
 ```bash
-diogenes-acp
+diogenes acp
 ```
 
 Or, before installation:
 
 ```bash
-node dist/acp-cli.js
+node dist/cli.js acp
 ```
 
 This is the preferred entry point for ACP clients and editor integrations.
-
-There is also a development shortcut through the general CLI:
-
-```bash
-diogenes --acp
-```
-
-That mode exists for convenience, but ACP clients should prefer `diogenes-acp`.
 
 ## Build And Bundle
 
@@ -60,16 +52,16 @@ Build the project:
 pnpm run build
 ```
 
-Create the dedicated ACP bundle:
+Create the CLI bundle:
 
 ```bash
-pnpm run bundle:acp
+pnpm run bundle
 ```
 
 This produces:
 
 ```text
-bundle/acp-server.cjs
+bundle/cli.cjs
 ```
 
 ## Configuration
@@ -79,10 +71,8 @@ The ACP server accepts the same core model and workspace configuration as the ma
 ### Command-Line Options
 
 ```bash
-diogenes-acp \
+diogenes acp \
   --env-file /path/to/.env.acp \
-  --config-file /path/to/diogenes.config.yaml \
-  --api-key "$OPENAI_API_KEY" \
   --model gpt-4o \
   --workspace /path/to/repo \
   --max-iterations 20
@@ -90,11 +80,9 @@ diogenes-acp \
 
 Supported options:
 
-- `--api-key`
 - `--model`
 - `--base-url`
 - `--workspace`
-- `--config-file`
 - `--env-file`
 - `--max-iterations`
 
@@ -116,13 +104,13 @@ Examples:
 Use these helpers before wiring an editor/client to the ACP server:
 
 ```bash
-diogenes-acp init
-diogenes-acp doctor
+diogenes acp init
+diogenes acp doctor
 ```
 
-`diogenes-acp init` prints:
+`diogenes acp init` prints:
 
-- the exact launch command as `node <path-to-acp-cli>`
+- the exact launch command as `node <path-to-cli> acp`
 - the environment variable keys to provide
 - a JSON ACP config example you can copy into the client config file
 
@@ -137,7 +125,7 @@ diogenes model add proxy/gpt-4.1 --name "GPT 4.1 Proxy"
 diogenes model default openai/gpt-4o
 ```
 
-If you run `diogenes-acp` with no subcommand, it starts the stdio ACP server directly.
+If you run `diogenes acp` with no subcommand, it starts the stdio ACP server directly.
 
 ### Logging
 
@@ -162,14 +150,10 @@ Example:
 If you want the ACP server to read a specific env file instead of the default process environment, pass:
 
 ```bash
-diogenes-acp --env-file /path/to/.env.acp
+diogenes acp --env-file /path/to/.env.acp
 ```
 
-If you want to provide an explicit config file path, pass:
-
-```bash
-diogenes-acp --config-file /path/to/diogenes.config.yaml
-```
+ACP config paths are managed automatically through Diogenes managed config files.
 
 ## Session Behavior
 
@@ -317,12 +301,11 @@ If your ACP client accepts a command plus args, prefer one of:
 
 ```json
 {
-  "command": "diogenes-acp",
+  "command": "diogenes",
   "args": [
+    "acp",
     "--env-file",
     "/path/to/.env.acp",
-    "--config-file",
-    "/path/to/diogenes.config.yaml",
     "--workspace",
     "/path/to/repo"
   ]
@@ -334,7 +317,7 @@ Or:
 ```json
 {
   "command": "node",
-  "args": ["dist/acp-cli.js", "--workspace", "/path/to/repo"]
+  "args": ["dist/cli.js", "acp", "--workspace", "/path/to/repo"]
 }
 ```
 
@@ -343,7 +326,7 @@ For bundled deployment:
 ```json
 {
   "command": "node",
-  "args": ["bundle/acp-server.cjs", "--workspace", "/path/to/repo"]
+  "args": ["bundle/cli.cjs", "acp", "--workspace", "/path/to/repo"]
 }
 ```
 

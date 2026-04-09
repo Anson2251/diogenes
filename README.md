@@ -61,7 +61,6 @@ pnpm test
 pnpm run dev
 pnpm run lint
 pnpm run bundle
-pnpm run bundle:acp
 ```
 
 ### Run The CLI
@@ -93,7 +92,7 @@ node dist/cli.js run --socratic "Debug the failing test"
 Start the ACP server:
 
 ```bash
-node dist/acp-cli.js
+node dist/cli.js acp
 ```
 
 ## CLI Modes
@@ -148,24 +147,24 @@ Multi-line input ends with `..` on its own line.
 
 ### ACP Server
 
-Run the dedicated ACP entrypoint when integrating with editors or other ACP clients.
+Run the ACP subcommand when integrating with editors or other ACP clients.
 
 Preferred:
 
 ```bash
-node dist/acp-cli.js
+node dist/cli.js acp
 ```
 
-Development shortcut:
+Installed CLI:
 
 ```bash
-node dist/cli.js --acp
+diogenes acp
 ```
 
-Create the standalone ACP bundle with:
+Bundled deployment uses the same entrypoint:
 
 ```bash
-pnpm run bundle:acp
+node bundle/cli.cjs acp
 ```
 
 Current ACP support includes:
@@ -200,15 +199,15 @@ Use these built-in commands to inspect first-run state:
 ```bash
 diogenes init
 diogenes doctor
-diogenes-acp init
-diogenes-acp doctor
+diogenes acp init
+diogenes acp doctor
 ```
 
 `init` prints the shortest next steps. `doctor` prints config paths, provider environment readiness, and snapshot/restic status.
 
-`diogenes-acp init` also prints:
+`diogenes acp init` also prints:
 
-- the exact ACP launch command as `node <path-to-acp-cli>`
+- the exact ACP launch command as `node <path-to-cli> acp`
 - the environment variable keys to provide
 - a ready-to-copy ACP config example snippet
 
@@ -337,8 +336,8 @@ Use these commands to find them:
 diogenes init
 diogenes doctor
 diogenes model path
-diogenes-acp init
-diogenes-acp doctor
+diogenes acp init
+diogenes acp doctor
 ```
 
 Typical locations:

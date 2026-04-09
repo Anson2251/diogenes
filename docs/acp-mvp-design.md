@@ -38,7 +38,7 @@ The recommended MVP is:
 
 This keeps the protocol surface small and fits the current Diogenes architecture.
 
-Operationally, the preferred entry point should be a dedicated ACP binary such as `diogenes-acp`, with `diogenes --acp` kept only as a development shortcut.
+Operationally, the preferred entry point should be the ACP subcommand `diogenes acp`.
 
 ## Why This Fits The Current Codebase
 

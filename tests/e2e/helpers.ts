@@ -4,7 +4,6 @@ import * as os from "os";
 import * as path from "path";
 
 export const BUNDLE_CLI = path.resolve(__dirname, "../../bundle/cli.cjs");
-export const BUNDLE_ACP = path.resolve(__dirname, "../../bundle/acp-server.cjs");
 
 export interface TestContext {
     homeDir: string;
@@ -42,28 +41,6 @@ export function runCLI(
     try {
         const escapedArgs = args.map(escapeArg).join(" ");
         const stdout = execSync(`node ${BUNDLE_CLI} ${escapedArgs}`, {
-            env,
-            encoding: "utf-8",
-            timeout: 30000,
-        });
-        return { stdout, stderr: "", exitCode: 0 };
-    } catch (error: unknown) {
-        const execError = error as { stdout?: string; stderr?: string; status?: number };
-        return {
-            stdout: execError.stdout || "",
-            stderr: execError.stderr || "",
-            exitCode: execError.status ?? 1,
-        };
-    }
-}
-
-export function runACP(
-    args: string[],
-    env: NodeJS.ProcessEnv,
-): { stdout: string; stderr: string; exitCode: number } {
-    try {
-        const escapedArgs = args.map(escapeArg).join(" ");
-        const stdout = execSync(`node ${BUNDLE_ACP} ${escapedArgs}`, {
             env,
             encoding: "utf-8",
             timeout: 30000,

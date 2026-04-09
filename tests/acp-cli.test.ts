@@ -11,18 +11,18 @@ import {
     formatACPDoctorSummary,
     formatACPInitSummary,
     parseArgs,
-} from "../src/acp-cli";
+} from "../src/cli";
 import * as resticManager from "../src/utils/restic-manager";
 import { collectSetupDiagnostics } from "../src/utils/setup-diagnostics";
 
-describe("acp-cli arg parsing", () => {
+describe("acp command arg parsing", () => {
     it("parses restic binary option", () => {
         const originalArgv = process.argv;
-        process.argv = ["node", "diogenes-acp", "--restic-binary", "/tmp/restic"];
+        process.argv = ["node", "diogenes", "acp", "--restic-binary", "/tmp/restic"];
 
         try {
             const parsed = parseArgs();
-            expect(parsed.command).toBe("server");
+            expect(parsed.command).toEqual({ kind: "acp.server" });
             expect(parsed.options.resticBinary).toBe("/tmp/restic");
         } finally {
             process.argv = originalArgv;
@@ -31,11 +31,11 @@ describe("acp-cli arg parsing", () => {
 
     it("parses init command", () => {
         const originalArgv = process.argv;
-        process.argv = ["node", "diogenes-acp", "init"];
+        process.argv = ["node", "diogenes", "acp", "init"];
 
         try {
             const parsed = parseArgs();
-            expect(parsed.command).toBe("init");
+            expect(parsed.command).toEqual({ kind: "acp.init" });
         } finally {
             process.argv = originalArgv;
         }
@@ -43,11 +43,11 @@ describe("acp-cli arg parsing", () => {
 
     it("parses doctor command", () => {
         const originalArgv = process.argv;
-        process.argv = ["node", "diogenes-acp", "doctor"];
+        process.argv = ["node", "diogenes", "acp", "doctor"];
 
         try {
             const parsed = parseArgs();
-            expect(parsed.command).toBe("doctor");
+            expect(parsed.command).toEqual({ kind: "acp.doctor" });
         } finally {
             process.argv = originalArgv;
         }
@@ -75,11 +75,11 @@ describe("acp-cli arg parsing", () => {
     });
 });
 
-describe("acp-cli setup summaries", () => {
+describe("acp command setup summaries", () => {
     it("formats help output with model management guidance", () => {
         const output = formatACPCLIHelp();
 
-        expect(output).toContain("No subcommand starts the ACP stdio server.");
+        expect(output).toContain("Default behavior starts the ACP stdio server.");
         expect(output).toContain("Model Management:");
         expect(output).toContain("<PROVIDER>_API_KEY");
         expect(output).toContain("claude-proxy -> CLAUDE_PROXY_API_KEY");
@@ -89,7 +89,7 @@ describe("acp-cli setup summaries", () => {
 
     it("formats init output with ACP config example", async () => {
         const originalArgv = process.argv;
-        process.argv = ["node", path.join(process.cwd(), "dist", "acp-cli.js"), "init"];
+        process.argv = ["node", path.join(process.cwd(), "dist", "cli.js"), "acp", "init"];
         vi.spyOn(resticManager, "ensureSnapshotResticConfigured").mockImplementation(
             async (config) => {
                 config.security = {
@@ -164,7 +164,7 @@ describe("createDebugStdio", () => {
         const errorChunks: string[] = [];
         const debugFile = path.join(
             os.tmpdir(),
-            `diogenes-acp-debug-${Date.now()}-${Math.random().toString(16).slice(2)}.log`,
+            `diogenes-acp-command-debug-${Date.now()}-${Math.random().toString(16).slice(2)}.log`,
         );
 
         createdFiles.push(debugFile);

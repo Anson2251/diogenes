@@ -3,10 +3,6 @@ const targets = {
         input: "dist/cli.js",
         outputBaseName: "cli",
     },
-    acp: {
-        input: "dist/acp-cli.js",
-        outputBaseName: "acp-server",
-    },
 } as const;
 
 type TargetName = keyof typeof targets;
