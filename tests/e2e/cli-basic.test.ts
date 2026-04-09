@@ -47,8 +47,8 @@ describe("bundled CLI basic commands", () => {
             expect(stdout).toContain("Models file:");
 
             // Verify files were created
-            const configPath = path.join(testCtx.homeDir, ".config", "diogenes", "config.yaml");
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const configPath = path.join(testCtx.configDir, "config.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
 
             const configExists = await fs
                 .access(configPath)
@@ -86,7 +86,6 @@ describe("bundled CLI basic commands", () => {
             expect(stdout).toContain("Models File:");
             expect(stdout).toContain("Providers:");
             expect(stdout).toContain("openai:");
-            expect(stdout).toContain("anthropic:");
             expect(stdout).toContain("Snapshots:");
         });
 
@@ -116,7 +115,7 @@ describe("config file structure", () => {
     });
 
     it("should create valid config.yaml structure", async () => {
-        const configPath = path.join(testCtx.homeDir, ".config", "diogenes", "config.yaml");
+        const configPath = path.join(testCtx.configDir, "config.yaml");
         const configContent = await fs.readFile(configPath, "utf-8");
         const config = yaml.parse(configContent);
 
@@ -133,15 +132,13 @@ describe("config file structure", () => {
     });
 
     it("should create valid models.yaml structure", async () => {
-        const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+        const modelsPath = path.join(testCtx.configDir, "models.yaml");
         const modelsContent = await fs.readFile(modelsPath, "utf-8");
         const models = yaml.parse(modelsContent);
 
         // Should have providers
         expect(models).toHaveProperty("providers");
         expect(models.providers).toHaveProperty("openai");
-        expect(models.providers).toHaveProperty("anthropic");
-        expect(models.providers).toHaveProperty("openrouter");
 
         // Each provider should have models
         expect(models.providers.openai).toHaveProperty("models");

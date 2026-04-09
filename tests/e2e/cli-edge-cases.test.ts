@@ -139,7 +139,7 @@ describe("bundled CLI model edge cases", () => {
             runCLI(["model", "default", "custom1/model-b"], testCtx.env);
 
             // Verify structure is intact
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
 
@@ -156,7 +156,7 @@ describe("bundled CLI model edge cases", () => {
                 runCLI(["model", "use", "--clear"], testCtx.env);
             }
 
-            const configPath = path.join(testCtx.homeDir, ".config", "diogenes", "config.yaml");
+            const configPath = path.join(testCtx.configDir, "config.yaml");
             const configContent = await fs.readFile(configPath, "utf-8");
             const config = yaml.parse(configContent);
 
@@ -174,7 +174,7 @@ describe("bundled CLI model edge cases", () => {
             expect(exitCode).toBe(0);
 
             // Verify it was added
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.providers[longName]).toBeDefined();
@@ -195,7 +195,7 @@ describe("bundled CLI model edge cases", () => {
             );
             expect(exitCode).toBe(0);
 
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.providers.custom.baseURL).toBe("https://api.example.com/v1?param=value");
@@ -217,7 +217,7 @@ describe("bundled CLI model edge cases", () => {
             );
             expect(exitCode).toBe(0);
 
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.providers.custom.models["zero-context"].contextWindow).toBe(0);
@@ -239,7 +239,7 @@ describe("bundled CLI model edge cases", () => {
             );
             expect(exitCode).toBe(0);
 
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.providers.custom.models["huge-context"].contextWindow).toBe(999999999);
@@ -287,7 +287,7 @@ describe("bundled CLI model edge cases", () => {
             });
 
             // Verify all models exist
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
 
@@ -352,7 +352,7 @@ describe("bundled CLI config corruption edge cases", () => {
 
     it("should handle corrupted models.yaml gracefully", async () => {
         // Corrupt models.yaml
-        const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+        const modelsPath = path.join(testCtx.configDir, "models.yaml");
         await fs.writeFile(modelsPath, "invalid: yaml: [", "utf-8");
 
         const { stderr, exitCode } = runCLI(["model", "list"], testCtx.env);
@@ -362,7 +362,7 @@ describe("bundled CLI config corruption edge cases", () => {
 
     it("should handle empty models.yaml", async () => {
         // Empty models.yaml
-        const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+        const modelsPath = path.join(testCtx.configDir, "models.yaml");
         await fs.writeFile(modelsPath, "", "utf-8");
 
         const { exitCode } = runCLI(["model", "list"], testCtx.env);
@@ -372,7 +372,7 @@ describe("bundled CLI config corruption edge cases", () => {
 
     it("should handle missing models.yaml file (auto-recreates)", async () => {
         // Delete models.yaml
-        const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+        const modelsPath = path.join(testCtx.configDir, "models.yaml");
         await fs.unlink(modelsPath);
 
         const { exitCode } = runCLI(["model", "list"], testCtx.env);

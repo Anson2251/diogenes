@@ -1142,24 +1142,61 @@ describe("ACPServer", () => {
                 },
             });
 
-            const listResponse = await server.handleMessage({
+            let listResponse = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 4,
                 method: "session/list",
                 params: { includeSnapshots: true },
             });
-            const getResponse = await server.handleMessage({
+            let getResponse = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 5,
                 method: "_diogenes/session/get",
                 params: { sessionId, includeSnapshots: true },
             });
-            const snapshotsResponse = await server.handleMessage({
+            let snapshotsResponse = await server.handleMessage({
                 jsonrpc: "2.0",
                 id: 6,
                 method: "_diogenes/session/snapshots",
                 params: { sessionId },
             });
+
+            for (let attempt = 0; attempt < 20; attempt++) {
+                const snapshotCount =
+                    listResponse && "result" in listResponse
+                        ? (listResponse.result.sessions as Array<{ sessionId: string; _meta?: { diogenes?: { snapshotCount?: number } } }>).find(
+                              (session) => session.sessionId === sessionId,
+                          )?._meta?.diogenes?.snapshotCount
+                        : undefined;
+                const snapshotsLength =
+                    snapshotsResponse && "result" in snapshotsResponse
+                        ? ((snapshotsResponse.result.snapshots as unknown[]) || []).length
+                        : 0;
+
+                if ((snapshotCount ?? 0) >= 1 && snapshotsLength >= 1) {
+                    break;
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                listResponse = await server.handleMessage({
+                    jsonrpc: "2.0",
+                    id: 4,
+                    method: "session/list",
+                    params: { includeSnapshots: true },
+                });
+                getResponse = await server.handleMessage({
+                    jsonrpc: "2.0",
+                    id: 5,
+                    method: "_diogenes/session/get",
+                    params: { sessionId, includeSnapshots: true },
+                });
+                snapshotsResponse = await server.handleMessage({
+                    jsonrpc: "2.0",
+                    id: 6,
+                    method: "_diogenes/session/snapshots",
+                    params: { sessionId },
+                });
+            }
 
             expect(
                 listResponse && "result" in listResponse ? listResponse.result.sessions : [],

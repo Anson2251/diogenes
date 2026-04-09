@@ -34,7 +34,7 @@ describe("bundled CLI model commands", () => {
             const { stdout, exitCode } = runCLI(["model", "path"], testCtx.env);
             expect(exitCode).toBe(0);
             expect(stdout).toContain("models.yaml");
-            expect(stdout).toContain(testCtx.homeDir);
+            expect(stdout).toContain(testCtx.configDir);
         });
 
         it("should list configured providers", async () => {
@@ -82,7 +82,7 @@ describe("bundled CLI model commands", () => {
             expect(setExit).toBe(0);
 
             // Verify by reading models.yaml
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.default).toBe("anthropic/claude-sonnet-4-20250514");
@@ -97,7 +97,7 @@ describe("bundled CLI model commands", () => {
             expect(exitCode).toBe(0);
 
             // Verify by reading models.yaml
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.default).toBeUndefined();
@@ -114,7 +114,7 @@ describe("bundled CLI model commands", () => {
             expect(setExit).toBe(0);
 
             // Verify by reading config.yaml
-            const configPath = path.join(testCtx.homeDir, ".config", "diogenes", "config.yaml");
+            const configPath = path.join(testCtx.configDir, "config.yaml");
             const configContent = await fs.readFile(configPath, "utf-8");
             const config = yaml.parse(configContent);
             expect(config.llm?.model).toBe("openai/gpt-4o-mini");
@@ -129,7 +129,7 @@ describe("bundled CLI model commands", () => {
             expect(exitCode).toBe(0);
 
             // Verify by reading config.yaml
-            const configPath = path.join(testCtx.homeDir, ".config", "diogenes", "config.yaml");
+            const configPath = path.join(testCtx.configDir, "config.yaml");
             const configContent = await fs.readFile(configPath, "utf-8");
             const config = yaml.parse(configContent);
             expect(config.llm?.model).toBeUndefined();
@@ -153,7 +153,7 @@ describe("bundled CLI model commands", () => {
             expect(exitCode).toBe(0);
 
             // Verify by reading models.yaml
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.providers["custom-provider"]).toBeDefined();
@@ -183,7 +183,7 @@ describe("bundled CLI model commands", () => {
             expect(exitCode).toBe(0);
 
             // Verify by reading models.yaml
-            const modelsPath = path.join(testCtx.homeDir, ".config", "diogenes", "models.yaml");
+            const modelsPath = path.join(testCtx.configDir, "models.yaml");
             const modelsContent = await fs.readFile(modelsPath, "utf-8");
             const models = yaml.parse(modelsContent);
             expect(models.providers["custom"].models["my-model"]).toBeDefined();
