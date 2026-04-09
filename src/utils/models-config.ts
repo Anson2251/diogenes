@@ -59,12 +59,13 @@ export function listAvailableModels(config: ModelsConfig): string[] {
 }
 
 export function resolveModel(config: ModelsConfig, modelRef: string): ResolvedModel {
-    const parts = modelRef.split("/");
-    if (parts.length !== 2) {
+    const slashIndex = modelRef.indexOf("/");
+    if (slashIndex <= 0 || slashIndex >= modelRef.length - 1) {
         throw new Error(`Invalid model reference: ${modelRef}. Expected format: provider/model`);
     }
 
-    const [providerName, modelName] = parts;
+    const providerName = modelRef.slice(0, slashIndex);
+    const modelName = modelRef.slice(slashIndex + 1);
     const provider = config.providers[providerName];
     if (!provider) {
         throw new Error(`Unknown provider: ${providerName}`);

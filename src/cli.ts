@@ -114,6 +114,17 @@ function getProviderEnvApiKey(providerName?: string): string | undefined {
     return getProviderApiKey(providerName || "openai");
 }
 
+function parseProviderModelRef(modelRef: string): { provider: string; model: string } | null {
+    const slashIndex = modelRef.indexOf("/");
+    if (slashIndex <= 0 || slashIndex >= modelRef.length - 1) {
+        return null;
+    }
+    return {
+        provider: modelRef.slice(0, slashIndex),
+        model: modelRef.slice(slashIndex + 1),
+    };
+}
+
 type QuestionFn = (prompt: string) => Promise<string>;
 const CLEAR_APP_DATA_PASSPHRASE = "delete diogenes data";
 
@@ -678,6 +689,20 @@ function createConfig(options: CLIOptions): DiogenesConfig {
                 maxTokens: resolved.maxTokens ?? currentLLM.maxTokens,
                 temperature: resolved.temperature ?? currentLLM.temperature,
             };
+        }
+    }
+
+    if (modelsConfig && merged.llm && merged.llm.model && !merged.llm.provider) {
+        const parsedRef = parseProviderModelRef(merged.llm.model);
+        if (parsedRef && modelsConfig.providers[parsedRef.provider]) {
+            merged.llm.provider = parsedRef.provider;
+            merged.llm.model = parsedRef.model;
+            merged.llm.providerStyle = modelsConfig.providers[parsedRef.provider].style;
+            merged.llm.supportsToolRole =
+                modelsConfig.providers[parsedRef.provider].supportsToolRole ?? false;
+            if (!merged.llm.baseURL) {
+                merged.llm.baseURL = modelsConfig.providers[parsedRef.provider].baseURL;
+            }
         }
     }
 
@@ -1866,7 +1891,16 @@ function formatModelDetails(
     modelsConfig: NonNullable<ReturnType<typeof loadModelsConfig>>,
     model: string,
 ): string {
-    const [providerName, modelName] = model.split("/", 2);
+    const parsedRef = parseProviderModelRef(model);
+    if (!parsedRef) {
+        const available = listAvailableModels(modelsConfig);
+        console.error(`${colors.red}Error: Model "${model}" not found${colors.reset}`);
+        console.error(`${colors.dim}Available models: ${available.join(", ")}${colors.reset}`);
+        process.exit(1);
+    }
+
+    const providerName = parsedRef.provider;
+    const modelName = parsedRef.model;
     const provider = modelsConfig.providers[providerName];
     const definition = provider?.models?.[modelName];
 
@@ -1961,7 +1995,9 @@ function handleModelsCommand(
             return;
         }
         case "models.add": {
-            const [providerName, modelName] = command.model.split("/", 2);
+            const parsedRef = parseProviderModelRef(command.model);
+            const providerName = parsedRef?.provider;
+            const modelName = parsedRef?.model;
             const provider = providerName ? modelsConfig.providers[providerName] : undefined;
 
             if (!provider || !modelName) {
