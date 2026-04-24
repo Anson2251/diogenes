@@ -22,7 +22,7 @@ export class FileLoadSymbolTool extends BaseTool<typeof fileLoadSymbolSchema> {
     constructor(workspace: WorkspaceManager, astService: AstService) {
         super({
             namespace: "file",
-            name: "load_symbol",
+            name: "load-symbol",
             description: "Load a named symbol into workspace using AST ranges",
             params: {
                 path: { type: "string", description: "File path" },

@@ -22,7 +22,7 @@ export class FileNodeAtTool extends BaseTool<typeof fileNodeAtSchema> {
     constructor(workspace: WorkspaceManager, astService: AstService) {
         super({
             namespace: "file",
-            name: "node_at",
+            name: "node-at",
             description: "Show the syntax node at a given file position",
             params: {
                 path: { type: "string", description: "File path" },
