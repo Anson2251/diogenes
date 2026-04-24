@@ -82,7 +82,6 @@ describe("acp command setup summaries", () => {
         expect(output).toContain("Default behavior starts the ACP stdio server.");
         expect(output).toContain("Model Management:");
         expect(output).toContain("<PROVIDER>_API_KEY");
-        expect(output).toContain("claude-proxy -> CLAUDE_PROXY_API_KEY");
         expect(output).toContain("diogenes model add-provider <provider>");
         expect(output).toContain("diogenes model add <provider/model> --name <name>");
     });

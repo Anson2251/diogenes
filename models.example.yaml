@@ -7,7 +7,6 @@
 # - API keys are loaded from environment variables:
 #   - openai       -> OPENAI_API_KEY
 #   - anthropic    -> ANTHROPIC_API_KEY
-#   - claude-proxy -> CLAUDE_PROXY_API_KEY
 # - Default model format is: provider/model
 
 providers:
@@ -73,18 +72,6 @@ providers:
         name: OpenAI GPT-4o via OpenRouter
         description: Routed through OpenRouter
         contextWindow: 128000
-
-  claude-proxy:
-    # Example of a custom provider that speaks Anthropic-style protocol.
-    style: anthropic
-    supportsToolRole: false
-    baseURL: https://your-provider.example.com/v1
-
-    models:
-      claude-sonnet:
-        name: Claude Sonnet via Proxy
-        description: Custom proxy endpoint
-        contextWindow: 200000
 
 # Default model used when CLI/env/config does not override it.
 default: openai/gpt-4o

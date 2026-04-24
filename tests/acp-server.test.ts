@@ -2227,7 +2227,7 @@ describe("ACPServer", () => {
                 respond: (response) => responses.push(response),
             });
             const fileEditToolCall = `\`\`\`tool-call
-[{"tool":"file.edit","params":{"path":"sample.ts","edits":[{"mode":"replace","anchor":{"start":{"line":1,"text":"const greeting = 'hello';"}},"content":["const greeting = 'hello there';"]}]}},{"tool":"task.end","params":{"reason":"done","summary":"edited file"}}]
+[{"tool":"file.edit","params":{"path":"sample.ts","oldString":"const greeting = 'hello';","newString":"const greeting = 'hello there';"}},{"tool":"task.end","params":{"reason":"done","summary":"edited file"}}]
 \`\`\``;
 
             vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
@@ -2276,10 +2276,7 @@ describe("ACPServer", () => {
                         item.params.update.status === "completed" &&
                         Array.isArray(item.params.update.content) &&
                         item.params.update.content[0]?.content?.text ===
-                            [
-                                "Updated sample.ts: 1 edit applied, 2 total lines",
-                                "replace lines 1-1 -> 1-1",
-                            ].join("\n"),
+                            "Updated sample.ts, replaced at line 1, 2 total lines",
                 ),
             ).toBe(true);
             expect(
@@ -2330,7 +2327,7 @@ describe("ACPServer", () => {
                 respond: (response) => responses.push(response),
             });
             const fileEditToolCall = `\`\`\`tool-call
-[{"tool":"file.edit","params":{"path":"sample.ts","edits":[{"mode":"replace","anchor":{"start":{"line":1,"text":"const missing = 'hello';","before":[],"after":[]}},"content":["const greeting = 'hello there';"]}]}},{"tool":"task.end","params":{"reason":"done","summary":"attempted edit"}}]
+[{"tool":"file.edit","params":{"path":"sample.ts","oldString":"const missing = 'hello';","newString":"const greeting = 'hello there';"}},{"tool":"task.end","params":{"reason":"done","summary":"attempted edit"}}]
 \`\`\``;
 
             vi.spyOn(OpenAIClient.prototype, "createChatCompletionStream").mockImplementation(
@@ -2381,10 +2378,8 @@ describe("ACPServer", () => {
                         typeof item.params.update.content[0]?.content?.text === "string" &&
                         item.params.update.content[0].content.text.includes("[FAIL] file.edit") &&
                         item.params.update.content[0].content.text.includes(
-                            "Could not apply edits to sample.ts",
-                        ) &&
-                        item.params.update.content[0].content.text.includes("Closest match:") &&
-                        !item.params.update.content[0].content.text.includes("failedEdits"),
+                            "oldString not found in file",
+                        ),
                 ),
             ).toBe(true);
         } finally {

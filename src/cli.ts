@@ -106,7 +106,8 @@ type CLICommand =
           contextWindow?: number;
           maxTokens?: number;
           temperature?: number;
-      };
+      }
+    | { kind: "configure"; step?: string };
 
 function getProviderEnvApiKey(providerName?: string): string | undefined {
     return getProviderApiKey(providerName || "openai");
@@ -398,6 +399,43 @@ function parseArgs(): { task?: string; options: CLIOptions; command: CLICommand 
                 };
             },
         );
+
+    const configure = program
+        .command("configure [step]")
+        .alias("config")
+        .summary("Interactive configuration wizard")
+        .description("Configure providers, models, and settings interactively")
+        .action((step?: string) => {
+            command = { kind: "configure", step };
+        });
+
+    configure
+        .command("provider")
+        .summary("Configure providers")
+        .action(() => {
+            command = { kind: "configure", step: "provider" };
+        });
+
+    configure
+        .command("model")
+        .summary("Configure models")
+        .action(() => {
+            command = { kind: "configure", step: "model" };
+        });
+
+    configure
+        .command("default")
+        .summary("Quick switch default model")
+        .action(() => {
+            command = { kind: "configure", step: "default" };
+        });
+
+    configure
+        .command("settings")
+        .summary("Configure settings")
+        .action(() => {
+            command = { kind: "configure", step: "settings" };
+        });
 
     program.parse(process.argv);
 
@@ -1336,6 +1374,12 @@ async function main(): Promise<void> {
         return;
     }
 
+    if (command.kind === "configure") {
+        const { runWizard } = await import("./cli/wizard");
+        await runWizard({ step: command.step });
+        return;
+    }
+
     if (options.acp || command.kind === "acp.server") {
         const configPath = ensureDefaultConfigFileSync();
         const config = createConfig(options);
@@ -1516,6 +1560,11 @@ async function handleCommand(
 
             const result = await sessionStore.pruneSessions({ dryRun: command.dryRun });
             console.log(formatSessionPrune(result, command.dryRun));
+            return;
+        }
+        case "configure": {
+            const { runWizard } = await import("./cli/wizard");
+            await runWizard({ step: command.step });
             return;
         }
     }
@@ -2109,6 +2158,12 @@ function handleModelsCommand(
 if (require.main === module) {
     main().catch((error: unknown) => {
         if (error instanceof Error) {
+            // Handle user interrupting interactive prompts gracefully
+            if (error.name === "ExitPromptError") {
+                console.log("\n" + colors.dim + "Cancelled." + colors.reset);
+                process.exit(0);
+            }
+
             // Don't show stack trace for known user errors
             const userErrorPatterns = [
                 "Unknown managed session",

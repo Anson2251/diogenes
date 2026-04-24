@@ -26,6 +26,7 @@
     "bundle": "pnpm build; pnpm rolldown -c rolldown.cli.config.ts --minify"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.4.2",
     "@tron-format/tron": "^0.1.3",
     "@vscode/tree-sitter-wasm": "0.3.0",
     "cli-table3": "^0.6.5",

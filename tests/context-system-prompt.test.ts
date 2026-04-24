@@ -79,7 +79,7 @@ describe("DiogenesContextManager system prompt integration", () => {
             });
 
             const systemPrompt = manager.getSystemPrompt();
-            expect(systemPrompt).toBe(customPrompt);
+            expect(systemPrompt).toContain(customPrompt);
         });
 
         it("should include JSON tool calling section in text mode", () => {

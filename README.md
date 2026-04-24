@@ -414,15 +414,6 @@ providers:
         maxTokens: 4096
         temperature: 0.7
 
-  claude-proxy:
-    style: anthropic
-    baseURL: https://your-provider.example.com/v1
-    supportsToolRole: false
-    models:
-      claude-sonnet:
-        name: Claude Sonnet
-        contextWindow: 200000
-
   openrouter:
     style: openai
     baseURL: https://openrouter.ai/api/v1
@@ -454,7 +445,6 @@ Diogenes only uses `style` to choose the client. It does not infer protocol styl
 API keys are loaded from environment variables derived from the provider name:
 
 - `openai` -> `OPENAI_API_KEY`
-- `claude-proxy` -> `CLAUDE_PROXY_API_KEY`
 - `openrouter` -> `OPENROUTER_API_KEY`
 
 #### Model Reference Format
@@ -462,7 +452,6 @@ API keys are loaded from environment variables derived from the provider name:
 Models are referenced as `provider/model`, e.g.:
 
 - `openai/gpt-4o`
-- `claude-proxy/claude-sonnet`
 - `openrouter/auto`
 
 #### CLI Models Commands
@@ -474,7 +463,7 @@ diogenes model list
 diogenes model providers
 diogenes model show openai/gpt-4o
 diogenes model add-provider proxy --style openai --base-url https://example.com/v1
-diogenes model add proxy/gpt-4.1 --name "GPT 4.1 Proxy" --context-window 128000
+diogenes model add openai/gpt-4.1 --name "GPT 4.1" --context-window 128000
 ```
 
 Show, set, or clear the default model:
@@ -488,7 +477,7 @@ diogenes model default --clear
 Use a specific model for a task:
 
 ```bash
-diogenes -m claude-proxy/claude-sonnet "your task"
+diogenes -m openai/chatgpt-4o "your task"
 ```
 
 #### Resolution Order
