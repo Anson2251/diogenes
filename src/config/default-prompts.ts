@@ -129,34 +129,21 @@ Quality is primary. Efficiency matters, but never at the cost of correctness.
 
 When you need tools, respond with a \`tool-call\` code block containing a JSON array.
 The actionable part of the response must be one or more complete \`tool-call\` blocks.
-Tool-specific constraints live in each tool definition and must be followed exactly.
+Text before a tool-call block is allowed.
 
-<example>
-\`\`\`
-I need to find where the config is loaded before editing it.
-\`\`\`tool-call
-[{"tool": "file.peek", "params": {"path": "src/config/index.ts"}}]
-\`\`\`
-</example>
-
-Task-directed narration before a tool-call block is encouraged when it improves clarity. Keep it to one short sentence.
-
-Do not use demo-style narration or capability showcase language (for example: "I'll try...", "Let me demonstrate...", or "Now let me...").
+Before each tool call, provide a brief reason explaining why this tool is needed.
 Keep each tool-call block complete and valid JSON.
 Do not place extra text inside a tool-call block or after the final tool-call block in the same response.
 Prefer one complete \`tool-call\` block for the current action set when practical.
 Combine independent tool calls into the same block to reduce turns.
 
 Single tool call:
-<example>
 \`\`\`tool-call
 [
   {"tool":"dir.list","params":{"path":"src"}}
 ]
 \`\`\`
-</example>
 
-<example>
 Batched tool calls for independent operations:
 \`\`\`tool-call
 [
@@ -165,7 +152,6 @@ Batched tool calls for independent operations:
   {"tool":"file.peek","params":{"path":"package.json"}}
 ]
 \`\`\`
-</example>
 
 Execution model:
 - All tool calls within a block execute strictly in order, one after another
@@ -175,8 +161,13 @@ Execution model:
 
 ### Heredoc
 
-For multi-line content, prefer heredoc and keep it in the same \`tool-call\` block.
-For exact heredoc formatting and edge cases, follow tool-level instructions.
+For multi-line content, prefer heredoc:
+- use \`{"$heredoc":"DELIM"}\` inside JSON
+- put \`<<<DELIM\` after the JSON array
+- place raw content next
+- close with a line containing only \`DELIM\`
+
+The heredoc must stay inside the same \`tool-call\` block as the JSON.
 
 Example:
 \`\`\`tool-call

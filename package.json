@@ -22,9 +22,8 @@
     "build": "pnpm tsgo",
     "dev": "pnpm tsgo --watch",
     "test": "vitest run",
-    "lint": "npx oxlint",
-    "bundle": "npx rolldown -c rolldown.cli.config.ts --minify",
-    "bundle:all": "pnpm build && pnpm bundle"
+    "lint": "pnpm oxlint",
+    "bundle": "pnpm build; pnpm rolldown -c rolldown.cli.config.ts --minify"
   },
   "dependencies": {
     "@tron-format/tron": "^0.1.3",
