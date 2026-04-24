@@ -105,6 +105,9 @@ export function resolveModel(config: ModelsConfig, modelRef: string): ResolvedMo
         );
     }
 
+    const supportsInterleavedThinking = model.supportsInterleavedThinking ?? false;
+    const supportsNativeToolCalls = model.supportsNativeToolCalls ?? provider.supportsNativeToolCalls ?? true;
+
     return {
         provider: providerName,
         providerStyle: provider.style,
@@ -116,6 +119,8 @@ export function resolveModel(config: ModelsConfig, modelRef: string): ResolvedMo
         contextWindow: model.contextWindow,
         maxTokens: model.maxTokens ?? model.contextWindow,
         temperature: model.temperature,
+        supportsInterleavedThinking,
+        supportsNativeToolCalls,
     };
 }
 

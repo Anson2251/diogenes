@@ -101,132 +101,60 @@ export class FileEditTool extends BaseTool<typeof fileEditSchema> {
             namespace: "file",
             name: "edit",
             description: `Apply structured edits to a file.
+        CRITICAL REQUIREMENTS - READ THIS FIRST:
+        1. ALWAYS read the file first with file.load to get exact content and line numbers
+        2. The "text" field MUST be copied VERBATIM from the file - no paraphrasing, no truncation
+        3. ALWAYS include "before" and "after" context (2 lines each) - this is NOT optional
+        4. ALWAYS use heredoc syntax for content with newlines, quotes, or special characters
+        5. Keep each file.edit change small and local; around 30 lines is a good target
+        6. If you need to rewrite most of a file, use file.overwrite instead
+        7. If you need to create a new file, use file.create instead
 
-CRITICAL REQUIREMENTS - READ THIS FIRST:
-1. ALWAYS read the file first with file.load to get exact content and line numbers
-2. The "text" field MUST be copied VERBATIM from the file - no paraphrasing, no truncation
-3. ALWAYS include "before" and "after" context (2 lines each) - this is NOT optional
-4. ALWAYS use heredoc syntax for content with newlines, quotes, or special characters
-5. Keep each file.edit change small and local; around 30 lines is a good target
-6. If you need to rewrite most of a file, use file.overwrite instead
-7. If you need to create a new file, use file.create instead
+        ANCHOR MATCHING - HOW IT WORKS:
+        The tool tries to find your anchor in this order:
+        1. Exact match: "text" matches exactly + "before"/"after" context matches
+        2. Fuzzy match: "text" is similar + "before"/"after" context matches
+        3. Line hint: Falls back to searching around the specified "line" number (±10 lines)
 
-ANCHOR MATCHING - HOW IT WORKS:
-The tool tries to find your anchor in this order:
-1. Exact match: "text" matches exactly + "before"/"after" context matches
-2. Fuzzy match: "text" is similar + "before"/"after" context matches
-3. Line hint: Falls back to searching around the specified "line" number (±10 lines)
+        CONTEXT ORDERING:
+        - "before": list lines above the anchor in ascending line-number order (furthest line first, nearest line last)
+        - "after": list lines below the anchor in ascending line-number order (nearest line first, furthest line last)
 
-CONTEXT ORDERING:
-- "before": list lines above the anchor in ascending line-number order (furthest line first, nearest line last)
-- "after": list lines below the anchor in ascending line-number order (nearest line first, furthest line last)
+        COMMON FAILURE MODES - AVOID THESE:
+        WRONG: Paraphrasing text: "text": "function that does something"
+        RIGHT: Copy exact text: "text": "function processData(input: string): void {"
 
-COMMON FAILURE MODES - AVOID THESE:
-❌ WRONG: Paraphrasing text: "text": "function that does something"
-✅ RIGHT: Copy exact text: "text": "function processData(input: string): void {"
+        WRONG: Skipping context: { "line": 10, "text": "const x = 1;" }
+        RIGHT: Include context: { "line": 10, "text": "const x = 1;", "before": ["// init", "import { x }"], "after": ["const y = 2", "return x"] }
 
-❌ WRONG: Skipping context: { "line": 10, "text": "const x = 1;" }
-✅ RIGHT: Include context: { "line": 10, "text": "const x = 1;", "before": ["// init", "import { x }"], "after": ["const y = 2", "return x"] }
+        WRONG: Reusing a line that appears multiple times without context
+        RIGHT: When the same text appears more than once, you MUST provide "before" and/or "after" context to disambiguate the target location
 
-❌ WRONG: Reusing a line that appears multiple times without context
-✅ RIGHT: When the same text appears more than once, you MUST provide "before" and/or "after" context to disambiguate the target location
+        WRONG: Using JSON escaping for multi-line content: "content": ["line 1\\n", "line 2\\n"]
+        RIGHT: Use heredoc (see below)
 
-❌ WRONG: Using JSON escaping for multi-line content: "content": ["line 1\\n", "line 2\\n"]
-✅ RIGHT: Use heredoc (see below)
+        Benefits:
+        - No JSON escaping needed - just paste your content as-is
+        - Works with any characters: quotes, backslashes, dollar signs, etc.
+        - Essential for code, markdown, or any content with special characters
 
-HEREDOC SYNTAX - USE THIS FOR MULTI-LINE CONTENT:
-{
-  "content": {"$heredoc": "EOF"}
-}
+        EDIT MODES:
+        - "replace": Replace content at the anchor. For a single-line edit, provide only "start". For a multi-line range, provide both "start" and "end".
+        - "delete": Remove content at the anchor. For a single-line deletion, provide only "start". For a multi-line range, provide both "start" and "end".
+        - "insert_before": Insert new content before the anchor line
+        - "insert_after": Insert new content after the anchor line
 
-// AT THE END OF THE tool-call BLOCK, OUTSIDE THE JSON ARRAY
-<<<EOF
-line 1 with "quotes" and 'apostrophes'
-line 2 with backslashes and special chars: \\n \\t $variable
-line 3
-EOF
+        MULTIPLE EDITS:
+        - Edits are applied bottom-to-top (descending line order)
+        - Overlapping ranges are rejected
+        - MERGE nearby edits into one larger edit instead of many small ones
+        - If one replacement grows beyond about 30 lines, prefer file.overwrite
 
-Benefits:
-- No JSON escaping needed - just paste your content as-is
-- Works with any characters: quotes, backslashes, dollar signs, etc.
-- Essential for code, markdown, or any content with special characters
-
-EDIT MODES:
-- "replace": Replace content at the anchor. For a single-line edit, provide only "start". For a multi-line range, provide both "start" and "end".
-- "delete": Remove content at the anchor. For a single-line deletion, provide only "start". For a multi-line range, provide both "start" and "end".
-- "insert_before": Insert new content before the anchor line
-- "insert_after": Insert new content after the anchor line
-
-MULTIPLE EDITS:
-- Edits are applied bottom-to-top (descending line order)
-- Overlapping ranges are rejected
-- MERGE nearby edits into one larger edit instead of many small ones
-- If one replacement grows beyond about 30 lines, prefer file.overwrite
-
-MULTIPLE MATCHES:
-- If the anchor text appears in multiple places, the edit is ambiguous
-- In that case, include "before" and/or "after" context copied exactly from the file
-- Do not rely on line number alone to disambiguate repeated text
-
-EXAMPLE - Replace multiple lines using heredoc:
-
-\`\`\`tool-call
-[
-    {"tool": "file.edit", "params": {
-        "path": "src/file.ts",
-        "edits": [{
-            "mode": "replace",
-            "anchor": {
-            "start": {
-                "line": 10,
-                "text": "function old() {",
-                "before": ["import { x } from 'lib';", ""],
-                "after": ["  return x;", "}"]
-            },
-            "end": {
-                "line": 13,
-                "text": "}",
-                "before": ["  return x;", "function old() {"],
-                "after": ["", "export { old };"]
-            }
-            },
-            "content": {"$heredoc": "EOF"}
-        }]
-        }
-    }}
-]
-
-<<<EOF
-function new() {
-  return x * 2;
-}
-EOF
-\`\`\`
-
-EXAMPLE - Append to end of file (file has 3 lines):
-\`\`\`tool-call
-[
-    {"tool": "file.edit", "params": {
-        "path": "file.txt",
-        "edits": [{
-            "mode": "insert_after",
-            "anchor": {
-            "start": {
-                "line": 3,
-                "text": "last line content",
-                "before": ["line 1 content", "line 2 content"],
-                "after": []
-            }
-            },
-            "content": {"$heredoc": "EOF"}
-        }]
-    }}
-]
-
-<<<EOF
-new line at end
-EOF
-\`\`\``,
+        MULTIPLE MATCHES:
+        - If the anchor text appears in multiple places, the edit is ambiguous
+        - In that case, include "before" and/or "after" context copied exactly from the file
+        - Do not rely on line number alone to disambiguate repeated text
+        `,
             params: {
                 path: { type: "string", description: "File path" },
                 options: {

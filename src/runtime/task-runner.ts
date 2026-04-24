@@ -2,7 +2,7 @@ import type { DiogenesContextManager } from "../context";
 import type { StreamChunk } from "../llm/anthropic-client";
 import type { ToolCall, ToolResult } from "../types";
 
-import { formatParseError, formatToolResults, parseToolCalls } from "../utils/tool-parser";
+import { formatParseError } from "../utils/tool-parser";
 
 export interface ConversationMessage {
     role: "user" | "assistant" | "tool";
@@ -138,6 +138,11 @@ export async function runTaskLoop(
 
             emit(options, { type: "llm.stream.started", iteration: iterations });
 
+            // Check if native tool calling is supported
+            const capabilities = llmClient.getCapabilities();
+            const useNativeToolCalls = capabilities.supportsNativeToolCalls;
+            const tools = useNativeToolCalls ? diogenes.getToolsForNativeCalling() : undefined;
+
             let streamResult;
             try {
                 streamResult = await llmClient.createChatCompletionStream(
@@ -153,6 +158,7 @@ export async function runTaskLoop(
                         temperature: diogenes.getLLMConfig().temperature,
                         max_tokens: diogenes.getLLMConfig().maxTokens,
                     },
+                    tools,
                 );
             } catch (error) {
                 if (options.shouldCancel?.() || isCancellationError(error)) {
@@ -175,20 +181,36 @@ export async function runTaskLoop(
             });
             emitMessageHistory(options, messageHistory);
 
-            const parseResult = parseToolCalls(streamResult.content);
+            const toolCallManager = diogenes.getToolCallManager();
 
-            if (!parseResult.success) {
-                const message = parseResult.error?.message || "Unknown parse error";
-                emit(options, { type: "parse.error", iteration: iterations, message });
-                messageHistory.push({
-                    role: "user",
-                    content: formatParseError(parseResult.error),
+            // Use native tool calls from stream if available, otherwise parse from text
+            let toolCalls: Array<{ tool: string; params: Record<string, unknown> }>;
+            if (streamResult.toolCalls !== undefined) {
+                // Native tool calls from API (may be empty array if no tool calls made)
+                // Convert API-safe names back to internal format
+                toolCalls = streamResult.toolCalls.map((tc) => ({
+                    tool: tc.tool.replace(/_/g, "."),
+                    params: tc.params,
+                }));
+            } else {
+                // Fallback to text parsing
+                const processResult = toolCallManager.processResponse({
+                    content: streamResult.content,
                 });
-                emitMessageHistory(options, messageHistory);
-                continue;
-            }
 
-            const toolCalls = parseResult.toolCalls || [];
+                if (!processResult.success) {
+                    const message = processResult.error?.message || "Unknown parse error";
+                    emit(options, { type: "parse.error", iteration: iterations, message });
+                    messageHistory.push({
+                        role: "user",
+                        content: formatParseError(processResult.error),
+                    });
+                    emitMessageHistory(options, messageHistory);
+                    continue;
+                }
+
+                toolCalls = processResult.toolCalls;
+            }
             if (toolCalls.length > 0) {
                 emit(options, {
                     type: "tool.calls.parsed",
@@ -263,7 +285,7 @@ export async function runTaskLoop(
                     }
                 }
 
-                let resultContent = formatToolResults(
+                let resultContent = toolCallManager.formatResults(
                     toolCalls,
                     results,
                     (toolCall: ToolCall, result: ToolResult): string => {

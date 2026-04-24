@@ -13,6 +13,21 @@ const OpenAIErrorSchema = z.object({
     }),
 });
 
+const ToolCallSchema = z.object({
+    id: z.string(),
+    type: z.literal("function"),
+    function: z.object({
+        name: z.string(),
+        arguments: z.string(), // JSON string
+    }),
+});
+
+const MessageSchema = z.object({
+    role: z.string(),
+    content: z.string(),
+    tool_calls: z.array(ToolCallSchema).optional(),
+});
+
 const OpenAICompletionResponseSchema = z.object({
     id: z.string(),
     object: z.string(),
@@ -22,10 +37,7 @@ const OpenAICompletionResponseSchema = z.object({
         .array(
             z.object({
                 index: z.number(),
-                message: z.object({
-                    role: z.string(),
-                    content: z.string(),
-                }),
+                message: MessageSchema,
                 finish_reason: z.string(),
             }),
         )
@@ -51,6 +63,21 @@ const OpenAIStreamChunkSchema = z.object({
                 role: z.string().optional(),
                 content: z.string().optional(),
                 reasoning_content: z.string().optional(),
+                tool_calls: z
+                    .array(
+                        z.object({
+                            index: z.number().optional(),
+                            id: z.string().optional(),
+                            type: z.string().optional(),
+                            function: z
+                                .object({
+                                    name: z.string().optional(),
+                                    arguments: z.string().optional(),
+                                })
+                                .optional(),
+                        }),
+                    )
+                    .optional(),
             }),
             finish_reason: z.string().nullable(),
         }),
@@ -62,6 +89,52 @@ export interface OpenAIClientConfig {
     baseURL?: string;
     model?: string;
     timeout?: number;
+    /**
+     * Model capabilities configuration
+     */
+    capabilities?: {
+        /** Whether the model supports native tool calls via API */
+        supportsNativeToolCalls?: boolean;
+        /** Whether the model supports interleaved thinking (reasoning between tool calls) */
+        supportsInterleavedThinking?: boolean;
+    };
+}
+
+/**
+ * Tool definition for function calling
+ */
+export interface Tool {
+    type: "function";
+    function: {
+        name: string;
+        description: string;
+        parameters: {
+            type: "object";
+            properties: Record<string, unknown>;
+            required?: string[];
+        };
+    };
+}
+
+/**
+ * Tool call from the model
+ */
+export interface ToolCall {
+    id: string;
+    type: "function";
+    function: {
+        name: string;
+        arguments: string; // JSON string
+    };
+}
+
+/**
+ * Tool response to send back to the model
+ */
+export interface ToolResponse {
+    tool_call_id: string;
+    role: "tool";
+    content: string;
 }
 
 export interface OpenAIMessage {
@@ -69,6 +142,7 @@ export interface OpenAIMessage {
     content: string;
     name?: string;
     tool_call_id?: string;
+    tool_calls?: ToolCall[];
 }
 
 export interface OpenAICompletionRequest {
@@ -81,6 +155,8 @@ export interface OpenAICompletionRequest {
     presence_penalty?: number;
     stop?: string | string[];
     stream?: boolean;
+    tools?: Tool[];
+    tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } };
 }
 
 export interface OpenAICompletionResponse {
@@ -93,6 +169,7 @@ export interface OpenAICompletionResponse {
         message: {
             role: string;
             content: string;
+            tool_calls?: ToolCall[];
         };
         finish_reason: string;
     }>;
@@ -114,6 +191,15 @@ export interface OpenAIStreamChunk {
             role?: string;
             content?: string;
             reasoning_content?: string;
+            tool_calls?: Array<{
+                index?: number;
+                id?: string;
+                type?: string;
+                function?: {
+                    name?: string;
+                    arguments?: string;
+                };
+            }>;
         };
         finish_reason: string | null;
     }>;
@@ -124,6 +210,7 @@ export type StreamChunkType = "content" | "reasoning";
 export interface StreamCompletionResult {
     content: string;
     reasoning: string;
+    toolCalls?: DiogenesToolCall[];
 }
 
 export interface OpenAIErrorResponse {
@@ -153,10 +240,15 @@ function isOpenAIStreamChunk(val: unknown): val is OpenAIStreamChunk {
     return result.success;
 }
 
-import type { LLMClient, LLMClientConfig, StreamChunk } from "./anthropic-client";
+import type { LLMClient, LLMClientConfig, StreamChunk, LLMTool } from "./anthropic-client";
+import type { ToolCall as DiogenesToolCall } from "../types";
 
 export class OpenAIClient implements LLMClient {
-    private config: Required<LLMClientConfig>;
+    private config: Required<Omit<LLMClientConfig, 'capabilities'>>;
+    private capabilities: {
+        supportsNativeToolCalls: boolean;
+        supportsInterleavedThinking: boolean;
+    };
     private abortController: AbortController | null = null;
     private abortReason: "timeout" | "cancelled" | null = null;
 
@@ -166,6 +258,10 @@ export class OpenAIClient implements LLMClient {
             model: config.model || "gpt-4",
             timeout: config.timeout || 60000,
             apiKey: config.apiKey,
+        };
+        this.capabilities = {
+            supportsNativeToolCalls: config.capabilities?.supportsNativeToolCalls ?? true,
+            supportsInterleavedThinking: config.capabilities?.supportsInterleavedThinking ?? false,
         };
 
         if (!this.config.apiKey) {
@@ -179,6 +275,25 @@ export class OpenAIClient implements LLMClient {
             throw new Error(
                 `Invalid base URL: ${this.config.baseURL}. Must be a valid URL including protocol (http:// or https://).`,
             );
+        }
+    }
+
+    /**
+     * Get model capabilities
+     */
+    getCapabilities(): { supportsNativeToolCalls: boolean; supportsInterleavedThinking: boolean } {
+        return { ...this.capabilities };
+    }
+
+    /**
+     * Update model capabilities
+     */
+    updateCapabilities(capabilities: Partial<OpenAIClientConfig['capabilities']>): void {
+        if (capabilities?.supportsNativeToolCalls !== undefined) {
+            this.capabilities.supportsNativeToolCalls = capabilities.supportsNativeToolCalls;
+        }
+        if (capabilities?.supportsInterleavedThinking !== undefined) {
+            this.capabilities.supportsInterleavedThinking = capabilities.supportsInterleavedThinking;
         }
     }
 
@@ -301,16 +416,141 @@ export class OpenAIClient implements LLMClient {
     }
 
     /**
+     * Create a chat completion with tool calling support
+     * @param messages - Array of messages
+     * @param tools - Array of tool definitions
+     * @param options - Request options including tool_choice
+     * @returns Message with content and optional tool_calls
+     */
+    async createChatCompletionWithTools(
+        messages: OpenAIMessage[],
+        tools: Tool[],
+        options: Partial<OpenAICompletionRequest> = {},
+    ): Promise<{ content: string; toolCalls?: ToolCall[]; reasoning?: string }> {
+        const request: OpenAICompletionRequest = {
+            model: this.config.model,
+            messages,
+            tools,
+            tool_choice: options.tool_choice ?? "auto",
+            temperature: options.temperature ?? 1.0,
+            max_tokens: options.max_tokens,
+            top_p: options.top_p,
+            frequency_penalty: options.frequency_penalty,
+            presence_penalty: options.presence_penalty,
+            stop: options.stop,
+            stream: false,
+        };
+
+        // Clean up any existing abort controller
+        if (this.abortController) {
+            this.abortReason = "cancelled";
+            this.abortController.abort();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        this.abortController = new AbortController();
+        this.abortReason = null;
+        const timeoutId = setTimeout(() => {
+            this.abortReason = "timeout";
+            this.abortController?.abort();
+        }, this.config.timeout);
+
+        try {
+            const response = await fetch(`${this.config.baseURL}/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${this.config.apiKey}`,
+                },
+                body: JSON.stringify(request),
+                signal: this.abortController.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorData: unknown = await response.json();
+                if (isOpenAIErrorResponse(errorData)) {
+                    throw new Error(`OpenAI API error: ${errorData.error.message}`);
+                }
+                throw new Error(`OpenAI API error: ${JSON.stringify(errorData)}`);
+            }
+
+            const data: unknown = await response.json();
+            if (!isOpenAICompletionResponse(data)) {
+                throw new Error("Invalid response format from OpenAI API");
+            }
+
+            const message = data.choices[0].message;
+            return {
+                content: message.content,
+                toolCalls: message.tool_calls ?? undefined,
+            };
+        } catch (error) {
+            clearTimeout(timeoutId);
+
+            if (error instanceof Error) {
+                if (error.name === "AbortError") {
+                    if (this.abortReason === "cancelled") {
+                        throw new Error("Request cancelled");
+                    }
+                    throw new Error(`Request timeout after ${this.config.timeout}ms`);
+                }
+
+                const sanitizedBaseURL = this.config.baseURL.replace(/\/\/([^@]+)@/, "//***@");
+                const errorMsg = error.message?.toLowerCase() || "";
+                if (
+                    errorMsg.includes("fetch") ||
+                    errorMsg.includes("network") ||
+                    errorMsg.includes("failed")
+                ) {
+                    let detailedError = `Network error connecting to ${sanitizedBaseURL}: ${error.message}`;
+
+                    if (
+                        errorMsg.includes("certificate") ||
+                        errorMsg.includes("tls") ||
+                        errorMsg.includes("ssl")
+                    ) {
+                        detailedError +=
+                            "\nSSL/TLS certificate issue detected. If using a self-signed certificate, try adding NODE_TLS_REJECT_UNAUTHORIZED=0";
+                    } else if (errorMsg.includes("dns") || errorMsg.includes("hostname")) {
+                        detailedError +=
+                            "\nDNS resolution failed. Check if the API endpoint URL is correct.";
+                    } else if (
+                        errorMsg.includes("connection refused") ||
+                        errorMsg.includes("econnrefused")
+                    ) {
+                        detailedError +=
+                            "\nConnection refused. The API endpoint may be down or unreachable.";
+                    } else if (errorMsg.includes("timeout")) {
+                        detailedError += `\nRequest timed out after ${this.config.timeout}ms. The server may be slow or network congested.`;
+                    }
+
+                    throw new Error(detailedError);
+                }
+
+                throw error;
+            }
+            throw new Error(`Unknown error: ${String(error)}`);
+        } finally {
+            if (!this.abortController?.signal.aborted) {
+                this.abortController = null;
+            }
+        }
+    }
+
+    /**
      * Create a streaming chat completion
      * @param messages - Array of messages
      * @param onChunk - Callback for each chunk received
      * @param options - Request options
+     * @param tools - Optional array of tool definitions for native tool calling
      * @returns Full response content after stream completes
      */
     async createChatCompletionStream(
         messages: OpenAIMessage[],
         onChunk: (chunk: StreamChunk) => void,
         options: Partial<OpenAICompletionRequest> = {},
+        tools?: LLMTool[],
     ): Promise<StreamCompletionResult> {
         const request: OpenAICompletionRequest = {
             model: this.config.model,
@@ -323,6 +563,12 @@ export class OpenAIClient implements LLMClient {
             stop: options.stop,
             stream: true, // Enable streaming
         };
+
+        // Add tools if provided for native tool calling
+        if (tools && tools.length > 0) {
+            request.tools = tools;
+            request.tool_choice = options.tool_choice ?? "auto";
+        }
 
         // Clean up any existing abort controller
         if (this.abortController) {
@@ -339,6 +585,8 @@ export class OpenAIClient implements LLMClient {
 
         let fullContent = "";
         let reasoning_text = "";
+        // Accumulate tool calls from stream
+        const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
 
         try {
             const response = await fetch(`${this.config.baseURL}/chat/completions`, {
@@ -407,6 +655,25 @@ export class OpenAIClient implements LLMClient {
                             });
                         }
 
+                        // Handle streaming tool calls
+                        if (delta?.tool_calls) {
+                            for (const tc of delta.tool_calls) {
+                                const index = tc.index ?? 0;
+                                const existing = toolCallMap.get(index) || {
+                                    id: "",
+                                    name: "",
+                                    arguments: "",
+                                };
+
+                                if (tc.id) existing.id = tc.id;
+                                if (tc.function?.name) existing.name += tc.function.name;
+                                if (tc.function?.arguments)
+                                    existing.arguments += tc.function.arguments;
+
+                                toolCallMap.set(index, existing);
+                            }
+                        }
+
                         if (delta?.content) {
                             // NOTE: Reasoning is kept SEPARATE from output content.
                             // It's emitted via onChunk for user visibility but NOT included
@@ -422,9 +689,32 @@ export class OpenAIClient implements LLMClient {
                 }
             }
 
+            // Convert accumulated tool calls to Diogenes format
+            const finalToolCalls: DiogenesToolCall[] = [];
+            for (let i = 0; i < toolCallMap.size; i++) {
+                const tc = toolCallMap.get(i);
+                if (tc && tc.name) {
+                    let params: Record<string, unknown> = {};
+                    try {
+                        const parsed: unknown = JSON.parse(tc.arguments);
+                        const parsedParams = z.record(z.string(), z.unknown()).safeParse(parsed);
+                        if (parsedParams.success) {
+                            params = parsedParams.data;
+                        }
+                    } catch {
+                        // Keep default empty params if parsing fails
+                    }
+                    finalToolCalls.push({
+                        tool: tc.name,
+                        params,
+                    });
+                }
+            }
+
             return {
                 content: fullContent,
                 reasoning: reasoning_text.trim(),
+                toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
             };
         } catch (error) {
             clearTimeout(timeoutId);
@@ -504,6 +794,9 @@ export class OpenAIClient implements LLMClient {
      * Get current configuration
      */
     getConfig(): Required<LLMClientConfig> {
-        return { ...this.config };
+        return {
+            ...this.config,
+            capabilities: { ...this.capabilities },
+        };
     }
 }

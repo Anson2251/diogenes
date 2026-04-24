@@ -336,22 +336,10 @@ export function parseToolCalls(text: string): ParseResult {
                 },
             };
         }
+        // No tool calls found - this is valid (assistant may just be chatting)
         return {
-            success: false,
-            error: {
-                code: "PARSE_ERROR",
-                message: "NO tool call detected. Make sure you are using the correct tool call protocol. If you want to mark the task as finished, call task.end.",
-                suggestion: `XML tool call is NOT valid at ANY time.
-                You MUST use Markdown code blocks starting with \`\`\`tool-call and ending with \`\`\`. Inside the block, write a JSON array of tool calls.
-                Tool call:
-                \`\`\`tool-call
-                [
-                  {"tool":"<namespace>.<tool>","params":{<some params>}}
-                  ...
-                ]
-                \`\`\`
-                `,
-            },
+            success: true,
+            toolCalls: [],
         };
     }
 

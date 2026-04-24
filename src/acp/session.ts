@@ -27,7 +27,7 @@ import { getProviderApiKeyEnvVarName } from "../utils/api-key-manager";
 import { ensureDefaultModelsConfigSync } from "../utils/config-bootstrap";
 import { loadModelsConfig, resolveModel } from "../utils/models-config";
 import { collectSetupDiagnostics } from "../utils/setup-diagnostics";
-import { tryParsePartialToolCalls } from "../utils/tool-parser";
+
 import {
     createBaseSlashCommandRegistry,
     createSnapshotSlashCommands,
@@ -1786,7 +1786,8 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
             return;
         }
 
-        const partialResult = tryParsePartialToolCalls(this.activeRun.streamedContent);
+        const toolCallManager = this.diogenes.getToolCallManager();
+        const partialResult = toolCallManager.tryParsePartial(this.activeRun.streamedContent);
         if (!partialResult.isInToolCallBlock || partialResult.completeToolCalls.length === 0) {
             return;
         }

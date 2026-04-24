@@ -85,6 +85,18 @@ import { createDiogenes } from "./create-diogenes";
 
 // Re-export utility functions
 export { parseToolCalls, formatToolResults } from "./utils/tool-parser";
+export {
+    ToolCallManager,
+    createToolResponseMessage,
+    createAssistantMessageWithToolCalls,
+} from "./utils/tool-call-manager";
+export type {
+    NativeToolCall,
+    ToolCallSource,
+    ToolCallResult,
+    LLMResponse,
+    ToolCallManagerConfig,
+} from "./utils/tool-call-manager";
 export { ResticClient, ResticCommandError, ResticParseError } from "./utils/restic";
 export {
     resolveDiogenesAppPaths,

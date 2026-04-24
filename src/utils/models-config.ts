@@ -18,6 +18,8 @@ export const ModelDefinitionSchema = z.object({
     contextWindow: z.number().optional(),
     maxTokens: z.number().optional(),
     temperature: z.number().optional(),
+    supportsInterleavedThinking: z.boolean().optional(),
+    supportsNativeToolCalls: z.boolean().optional(),
 });
 
 export const ProviderDefinitionSchema = z.object({
@@ -25,6 +27,7 @@ export const ProviderDefinitionSchema = z.object({
     baseURL: z.string().optional(),
     supportsToolRole: z.boolean().optional(),
     models: z.record(z.string(), ModelDefinitionSchema),
+    supportsNativeToolCalls: z.boolean().optional(),
 });
 
 export const ModelsConfigSchema = z.object({
@@ -81,6 +84,11 @@ export function resolveModel(config: ModelsConfig, modelRef: string): ResolvedMo
         throw new MissingApiKeyError(providerName);
     }
 
+    // Model-level settings override provider-level
+    // For supportsInterleavedThinking: only model-level setting matters (defaults to false)
+    // For supportsNativeToolCalls: model overrides provider, provider defaults to true
+    const supportsNativeToolCalls = model.supportsNativeToolCalls ?? provider.supportsNativeToolCalls ?? true;
+
     return {
         provider: providerName,
         providerStyle: provider.style,
@@ -92,6 +100,8 @@ export function resolveModel(config: ModelsConfig, modelRef: string): ResolvedMo
         contextWindow: model.contextWindow,
         maxTokens: model.maxTokens ?? model.contextWindow,
         temperature: model.temperature,
+        supportsInterleavedThinking: model.supportsInterleavedThinking ?? false,
+        supportsNativeToolCalls,
     };
 }
 

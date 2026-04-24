@@ -4,14 +4,14 @@
 
 import { z } from "zod";
 
-import type { StreamChunk, LLMClient } from "../llm/anthropic-client";
+import type { StreamChunk, LLMClient, LLMTool } from "../llm/anthropic-client";
 
 import {
-    DEFAULT_SYSTEM_PROMPT,
     DEFAULT_SECURITY_CONFIG,
     DEFAULT_LOGGER_CONFIG,
     DEFAULT_TOKEN_LIMIT,
     getContextWindowForModel,
+    generateSystemPrompt,
 } from "../config/default-prompts";
 import { AnthropicClient } from "../llm/anthropic-client";
 import { OpenAIClient } from "../llm/openai-client";
@@ -25,8 +25,8 @@ import {
     ToolDefinition,
     LLMConfig,
 } from "../types";
-import { parseToolCalls, formatToolResults } from "../utils/tool-parser";
 import { PromptBuilder } from "./prompt-builder";
+import { ToolCallManager } from "../utils/tool-call-manager";
 import { WorkspaceManager } from "./workspace";
 
 export class DiogenesContextManager {
@@ -36,6 +36,7 @@ export class DiogenesContextManager {
     private toolRegistry: ToolRegistry;
     private state: DiogenesState;
     private llmClient: LLMClient | null = null;
+    private toolCallManager: ToolCallManager;
     private task: string = "";
 
     constructor(config: DiogenesConfig = {}) {
@@ -56,6 +57,20 @@ export class DiogenesContextManager {
         if (this.config.llm.apiKey) {
             this.llmClient = this.createLLMClient(this.config.llm);
         }
+
+        // Initialize tool call manager with LLM client capabilities
+        const capabilities = this.llmClient?.getCapabilities();
+        const useNativeToolCalls = capabilities?.supportsNativeToolCalls ?? true;
+        this.toolCallManager = new ToolCallManager({
+            preferNative: useNativeToolCalls,
+            enableTextFallback: true,
+            validateToolNames: true,
+            supportsInterleavedThinking: capabilities?.supportsInterleavedThinking ?? false,
+        });
+
+        // Set system prompt based on tool call mode (or use user-provided custom prompt)
+        const systemPrompt = config.systemPrompt || generateSystemPrompt(useNativeToolCalls);
+        this.promptBuilder.setSystemPrompt(systemPrompt);
     }
 
     private createLLMClient(llmConfig: Partial<LLMConfig>): LLMClient {
@@ -88,7 +103,7 @@ export class DiogenesContextManager {
         };
 
         return {
-            systemPrompt: config.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+            systemPrompt: config.systemPrompt || "", // Will be set in constructor based on tool call mode
             tokenLimit,
             security: {
                 ...DEFAULT_SECURITY_CONFIG,
@@ -219,6 +234,63 @@ export class DiogenesContextManager {
         }
 
         return parts.join('\n');
+    }
+
+    /**
+     * Convert internal type names to JSON Schema standard types
+     */
+    private convertToJSONSchemaType(internalType: string): string {
+        const typeMap: Record<string, string> = {
+            bool: "boolean",
+            int: "integer",
+            float: "number",
+            number: "number",
+            str: "string",
+            string: "string",
+            arr: "array",
+            array: "array",
+            obj: "object",
+            object: "object",
+        };
+        return typeMap[internalType] ?? internalType;
+    }
+
+    /**
+     * Get tools in LLMTool format for native API tool calling
+     */
+    getToolsForNativeCalling(): LLMTool[] {
+        const definitions = this.toolRegistry.getAllDefinitions();
+        return definitions.map((def) => {
+            const properties: Record<string, unknown> = {};
+            const required: string[] = [];
+
+            for (const [paramName, paramDef] of Object.entries(def.params)) {
+                properties[paramName] = {
+                    type: this.convertToJSONSchemaType(paramDef.type),
+                    description: paramDef.description,
+                };
+                if (!paramDef.optional) {
+                    required.push(paramName);
+                }
+            }
+
+            // API requires name to match pattern: ^[a-zA-Z0-9_-]+$
+            // Replace dots with underscores to satisfy the pattern
+            const apiSafeName = `${def.namespace}_${def.name}`;
+
+            return {
+                type: "function" as const,
+                function: {
+                    name: apiSafeName,
+                    description: def.description,
+                    parameters: {
+                        type: "object" as const,
+                        properties,
+                        required: required.length > 0 ? required : undefined,
+                    },
+                },
+            };
+        });
     }
 
     // ==================== Context Management ====================
@@ -390,6 +462,10 @@ export class DiogenesContextManager {
         return this.workspace;
     }
 
+    getToolCallManager(): ToolCallManager {
+        return this.toolCallManager;
+    }
+
     getState(): DiogenesState {
         return { ...this.state };
     }
@@ -501,21 +577,24 @@ export class DiogenesContextManager {
         // Reasoning is kept separate - only use content for the assistant message
         const response = result.content;
 
-        const parseResult = parseToolCalls(response);
+        // Use ToolCallManager to process response
+        const processResult = this.toolCallManager.processResponse({
+            content: response,
+        });
 
-        if (!parseResult.success) {
+        if (!processResult.success) {
             this.state.toolResults.push(
-                `## Parse Error\n${parseResult.error?.message}\nSuggestion: ${parseResult.error?.suggestion}\n--`,
+                `## Parse Error\n${processResult.error?.message}\nSuggestion: ${processResult.error?.suggestion}\n--`,
             );
             return response;
         }
 
-        const toolCalls = parseResult.toolCalls!;
+        const toolCalls = processResult.toolCalls;
 
         if (toolCalls.length > 0) {
             const results = await this.executeToolCalls(toolCalls);
 
-            const formattedResults = formatToolResults(
+            const formattedResults = this.toolCallManager.formatResults(
                 toolCalls,
                 results,
                 (toolCall: ToolCall, result: ToolResult): string => {

@@ -346,4 +346,126 @@ providers:
             expect(output).not.toContain("Default:");
         });
     });
+
+    describe("native tool calls support", () => {
+        it("defaults to true when not specified", () => {
+            vi.stubEnv("TEST_API_KEY", "sk-key");
+
+            const config = {
+                providers: {
+                    test: {
+                        style: "openai",
+                        models: {
+                            "model-1": { name: "Model 1" },
+                        },
+                    },
+                },
+            };
+
+            const resolved = resolveModel(config as any, "test/model-1");
+            expect(resolved.supportsNativeToolCalls).toBe(true);
+        });
+
+        it("inherits from provider when model doesn't specify", () => {
+            vi.stubEnv("TEST_API_KEY", "sk-key");
+
+            const config = {
+                providers: {
+                    test: {
+                        style: "openai",
+                        supportsNativeToolCalls: false,
+                        models: {
+                            "model-1": { name: "Model 1" },
+                        },
+                    },
+                },
+            };
+
+            const resolved = resolveModel(config as any, "test/model-1");
+            expect(resolved.supportsNativeToolCalls).toBe(false);
+        });
+
+        it("model-level overrides provider-level", () => {
+            vi.stubEnv("TEST_API_KEY", "sk-key");
+
+            const config = {
+                providers: {
+                    test: {
+                        style: "openai",
+                        supportsNativeToolCalls: false,
+                        models: {
+                            "model-1": {
+                                name: "Model 1",
+                                supportsNativeToolCalls: true,
+                            },
+                        },
+                    },
+                },
+            };
+
+            const resolved = resolveModel(config as any, "test/model-1");
+            expect(resolved.supportsNativeToolCalls).toBe(true);
+        });
+    });
+
+    describe("interleaved thinking support", () => {
+        it("defaults to false when not specified", () => {
+            vi.stubEnv("TEST_API_KEY", "sk-key");
+
+            const config = {
+                providers: {
+                    test: {
+                        style: "openai",
+                        models: {
+                            "model-1": { name: "Model 1" },
+                        },
+                    },
+                },
+            };
+
+            const resolved = resolveModel(config as any, "test/model-1");
+            expect(resolved.supportsInterleavedThinking).toBe(false);
+        });
+
+        it("uses model-level setting when specified", () => {
+            vi.stubEnv("TEST_API_KEY", "sk-key");
+
+            const config = {
+                providers: {
+                    test: {
+                        style: "openai",
+                        models: {
+                            "model-1": {
+                                name: "Model 1",
+                                supportsInterleavedThinking: true,
+                            },
+                        },
+                    },
+                },
+            };
+
+            const resolved = resolveModel(config as any, "test/model-1");
+            expect(resolved.supportsInterleavedThinking).toBe(true);
+        });
+
+        it("provider-level setting is ignored for interleaved thinking", () => {
+            vi.stubEnv("TEST_API_KEY", "sk-key");
+
+            const config = {
+                providers: {
+                    test: {
+                        style: "openai",
+                        // This should be ignored - interleaved thinking is only model-level
+                        models: {
+                            "model-1": { name: "Model 1" },
+                        },
+                    },
+                },
+            };
+
+            const resolved = resolveModel(config as any, "test/model-1");
+            // Should default to false even if provider had it set
+            expect(resolved.supportsInterleavedThinking).toBe(false);
+        });
+    });
 });

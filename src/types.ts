@@ -231,6 +231,16 @@ export interface ModelDefinition {
     contextWindow?: number;
     maxTokens?: number;
     temperature?: number;
+    /**
+     * Whether this model supports interleaved thinking (reasoning between tool calls).
+     * Default to true.
+     */
+    supportsInterleavedThinking?: boolean;
+    /**
+     * Whether this model supports native tool calls via API.
+     * If not set, inherits from provider definition.
+     */
+    supportsNativeToolCalls?: boolean;
 }
 
 export interface ProviderDefinition {
@@ -238,6 +248,12 @@ export interface ProviderDefinition {
     baseURL?: string;
     supportsToolRole?: boolean;
     models: Record<string, ModelDefinition>;
+    /**
+     * Default native tool call support for models in this provider.
+     * Can be overridden at the model level.
+     * @default true
+     */
+    supportsNativeToolCalls?: boolean;
 }
 
 export interface ModelsConfig {
@@ -256,6 +272,16 @@ export interface ResolvedModel {
     contextWindow?: number;
     maxTokens?: number;
     temperature?: number;
+    /**
+     * Whether interleaved thinking is supported.
+     * Model-level setting overrides provider-level.
+     */
+    supportsInterleavedThinking: boolean;
+    /**
+     * Whether native tool calls are supported.
+     * Model-level setting overrides provider-level.
+     */
+    supportsNativeToolCalls: boolean;
 }
 
 // ==================== Framework Configuration ====================

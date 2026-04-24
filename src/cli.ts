@@ -25,7 +25,6 @@ import {
     Logger,
     LogLevel,
     createDiogenes,
-    formatToolResults,
     startACPServer,
     type ConversationMessage,
     type DiogenesContextManager,
@@ -1265,7 +1264,8 @@ ${colors.bright}Multiline:${colors.reset}
         try {
             const results = await diogenes.executeToolCalls(toolCalls);
 
-            const formatted = formatToolResults(toolCalls, results);
+            const toolCallManager = diogenes.getToolCallManager();
+            const formatted = toolCallManager.formatResults(toolCalls, results);
             console.log(formatted);
 
             for (let i = 0; i < toolCalls.length; i++) {
