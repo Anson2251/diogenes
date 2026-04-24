@@ -174,8 +174,6 @@ export class DiogenesContextManager {
     getToolDefinitions(): string {
         const definitions = this.toolRegistry.getAllDefinitions();
 
-        const parts: string[] = [];
-
         const byNamespace: Record<string, ToolDefinition[]> = {};
         for (const def of definitions) {
             if (!byNamespace[def.namespace]) {
@@ -184,15 +182,24 @@ export class DiogenesContextManager {
             byNamespace[def.namespace].push(def);
         }
 
+        const parts: string[] = [];
+
         for (const [namespace, tools] of Object.entries(byNamespace)) {
-            parts.push(`\n--\n\n[${namespace}]`);
+            parts.push(`\n## NAMESPACE: ${namespace}\n`);
 
             for (const tool of tools) {
-                parts.push(`\n\n  ${tool.name}: ${tool.description}`);
+                const paramSignatures: string[] = [];
+                for (const [paramName, paramDef] of Object.entries(tool.params)) {
+                    const optionalMark = paramDef.optional ? '?' : '';
+                    paramSignatures.push(`${paramName}${optionalMark}`);
+                }
+                const signature = `${namespace}.${tool.name}(${paramSignatures.join(', ')})`;
+
+                parts.push(`### ${signature}`);
+                parts.push(`${tool.description}\n`);
 
                 const requiredParams: string[] = [];
                 const optionalParams: string[] = [];
-
                 for (const [paramName, paramDef] of Object.entries(tool.params)) {
                     if (paramDef.optional) {
                         optionalParams.push(paramName);
@@ -201,18 +208,17 @@ export class DiogenesContextManager {
                     }
                 }
 
-                if (requiredParams.length > 0) {
-                    parts.push(`    required: ${requiredParams.join(", ")}`);
+                if (requiredParams.length) {
+                    parts.push(`- **Required:** ${requiredParams.join(', ')}`);
                 }
-                if (optionalParams.length > 0) {
-                    parts.push(`    optional: ${optionalParams.join(", ")}`);
+                if (optionalParams.length) {
+                    parts.push(`- **Optional:** ${optionalParams.join(', ')}`);
                 }
+                parts.push('');
             }
-
-            parts.push("");
         }
 
-        return parts.join("\n");
+        return parts.join('\n');
     }
 
     // ==================== Context Management ====================

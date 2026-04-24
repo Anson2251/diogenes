@@ -127,6 +127,10 @@ Quality is primary. Efficiency matters, but never at the cost of correctness.
 
 ## Tool Calling
 
+CRITICAL: Do NOT use XML tags like <tool-call> or </tool-call>.
+You MUST use Markdown code blocks starting with \`\`\`tool-call and ending with \`\`\`.
+Inside the block, write a JSON array of tool calls.
+
 When you need tools, respond with a \`tool-call\` code block containing a JSON array.
 The actionable part of the response must be one or more complete \`tool-call\` blocks.
 Text before a tool-call block is allowed.

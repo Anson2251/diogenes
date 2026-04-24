@@ -322,16 +322,6 @@ export class WorkspaceManager {
         }
     }
 
-    private applyOffsets(index: number, offsets: Array<{ at: number; delta: number }>): number {
-        let newIndex = index;
-        for (const offset of offsets) {
-            if (offset.at < index) {
-                newIndex += offset.delta;
-            }
-        }
-        return newIndex;
-    }
-
     private mergeRanges(
         ranges: Array<{ start: number; end: number }>,
     ): Array<{ start: number; end: number }> {

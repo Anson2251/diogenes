@@ -310,10 +310,49 @@ class HeredocParseError extends Error {
 }
 
 export function parseToolCalls(text: string): ParseResult {
+    const mayInXmlFormat = text.trim().includes("<tool-call>");
+    const inXmlFormat = text.trim().endsWith("</tool-call>");
+
     const { blocks, errors: blockErrors } = extractToolCallBlocks(text);
 
-    if (blocks.length === 0 && blockErrors.length === 0) {
-        return { success: true, toolCalls: [] };
+    if (blocks.length === 0 && blockErrors.length === 0 || inXmlFormat) {
+        if (mayInXmlFormat) {
+            return {
+                success: false,
+                error: {
+                    code: "PARSE_ERROR",
+                    message: "You are using the XML tags like <tool-call> or </tool-call> to pass tool calls.",
+                    suggestion: `XML tool call is NOT valid at ANY time.
+                    You MUST use Markdown code blocks starting with \`\`\`tool-call and ending with \`\`\`. Inside the block, write a JSON array of tool calls.
+                    Tool call:
+                    \`\`\`tool-call
+                    [
+                      {"tool":"<namespace>.<tool>","params":{<some params>}}
+                      ...
+                    ]
+                    \`\`\`
+                    DO NOT emit ANYTHING like <tool-call> ... </tool-call>
+                    `,
+                },
+            };
+        }
+        return {
+            success: false,
+            error: {
+                code: "PARSE_ERROR",
+                message: "NO tool call detected. Make sure you are using the correct tool call protocol. If you want to mark the task as finished, call task.end.",
+                suggestion: `XML tool call is NOT valid at ANY time.
+                You MUST use Markdown code blocks starting with \`\`\`tool-call and ending with \`\`\`. Inside the block, write a JSON array of tool calls.
+                Tool call:
+                \`\`\`tool-call
+                [
+                  {"tool":"<namespace>.<tool>","params":{<some params>}}
+                  ...
+                ]
+                \`\`\`
+                `,
+            },
+        };
     }
 
     const allToolCalls: ToolCall[] = [];
