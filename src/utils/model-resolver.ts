@@ -22,6 +22,8 @@ export const ModelDefinitionSchema = z.object({
     contextWindow: z.number().optional(),
     maxTokens: z.number().optional(),
     temperature: z.number().optional(),
+    supportsInterleavedThinking: z.boolean().optional(),
+    supportsNativeToolCalls: z.boolean().optional(),
 });
 
 export const ProviderDefinitionSchema = z.object({
@@ -29,6 +31,7 @@ export const ProviderDefinitionSchema = z.object({
     baseURL: z.string().optional(),
     supportsToolRole: z.boolean().optional(),
     models: z.record(z.string(), ModelDefinitionSchema),
+    supportsNativeToolCalls: z.boolean().optional(),
 });
 
 export const ModelsConfigSchema = z.object({
@@ -193,6 +196,10 @@ export function applyResolvedModel(config: Partial<DiogenesConfig>, resolved: Re
         baseURL: resolved.baseURL || currentLLM.baseURL,
         maxTokens: resolved.maxTokens ?? currentLLM.maxTokens,
         temperature: resolved.temperature ?? currentLLM.temperature,
+        capabilities: {
+            supportsNativeToolCalls: resolved.supportsNativeToolCalls,
+            supportsInterleavedThinking: resolved.supportsInterleavedThinking,
+        },
     };
 }
 

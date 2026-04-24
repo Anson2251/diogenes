@@ -683,6 +683,10 @@ function createConfig(options: CLIOptions): DiogenesConfig {
                 baseURL: resolved.baseURL || currentLLM.baseURL,
                 maxTokens: resolved.maxTokens ?? currentLLM.maxTokens,
                 temperature: resolved.temperature ?? currentLLM.temperature,
+                capabilities: {
+                    supportsNativeToolCalls: resolved.supportsNativeToolCalls,
+                    supportsInterleavedThinking: resolved.supportsInterleavedThinking,
+                },
             };
         }
     }

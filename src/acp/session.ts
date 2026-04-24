@@ -389,94 +389,30 @@ function formatFileEditResult(pathName: string, result: ToolResult): string | nu
     }
 
     const resultData = result.data;
-    const appliedRaw: unknown[] = Array.isArray(resultData.applied) ? resultData.applied : [];
-    const errorsRaw: unknown[] = Array.isArray(resultData.errors) ? resultData.errors : [];
-    let fileState: Record<string, unknown> | undefined;
-    // Safely extract file_state with proper type narrowing
+    const matchLine = typeof resultData.match_line === "number" ? resultData.match_line : undefined;
+    const matchCount = typeof resultData.match_count === "number" ? resultData.match_count : undefined;
+
+    let totalLines: number | undefined;
     const fileStateInput: unknown = resultData.file_state;
     if (typeof fileStateInput === "object" && fileStateInput !== null) {
-        fileState = {};
-        const keys = Object.keys(fileStateInput);
-        for (const key of keys) {
-            const descriptor = Object.getOwnPropertyDescriptor(fileStateInput, key);
-            if (descriptor && "value" in descriptor) {
-                fileState[key] = descriptor.value;
-            }
+        const descriptor = Object.getOwnPropertyDescriptor(fileStateInput, "total_lines");
+        if (descriptor && typeof descriptor.value === "number") {
+            totalLines = descriptor.value;
         }
     }
-    const totalLines: number | undefined =
-        typeof fileState?.total_lines === "number" ? fileState.total_lines : undefined;
-
-    interface FileEdit {
-        mode: string;
-        matchedRange: [number, number];
-        newRange: [number, number];
-    }
-
-    interface EditError {
-        index: number;
-        message: string;
-    }
-
-    const applied: FileEdit[] = appliedRaw.filter((edit: unknown): edit is FileEdit => {
-        if (typeof edit !== "object" || edit === null) {
-            return false;
-        }
-        // Use property descriptors to avoid type assertions
-        const modeDescriptor = Object.getOwnPropertyDescriptor(edit, "mode");
-        const matchedRangeDescriptor = Object.getOwnPropertyDescriptor(edit, "matchedRange");
-        const newRangeDescriptor = Object.getOwnPropertyDescriptor(edit, "newRange");
-        return (
-            modeDescriptor !== undefined &&
-            typeof modeDescriptor.value === "string" &&
-            matchedRangeDescriptor !== undefined &&
-            Array.isArray(matchedRangeDescriptor.value) &&
-            newRangeDescriptor !== undefined &&
-            Array.isArray(newRangeDescriptor.value)
-        );
-    });
-
-    const errors: EditError[] = errorsRaw.filter((err: unknown): err is EditError => {
-        if (typeof err !== "object" || err === null) {
-            return false;
-        }
-        const indexDescriptor = Object.getOwnPropertyDescriptor(err, "index");
-        const messageDescriptor = Object.getOwnPropertyDescriptor(err, "message");
-        return (
-            indexDescriptor !== undefined &&
-            typeof indexDescriptor.value === "number" &&
-            messageDescriptor !== undefined &&
-            typeof messageDescriptor.value === "string"
-        );
-    });
 
     const lines: string[] = [];
-    const summary = [
-        `Updated ${pathName}: ${applied.length} edit${applied.length === 1 ? "" : "s"} applied`,
-    ];
-    if (errors.length > 0) {
-        summary.push(`${errors.length} failed`);
+    const parts = [`Updated ${pathName}`];
+    if (typeof matchLine === "number") {
+        parts.push(`replaced at line ${matchLine}`);
+    }
+    if (typeof matchCount === "number" && matchCount > 1) {
+        parts.push(`${matchCount - 1} other match${matchCount - 1 === 1 ? "" : "es"}`);
     }
     if (typeof totalLines === "number") {
-        summary.push(`${totalLines} total lines`);
+        parts.push(`${totalLines} total lines`);
     }
-    lines.push(summary.join(", "));
-
-    for (const edit of applied.slice(0, 3)) {
-        lines.push(
-            `${edit.mode} lines ${edit.matchedRange[0]}-${edit.matchedRange[1]} -> ${edit.newRange[0]}-${edit.newRange[1]}`,
-        );
-    }
-    if (applied.length > 3) {
-        lines.push(`${applied.length - 3} more edit${applied.length - 3 === 1 ? "" : "s"} applied`);
-    }
-
-    for (const error of errors.slice(0, 2)) {
-        lines.push(`Edit ${error.index} failed: ${error.message}`);
-    }
-    if (errors.length > 2) {
-        lines.push(`${errors.length - 2} more edit failures`);
-    }
+    lines.push(parts.join(", "));
 
     return lines.join("\n");
 }
@@ -940,6 +876,23 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
         this.description = state.metadata?.description ?? this.description;
 
         if (state.llm) {
+            // Load capabilities from models config (not from persisted state)
+            let capabilities: { supportsNativeToolCalls?: boolean; supportsInterleavedThinking?: boolean } = {};
+            try {
+                const modelsPath = ensureDefaultModelsConfigSync();
+                const modelsConfig = loadModelsConfig(modelsPath);
+                if (modelsConfig && state.llm.provider && state.llm.model) {
+                    const modelRef = `${state.llm.provider}/${state.llm.model}`;
+                    const resolved = resolveModel(modelsConfig, modelRef);
+                    capabilities = {
+                        supportsNativeToolCalls: resolved.supportsNativeToolCalls,
+                        supportsInterleavedThinking: resolved.supportsInterleavedThinking,
+                    };
+                }
+            } catch {
+                // Ignore errors, use default capabilities
+            }
+
             this.diogenes.setLLMConfig({
                 provider: state.llm.provider,
                 providerStyle: state.llm.providerStyle,
@@ -949,6 +902,7 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                 maxTokens: state.llm.maxTokens,
                 temperature: state.llm.temperature,
                 apiKey: this.getResolvedLLMApiKey(state.llm.provider),
+                capabilities,
             });
         }
 
@@ -1163,6 +1117,10 @@ export class ACPSession implements SnapshotStateProvider, SnapshotStateRestorer 
                     apiKey: resolved.apiKey,
                     maxTokens: resolved.maxTokens,
                     temperature: resolved.temperature,
+                    capabilities: {
+                        supportsNativeToolCalls: resolved.supportsNativeToolCalls,
+                        supportsInterleavedThinking: resolved.supportsInterleavedThinking,
+                    },
                 });
                 this.updatedAt = new Date().toISOString();
                 await this.persistMetadata();

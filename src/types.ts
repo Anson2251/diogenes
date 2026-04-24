@@ -221,6 +221,15 @@ export interface LLMConfig {
     provider?: string;
     providerStyle?: LLMProviderStyle;
     supportsToolRole?: boolean;
+    /**
+     * Model capabilities configuration
+     */
+    capabilities?: {
+        /** Whether the model supports native tool calls via API */
+        supportsNativeToolCalls?: boolean;
+        /** Whether the model supports interleaved thinking (reasoning between tool calls) */
+        supportsInterleavedThinking?: boolean;
+    };
 }
 
 // ==================== Models Configuration ====================

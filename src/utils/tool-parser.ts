@@ -13,19 +13,8 @@ const fileLoadDataSchema = z.object({
 });
 
 const fileEditDataSchema = z.object({
-    applied: z.array(
-        z.object({
-            mode: z.string(),
-            matchedRange: z.tuple([z.number(), z.number()]),
-            newRange: z.tuple([z.number(), z.number()]),
-        }),
-    ),
-    errors: z.array(
-        z.object({
-            index: z.number(),
-            message: z.string(),
-        }),
-    ),
+    match_line: z.number(),
+    match_count: z.number(),
     file_state: z
         .object({
             total_lines: z.number(),
@@ -310,7 +299,7 @@ class HeredocParseError extends Error {
 }
 
 export function parseToolCalls(text: string): ParseResult {
-    const mayInXmlFormat = text.trim().includes("<tool-call>");
+    const mayInXmlFormat = text.trim().includes("<tool-call>") || text.trim().includes("<tool_call>");
     const inXmlFormat = text.trim().endsWith("</tool-call>");
 
     const { blocks, errors: blockErrors } = extractToolCallBlocks(text);
@@ -321,7 +310,7 @@ export function parseToolCalls(text: string): ParseResult {
                 success: false,
                 error: {
                     code: "PARSE_ERROR",
-                    message: "You are using the XML tags like <tool-call> or </tool-call> to pass tool calls.",
+                    message: "You are using XML tags like <tool-call> or <tool_call> to pass tool calls.",
                     suggestion: `XML tool call is NOT valid at ANY time.
                     You MUST use Markdown code blocks starting with \`\`\`tool-call and ending with \`\`\`. Inside the block, write a JSON array of tool calls.
                     Tool call:
@@ -331,7 +320,7 @@ export function parseToolCalls(text: string): ParseResult {
                       ...
                     ]
                     \`\`\`
-                    DO NOT emit ANYTHING like <tool-call> ... </tool-call>
+                    DO NOT emit ANYTHING like <tool-call> ... </tool-call> or <tool_call> ... </tool_call>
                     `,
                 },
             };
@@ -671,19 +660,11 @@ function formatSingleToolResult(toolCall: ToolCall, result: ToolResult): string 
             case "file.edit": {
                 if (isFileEditData(result.data)) {
                     lines.push(`Edited: ${String(toolCall.params.path)}`);
-                    if (result.data.applied.length > 0) {
-                        lines.push(`Applied ${result.data.applied.length} edit(s):`);
-                        for (const edit of result.data.applied) {
-                            lines.push(
-                                `  - ${edit.mode} at lines ${edit.matchedRange[0]}-${edit.matchedRange[1]} → ${edit.newRange[0]}-${edit.newRange[1]}`,
-                            );
-                        }
-                    }
-                    if (result.data.errors.length > 0) {
-                        lines.push(`Failed ${result.data.errors.length} edit(s):`);
-                        for (const err of result.data.errors) {
-                            lines.push(`  - Edit ${err.index}: ${err.message}`);
-                        }
+                    const { match_line, match_count } = result.data;
+                    lines.push(`Replaced at line ${match_line}.`);
+                    const extra = match_count - 1;
+                    if (extra > 0) {
+                        lines.push(`${extra} other match${extra === 1 ? "" : "es"} for the same text (use approxLineNumber to disambiguate).`);
                     }
                     const totalLines = result.data.file_state?.total_lines;
                     if (totalLines !== undefined) {

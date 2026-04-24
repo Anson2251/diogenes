@@ -70,7 +70,12 @@ export abstract class BaseTool<TParams extends z.ZodType> implements ToolOutputF
     async execute(params: unknown): Promise<ToolResult> {
         const validation = this.schema.safeParse(params);
         if (!validation.success) {
-            return this.error("INVALID_PARAMS", "Validation failed", {
+            const readableErrors = validation.error.issues.map((issue) => {
+                const path = issue.path.length > 0 ? issue.path.join(".") : "(root)";
+                return `  - ${path}: ${issue.message}`;
+            });
+            const detailMsg = `Validation failed:\n${readableErrors.join("\n")}`;
+            return this.error("INVALID_PARAMS", detailMsg, {
                 issues: validation.error.issues,
             });
         }

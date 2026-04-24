@@ -68,8 +68,7 @@ export class DiogenesContextManager {
             supportsInterleavedThinking: capabilities?.supportsInterleavedThinking ?? false,
         });
 
-        // Set system prompt based on tool call mode (or use user-provided custom prompt)
-        const systemPrompt = config.systemPrompt || generateSystemPrompt(useNativeToolCalls);
+        const systemPrompt = generateSystemPrompt(useNativeToolCalls, config.systemPrompt);
         this.promptBuilder.setSystemPrompt(systemPrompt);
     }
 
@@ -85,6 +84,7 @@ export class DiogenesContextManager {
             baseURL: llmConfig.baseURL,
             model: llmConfig.model,
             timeout: llmConfig.timeout,
+            capabilities: llmConfig.capabilities,
         };
 
         if (providerStyle === "anthropic") {

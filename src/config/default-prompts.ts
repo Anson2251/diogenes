@@ -138,18 +138,18 @@ Quality is primary. Efficiency matters, but never at the cost of correctness.
 const JSON_TOOL_CALLING_SECTION = `
 ## Tool Calling
 
-CRITICAL: Do NOT use XML tags like <tool-call> or </tool-call>.
+CRITICAL: Do NOT use XML tags like <tool-call> or </tool-call> or <tool_call> or </tool_call>.
 You MUST use Markdown code blocks starting with \`\`\`tool-call and ending with \`\`\`.
 Inside the block, write a JSON array of tool calls.
 
 When you need tools, respond with a \`tool-call\` code block containing a JSON array.
-The actionable part of the response must be one or more complete \`tool-call\` blocks.
 Text before a tool-call block is allowed.
+
+CRITICAL: Use exactly ONE \`tool-call\` block per response. If you include multiple blocks, only the LAST one is parsed and executed — all earlier ones are silently ignored.
 
 Before each tool call, provide a brief reason explaining why this tool is needed.
 Keep each tool-call block complete and valid JSON.
-Do not place extra text inside a tool-call block or after the final tool-call block in the same response.
-Prefer one complete \`tool-call\` block for the current action set when practical.
+Do not place extra text inside a tool-call block or after the tool-call block in the same response.
 Combine independent tool calls into the same block to reduce turns.
 
 Single tool call:
@@ -391,13 +391,14 @@ During execution:
 /**
  * Generate system prompt based on tool calling mode.
  * @param useNativeToolCalls - Whether to use native API tool calls (no JSON instructions)
+ * @param customContent - Optional custom content to append (e.g. CLI notes, user config)
  * @returns The complete system prompt
  */
-export function generateSystemPrompt(useNativeToolCalls: boolean): string {
-    if (useNativeToolCalls) {
-        return `${BASE_SYSTEM_PROMPT}\n\n${REST_OF_PROMPT}`;
-    }
-    return `${BASE_SYSTEM_PROMPT}\n\n${JSON_TOOL_CALLING_SECTION}\n\n${REST_OF_PROMPT}`;
+export function generateSystemPrompt(useNativeToolCalls: boolean, customContent?: string): string {
+    const base = useNativeToolCalls
+        ? `${BASE_SYSTEM_PROMPT}\n\n${REST_OF_PROMPT}`
+        : `${BASE_SYSTEM_PROMPT}\n\n${JSON_TOOL_CALLING_SECTION}\n\n${REST_OF_PROMPT}`;
+    return customContent ? `${base}\n\n${customContent}` : base;
 }
 
 /**

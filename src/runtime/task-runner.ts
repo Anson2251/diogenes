@@ -122,11 +122,14 @@ export async function runTaskLoop(
             emit(options, { type: "run.iteration.started", iteration: iterations });
 
             const contextOnly = diogenes.buildContextOnly();
+
+            const systemContent = `${systemPrompt}\n${contextOnly}`;
+
             const messages: { role: "system" | "user" | "assistant" | "tool"; content: string }[] =
                 [
                     {
                         role: "system",
-                        content: `${systemPrompt}\n${contextOnly}`,
+                        content: systemContent,
                     },
                     ...messageHistory,
                 ];
@@ -183,9 +186,9 @@ export async function runTaskLoop(
 
             const toolCallManager = diogenes.getToolCallManager();
 
-            // Use native tool calls from stream if available, otherwise parse from text
+            // Use native tool calls from stream if enabled and available, otherwise parse from text
             let toolCalls: Array<{ tool: string; params: Record<string, unknown> }>;
-            if (streamResult.toolCalls !== undefined) {
+            if (useNativeToolCalls && streamResult.toolCalls !== undefined) {
                 // Native tool calls from API (may be empty array if no tool calls made)
                 // Convert API-safe names back to internal format
                 toolCalls = streamResult.toolCalls.map((tc) => ({
@@ -193,7 +196,7 @@ export async function runTaskLoop(
                     params: tc.params,
                 }));
             } else {
-                // Fallback to text parsing
+                // Fallback to text parsing (for JSON tool call mode)
                 const processResult = toolCallManager.processResponse({
                     content: streamResult.content,
                 });
